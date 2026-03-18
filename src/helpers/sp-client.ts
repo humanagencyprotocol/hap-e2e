@@ -114,7 +114,12 @@ export class SPClient {
     body: {
       profile_id: string;
       group_id: string;
-      frame: Record<string, unknown>;
+      /** v0.3 frame (kept for backward compat) */
+      frame?: Record<string, unknown>;
+      /** v0.4 bounds */
+      bounds?: Record<string, unknown>;
+      bounds_hash?: string;
+      context_hash?: string;
       domain: string;
       did: string;
       path: string;
@@ -123,7 +128,10 @@ export class SPClient {
     },
   ): Promise<{
     attestation_id: string;
+    /** v0.3 hash key */
     frame_hash: string;
+    /** v0.4 hash key */
+    bounds_hash?: string;
     blob: string;
     status: string;
     attested_domains: string[];

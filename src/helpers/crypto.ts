@@ -45,3 +45,24 @@ export function hashExecutionContext(ctx: Record<string, unknown>): string {
     }, {});
   return sha256Hash(JSON.stringify(sorted));
 }
+
+/**
+ * Compute v0.4 bounds hash using canonical key=value format.
+ * keyOrder must match the profile's declared bounds field order.
+ */
+export function computeBoundsHash(bounds: Record<string, unknown>, keyOrder: string[]): string {
+  const lines = keyOrder.map((key) => `${key}=${String(bounds[key])}`);
+  return sha256Hash(lines.join('\n'));
+}
+
+/**
+ * Compute v0.4 context hash using canonical key=value format.
+ * Returns hash of empty string when keyOrder is empty.
+ */
+export function computeContextHash(context: Record<string, unknown>, keyOrder: string[]): string {
+  if (keyOrder.length === 0) {
+    return sha256Hash('');
+  }
+  const lines = keyOrder.map((key) => `${key}=${String(context[key])}`);
+  return sha256Hash(lines.join('\n'));
+}

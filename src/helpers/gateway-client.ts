@@ -34,15 +34,15 @@ export class GatewayClient {
   // ── Gate Content ────────────────────────────────────────
 
   async pushGateContent(
-    frameHash: string,
+    hashOrOpts: string | { boundsHash: string; contextHash: string; context?: Record<string, unknown> },
     path: string,
     gateContent: { problem: string; objective: string; tradeoffs: string },
   ): Promise<void> {
-    const res = await this.request('POST', '/internal/gate-content', {
-      frameHash,
-      path,
-      gateContent,
-    });
+    const body = typeof hashOrOpts === 'string'
+      ? { frameHash: hashOrOpts, path, gateContent }
+      : { boundsHash: hashOrOpts.boundsHash, contextHash: hashOrOpts.contextHash, context: hashOrOpts.context, path, gateContent };
+
+    const res = await this.request('POST', '/internal/gate-content', body);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(`pushGateContent failed (${res.status}): ${JSON.stringify(body)}`);

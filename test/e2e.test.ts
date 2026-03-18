@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, computeFrameHash, hashExecutionContext } from '../src/helpers/crypto.js';
+import { hashGateContent, computeFrameHash, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
 import { ctx } from '../src/helpers/context.js';
 
 // ── Constants ─────────────────────────────────────────────
@@ -16,7 +16,7 @@ const GW_PORT = 13030;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/spend@0.3';
+const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/spend@0.4';
 const PROFILE_SHORT = 'spend';
 const EXEC_PATH = 'spend-routine';
 
@@ -24,18 +24,23 @@ const STRIPE_TEST_KEY = process.env.STRIPE_TEST_KEY ?? '';
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-/** Spend profile frame keyOrder (from the profile JSON). */
-const FRAME_KEY_ORDER = ['profile', 'path', 'amount_max', 'currency', 'action_type'];
+/** v0.4 bounds key order (from the spend profile). */
+const BOUNDS_KEY_ORDER = ['profile', 'path', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
+/** v0.4 context key order. */
+const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
 
-const FRAME = {
+const BOUNDS = {
   profile: PROFILE_ID,
   path: EXEC_PATH,
   amount_max: 100,
-  currency: 'USD',
-  action_type: 'charge',
   amount_daily_max: 500,
   amount_monthly_max: 5000,
   transaction_count_daily_max: 20,
+};
+
+const CONTEXT = {
+  currency: 'USD',
+  action_type: 'charge',
 };
 
 const LIMITS = {
@@ -134,18 +139,23 @@ describe('SP Setup', () => {
 // ══════════════════════════════════════════════════════════
 
 describe('Attestation', () => {
-  it('Bob submits attestation for spend-routine', async () => {
+  it('Bob submits v0.4 attestation for spend-routine', async () => {
     const gateContentHashes = hashGateContent(ctx.gateContent);
     const executionContextHash = hashExecutionContext({
-      action_type: 'charge',
-      amount: FRAME.amount_max,
-      currency: FRAME.currency,
+      action_type: CONTEXT.action_type,
+      amount: BOUNDS.amount_max,
+      currency: CONTEXT.currency,
     });
+
+    const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
+    const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
 
     const result = await sp.submitAttestation(ctx.agentUser!.apiKey, {
       profile_id: PROFILE_ID,
       group_id: ctx.groupId!,
-      frame: FRAME,
+      bounds: BOUNDS,
+      bounds_hash: boundsHash,
+      context_hash: contextHash,
       domain: 'finance',
       did: ctx.agentUser!.did,
       path: EXEC_PATH,
@@ -153,14 +163,11 @@ describe('Attestation', () => {
       execution_context_hash: executionContextHash,
     });
 
-    ctx.frameHash = result.frame_hash;
-    expect(result.frame_hash).toBeTruthy();
+    ctx.frameHash = result.bounds_hash ?? result.frame_hash;
+    expect(ctx.frameHash).toBeTruthy();
     expect(result.status).toMatch(/active|pending/);
     expect(result.blob).toBeTruthy();
-
-    // Verify frame hash matches local computation
-    const localHash = computeFrameHash(FRAME, FRAME_KEY_ORDER);
-    expect(result.frame_hash).toBe(localHash);
+    expect(result.bounds_hash).toBe(boundsHash);
   });
 });
 
@@ -177,7 +184,13 @@ describe('Gateway Configuration', () => {
   });
 
   it('pushes gate content for the attestation', async () => {
-    await gw.pushGateContent(ctx.frameHash!, EXEC_PATH, ctx.gateContent);
+    const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
+    const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+    await gw.pushGateContent(
+      { boundsHash, contextHash, context: CONTEXT },
+      EXEC_PATH,
+      ctx.gateContent,
+    );
   });
 
   it('pushes Stripe service credentials', async () => {
