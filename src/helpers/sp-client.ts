@@ -165,6 +165,26 @@ export class SPClient {
 
   // ── Receipts ────────────────────────────────────────────
 
+  /**
+   * POST /api/sp/receipt — submit an execution receipt for limit enforcement.
+   * Returns status and response body; does NOT throw on 403.
+   */
+  async postReceipt(
+    apiKey: string,
+    body: {
+      attestationHash: string;
+      profileId: string;
+      path: string;
+      action: string;
+      amount?: number;
+      executionContext?: Record<string, unknown>;
+    },
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await this.request('POST', '/api/sp/receipt', body, apiKey);
+    const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return { status: res.status, body: responseBody };
+  }
+
   async getGroupReceipts(
     apiKey: string,
     groupId: string,
