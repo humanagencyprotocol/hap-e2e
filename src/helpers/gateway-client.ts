@@ -73,6 +73,7 @@ export class GatewayClient {
     command: string;
     args: string[];
     envKeys: Record<string, string>;
+    env?: Record<string, string>;
     profile: string | null;
     enabled: boolean;
     toolGating?: Record<string, unknown>;
