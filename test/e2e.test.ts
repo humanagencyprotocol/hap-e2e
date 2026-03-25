@@ -16,15 +16,15 @@ const GW_PORT = 13030;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/spend@0.4';
-const PROFILE_SHORT = 'spend';
-const EXEC_PATH = 'spend-routine';
+const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILE_SHORT = 'charge';
+const EXEC_PATH = 'charge-routine';
 
 const STRIPE_TEST_KEY = process.env.STRIPE_TEST_KEY ?? '';
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-/** v0.4 bounds key order (from the spend profile). */
+/** v0.4 bounds key order (from the charge profile). */
 const BOUNDS_KEY_ORDER = ['profile', 'path', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
 /** v0.4 context key order. */
 const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
@@ -139,7 +139,7 @@ describe('SP Setup', () => {
 // ══════════════════════════════════════════════════════════
 
 describe('Attestation', () => {
-  it('Bob submits v0.4 attestation for spend-routine', async () => {
+  it('Bob submits v0.4 attestation for charge-routine', async () => {
     const gateContentHashes = hashGateContent(ctx.gateContent);
     const executionContextHash = hashExecutionContext({
       action_type: CONTEXT.action_type,

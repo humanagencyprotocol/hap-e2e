@@ -19,10 +19,10 @@ import { hashGateContent, computeBoundsHash, computeContextHash, hashExecutionCo
 const SP_PORT = 14200;
 const SP_URL = `http://localhost:${SP_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/spend@0.4';
-const EXEC_PATH = 'spend-routine';
+const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const EXEC_PATH = 'charge-routine';
 
-/** v0.4 bounds key order (from the spend profile). */
+/** v0.4 bounds key order (from the charge profile). */
 const BOUNDS_KEY_ORDER = ['profile', 'path', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
 /** v0.4 context key order. */
 const CONTEXT_KEY_ORDER = ['currency', 'action_type'];

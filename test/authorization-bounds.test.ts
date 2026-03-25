@@ -30,8 +30,8 @@ import {
 const SP_PORT = 15100; // distinct port from main e2e suite
 const SP_URL = `http://localhost:${SP_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/spend@0.4';
-const EXEC_PATH = 'spend-routine';
+const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const EXEC_PATH = 'charge-routine';
 
 const BOUNDS_KEY_ORDER = [
   'profile',
