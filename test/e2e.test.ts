@@ -128,6 +128,15 @@ describe('SP Setup', () => {
     expect(result.member).toBeTruthy();
   });
 
+  it('Alice configures path domains', async () => {
+    const result = await sp.setPathDomains(ctx.adminUser!.apiKey, ctx.groupId!, {
+      [PROFILE_ID]: {
+        [EXEC_PATH]: ['finance'],
+      },
+    });
+    expect(result).toBeTruthy();
+  });
+
   it('Alice sets group limits', async () => {
     const result = await sp.setLimits(ctx.adminUser!.apiKey, ctx.groupId!, LIMITS);
     expect(result).toBeTruthy();

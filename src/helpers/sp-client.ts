@@ -107,6 +107,24 @@ export class SPClient {
     return res.json();
   }
 
+  async setPathDomains(
+    apiKey: string,
+    groupId: string,
+    pathDomains: Record<string, Record<string, string[]>>,
+  ): Promise<unknown> {
+    const res = await this.request(
+      'PUT',
+      `/api/groups/${groupId}/path-domains`,
+      { pathDomains },
+      apiKey,
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(`setPathDomains failed (${res.status}): ${JSON.stringify(body)}`);
+    }
+    return res.json();
+  }
+
   // ── Attestation ─────────────────────────────────────────
 
   async submitAttestation(

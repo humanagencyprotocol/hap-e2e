@@ -135,6 +135,15 @@ describe('Authorization Bounds — SP Setup', () => {
     expect(result.member).toBeTruthy();
   });
 
+  it('admin configures path domains', async () => {
+    const result = await sp.setPathDomains(adminApiKey, groupId, {
+      [PROFILE_ID]: {
+        [EXEC_PATH]: ['finance'],
+      },
+    });
+    expect(result).toBeTruthy();
+  });
+
   it('admin sets generous group limits', async () => {
     const result = await sp.setLimits(adminApiKey, groupId, GENEROUS_LIMITS);
     expect(result).toBeTruthy();

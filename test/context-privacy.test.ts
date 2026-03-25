@@ -81,6 +81,11 @@ beforeAll(async () => {
   groupId = group.group.id;
   await sp.joinGroup(agentApiKey, group.inviteCode);
   await sp.setMemberDomains(adminApiKey, groupId, agentUserId, ['finance']);
+  await sp.setPathDomains(adminApiKey, groupId, {
+    [PROFILE_ID]: {
+      [EXEC_PATH]: ['finance'],
+    },
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -184,13 +189,11 @@ describe('Context Privacy', () => {
       // The blob is the signed attestation — it should contain only the hash
       expect(responseBody.blob).toBeTruthy();
       const blob = responseBody.blob as string;
-      // Decode the blob (base64 JWT-like) and check no context content leaks
-      const parts = blob.split('.');
-      expect(parts.length).toBe(3);
-      const payloadDecoded = Buffer.from(parts[1], 'base64').toString('utf-8');
-      expect(payloadDecoded).toContain('context_hash');
-      expect(payloadDecoded).not.toContain('"currency"');
-      expect(payloadDecoded).not.toContain('"action_type"');
+      // Decode the blob (base64url-encoded JSON) and check no context content leaks
+      const decoded = Buffer.from(blob, 'base64url').toString('utf-8');
+      expect(decoded).toContain('context_hash');
+      expect(decoded).not.toContain('"currency"');
+      expect(decoded).not.toContain('"action_type"');
     });
   });
 
