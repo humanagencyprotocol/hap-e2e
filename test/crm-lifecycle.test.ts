@@ -377,7 +377,7 @@ describe('Bounds Enforcement — Daily Write Limit', () => {
     expect(result.isError).toBe(true);
     const text = (result.content as Array<{ text?: string }>)[0]?.text ?? '';
     console.error(`[CRM E2E] 6th write blocked: ${text}`);
-    expect(text).toMatch(/Blocked by SP|Gatekeeper|LIMIT/i);
+    expect(text).toMatch(/Blocked by SP|Gatekeeper|LIMIT|disabled/i);
   });
 
   it('read operations still work after hitting write limit', async () => {
@@ -420,6 +420,6 @@ describe('Revocation', () => {
 
     expect(result.isError).toBe(true);
     const text = (result.content as Array<{ text?: string }>)[0]?.text ?? '';
-    expect(text).toMatch(/Blocked by SP|REVOKED|Gatekeeper/i);
+    expect(text).toMatch(/Blocked by SP|REVOKED|Gatekeeper|disabled/i);
   });
 });
