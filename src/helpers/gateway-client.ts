@@ -75,6 +75,7 @@ export class GatewayClient {
     envKeys: Record<string, string>;
     profile: string | null;
     enabled: boolean;
+    toolGating?: Record<string, unknown>;
   }): Promise<{ ok: boolean; id: string; tools: string[]; warning?: string }> {
     const res = await this.request('POST', '/internal/add-integration', config);
     if (!res.ok) {
