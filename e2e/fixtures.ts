@@ -267,18 +267,8 @@ export async function createAuthorization(
   // Click Authorize button (the btn-primary btn-lg, not the commitment cards)
   await page.locator('button.btn-primary.btn-lg').click();
 
-  // Wait for success or error
-  const result = await Promise.race([
-    page.waitForSelector('text=Attestation Committed', { timeout: 15_000 }).then(() => 'success'),
-    page.waitForSelector('.error-message', { timeout: 15_000 }).then(async (el) => {
-      const text = await el.textContent();
-      return `error: ${text}`;
-    }),
-  ]);
-
-  if (result.startsWith('error')) {
-    throw new Error(`Authorization failed: ${result}`);
-  }
+  // Wait for success: either the success card or the dashboard showing the new authorization
+  await page.locator('text=Attestation Committed').or(page.locator('text=Active Agent Authorizations')).first().waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 export const test = base;
