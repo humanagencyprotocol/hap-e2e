@@ -232,11 +232,12 @@ export async function createAuthorization(
   await page.waitForSelector('button:has-text("Create Authorization")', { timeout: 5_000 });
   await page.click('button:has-text("Create Authorization")');
 
-  // Step 1: Bounds — fill stepper inputs
+  // Step 1: Bounds — click + button to set value
   for (const [, value] of Object.entries(opts.bounds)) {
-    const input = page.locator('.stepper-input').first();
-    if (await input.isVisible({ timeout: 3_000 })) {
-      await input.fill(value);
+    const numValue = parseInt(value, 10);
+    const plusBtn = page.locator('.stepper-btn').last(); // + button is the last stepper-btn
+    for (let i = 0; i < numValue; i++) {
+      await plusBtn.click();
     }
   }
   // Click "Next: Problem Statement" or similar
@@ -257,17 +258,27 @@ export async function createAuthorization(
   await page.fill('textarea', opts.tradeoffs);
   await page.click('button:has-text("Continue")');
 
-  // Step 5: Review — choose commitment mode
+  // Step 5: Review — wait for commitment section, choose mode
+  await page.waitForSelector('text=Commitment', { timeout: 5_000 });
   if (opts.commitMode === 'per-action') {
-    await page.click('text=Commit Per Action');
+    await page.locator('button', { hasText: 'Commit Per Action' }).click();
   }
-  // Default is Commit Now (already selected)
 
-  // Click Authorize
-  await page.click('button:has-text("Authorize")');
+  // Click Authorize button (the btn-primary btn-lg, not the commitment cards)
+  await page.locator('button.btn-primary.btn-lg').click();
 
-  // Wait for success
-  await page.waitForSelector('text=Attestation Committed', { timeout: 15_000 });
+  // Wait for success or error
+  const result = await Promise.race([
+    page.waitForSelector('text=Attestation Committed', { timeout: 15_000 }).then(() => 'success'),
+    page.waitForSelector('.error-message', { timeout: 15_000 }).then(async (el) => {
+      const text = await el.textContent();
+      return `error: ${text}`;
+    }),
+  ]);
+
+  if (result.startsWith('error')) {
+    throw new Error(`Authorization failed: ${result}`);
+  }
 }
 
 export const test = base;
