@@ -9,36 +9,23 @@ import { test, expect, registerOnSP, signInToGateway, handleOnboarding, createAu
 test.describe.serial('Journey 1: Personal User', () => {
   let apiKey: string;
 
-  test('1.1 Register on SP and get API key', async ({ page }) => {
+  test('1.1 Register on SP, get API key, see Docker command', async ({ page }) => {
     apiKey = await registerOnSP(page, 'Alice');
     expect(apiKey).toBeTruthy();
     expect(apiKey.length).toBeGreaterThan(10);
-  });
 
-  test('1.2 See Docker command with HAP_MODE=personal', async ({ page }) => {
-    // Still on get-started page after registration
-    await page.goto(`${SP_URL}/get-started`);
-    await page.waitForSelector('text=Personal', { timeout: 10_000 });
-    await page.click('button:has-text("Personal")');
-
-    // Docker command should include HAP_MODE=personal
+    // Still on get-started page — Docker command should be visible
     const dockerCmd = await page.locator('pre code').textContent();
     expect(dockerCmd).toContain('HAP_MODE=personal');
     expect(dockerCmd).toContain('hap-gateway');
   });
 
-  test('1.3 Sign in to gateway', async ({ page }) => {
+  test('1.2 Sign in to gateway and see dashboard', async ({ page }) => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    // Should be on dashboard
-    await expect(page.locator('text=Dashboard')).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('1.4 Dashboard shows quick actions', async ({ page }) => {
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
-
+    // Should be on dashboard with quick actions
+    await expect(page.locator('h1:has-text("Dashboard")')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=New Agent Authorization')).toBeVisible({ timeout: 5_000 });
   });
 

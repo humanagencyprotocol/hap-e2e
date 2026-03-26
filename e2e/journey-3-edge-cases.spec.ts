@@ -94,7 +94,7 @@ test.describe.serial('Journey 3: Edge Cases', () => {
       data: {
         profile_id: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
         path: 'customers-write', domain: 'owner', did,
-        bounds: { profile: 'customers', path: 'customers-write', write_daily_max: 10 },
+        bounds: { profile: 'customers', path: 'customers-write', write_daily_max: 10, delete_daily_max: 5 },
         context_hash: 'sha256:' + '0'.repeat(64),
         gate_content_hashes: { problem: 'sha256:' + 'a'.repeat(64), objective: 'sha256:' + 'b'.repeat(64), tradeoffs: 'sha256:' + 'c'.repeat(64) },
         execution_context_hash: 'sha256:' + 'd'.repeat(64),

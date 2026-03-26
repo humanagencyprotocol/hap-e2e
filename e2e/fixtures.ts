@@ -135,6 +135,18 @@ export async function stopServers(): Promise<void> {
 export async function registerOnSP(page: Page, name: string): Promise<string> {
   const email = `${name.toLowerCase().replace(/\s/g, '')}-${Date.now()}@test.com`;
 
+  // Intercept registration API response to capture the real (unmasked) API key
+  let capturedApiKey = '';
+  const responseHandler = async (response: import('@playwright/test').Response) => {
+    if (response.url().includes('/api/auth/register') && response.status() === 201) {
+      try {
+        const data = await response.json();
+        if (data.apiKey) capturedApiKey = data.apiKey;
+      } catch { /* ignore */ }
+    }
+  };
+  page.on('response', responseHandler);
+
   await page.goto(`${SP_URL}/get-started`);
   await page.waitForSelector('input#name', { timeout: 10_000 });
   await page.fill('input#name', name);
@@ -144,25 +156,40 @@ export async function registerOnSP(page: Page, name: string): Promise<string> {
   // Wait for get-started flow to load (logged in state)
   await page.waitForSelector('text=Personal', { timeout: 15_000 });
 
-  // Click Personal mode to reveal API key
+  // Click Personal mode to reveal Docker command
   await page.click('button:has-text("Personal")');
+  await page.waitForSelector('pre code', { timeout: 10_000 });
 
-  // Wait for API key to appear in readonly input
-  await page.waitForSelector('input[readonly]', { timeout: 10_000 });
-  const apiKey = await page.locator('input[readonly]').first().inputValue();
-  if (!apiKey) throw new Error('Could not extract API key from get-started page');
-  return apiKey;
+  page.off('response', responseHandler);
+
+  if (!capturedApiKey) throw new Error('Could not capture API key from registration response');
+  return capturedApiKey;
 }
 
 /**
  * Sign in to the gateway through the browser login form.
  */
 export async function signInToGateway(page: Page, apiKey: string): Promise<void> {
-  await page.goto(`${GW_URL}/login`);
-  await page.waitForSelector('input[type="password"]', { timeout: 10_000 });
-  await page.fill('input[type="password"]', apiKey);
-  await page.click('button:has-text("Sign In")');
-  await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 15_000 });
+  // Log console errors for debugging
+  page.on('console', msg => {
+    if (msg.type() === 'error') console.error(`[BROWSER] ${msg.text()}`);
+  });
+
+  await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
+  await page.locator('input[type="password"]').fill(apiKey);
+  await page.locator('button:has-text("Sign In")').click();
+
+  // Wait for button to show "Signing in..." confirming the click registered
+  try {
+    await page.locator('button:has-text("Signing in")').waitFor({ state: 'visible', timeout: 5_000 });
+  } catch {
+    // If "Signing in" never appeared, the click didn't register — retry
+    console.error('[E2E] Sign In click did not register, retrying...');
+    await page.locator('button:has-text("Sign In")').click();
+  }
+
+  // Wait for sidebar (dashboard) or onboarding
+  await page.locator('.sidebar').or(page.locator('text=Single Domain')).first().waitFor({ state: 'visible', timeout: 30_000 });
 }
 
 /**

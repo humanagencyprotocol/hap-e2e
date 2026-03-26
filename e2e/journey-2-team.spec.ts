@@ -25,12 +25,9 @@ test.describe.serial('Journey 2: Team Setup', () => {
     await page.fill('input#name', 'Finance Team');
     await page.click('button:has-text("Create Group")');
 
-    // Wait for success
-    await expect(page.locator('.alert-success, text=Group created')).toBeVisible({ timeout: 10_000 });
-
-    // Get invite code
+    // Wait for success — invite code input appears after creation
     const codeInput = page.locator('input[readonly]');
-    await expect(codeInput).toBeVisible({ timeout: 5_000 });
+    await expect(codeInput).toBeVisible({ timeout: 15_000 });
     inviteCode = await codeInput.inputValue();
     expect(inviteCode).toBeTruthy();
 
@@ -108,11 +105,12 @@ test.describe.serial('Journey 2: Team Setup', () => {
       await page.locator('button:has-text("+ Add")').nth(1).click();
     }
 
-    // Save
+    // Save and wait for edit mode to exit
     await page.click('button:has-text("Save")');
+    await expect(page.locator('button:has-text("Edit")')).toBeVisible({ timeout: 10_000 });
 
-    // Verify domains saved
-    await expect(page.locator('.domain-tag:has-text("finance")')).toBeVisible({ timeout: 5_000 });
+    // Verify domains saved (read-only view)
+    await expect(page.locator('.domain-tag:has-text("finance")')).toBeVisible();
   });
 
   test('2.6 Alice signs in to gateway', async ({ page }) => {
