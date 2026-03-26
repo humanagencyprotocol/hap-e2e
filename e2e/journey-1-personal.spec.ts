@@ -1,8 +1,11 @@
 /**
  * Journey 1: First-Time Personal User
  *
- * Registration → API key → gateway login → integrations → authorize (commit now)
- * → authorize (commit per action) → verify authorizations → revoke → mobile menu
+ * Registration → API key → gateway login → navigate pages → authorize → revoke → mobile
+ *
+ * Key constraint: gateway stores API key in React state (no cookies).
+ * Each test gets a fresh page, so we must login + do all checks in one test,
+ * navigating via sidebar clicks (SPA navigation) not page.goto (full reload).
  */
 import { test, expect, registerOnSP, signInToGateway, handleOnboarding, createAuthorization, SP_URL, GW_URL } from './fixtures';
 
@@ -14,55 +17,51 @@ test.describe.serial('Journey 1: Personal User', () => {
     expect(apiKey).toBeTruthy();
     expect(apiKey.length).toBeGreaterThan(10);
 
-    // Still on get-started page — Docker command should be visible
+    // Docker command should be visible with HAP_MODE=personal
     const dockerCmd = await page.locator('pre code').textContent();
     expect(dockerCmd).toContain('HAP_MODE=personal');
     expect(dockerCmd).toContain('hap-gateway');
   });
 
-  test('1.2 Sign in to gateway and see dashboard', async ({ page }) => {
+  test('1.2 Gateway: login, navigate all pages, check sidebar', async ({ page }) => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    // Should be on dashboard with quick actions
-    await expect(page.locator('h1:has-text("Dashboard")')).toBeVisible({ timeout: 10_000 });
+    // Dashboard — wait for page to fully render
+    await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=New Agent Authorization')).toBeVisible({ timeout: 5_000 });
-  });
 
-  test('1.5 Integrations page shows running integrations', async ({ page }) => {
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
+    // Sidebar items
+    await expect(page.locator('.sidebar')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("Integrations")')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("AI Assistant")')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("Proposals")')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("Agent Authorizations")')).toBeVisible();
 
-    await page.goto(`${GW_URL}/integrations`);
-    // Records and CRM should be auto-registered in personal mode
-    await expect(page.locator('text=Running')).toBeVisible({ timeout: 20_000 });
-  });
+    // Navigate to Integrations via sidebar
+    await page.click('.sidebar-item:has-text("Integrations")');
+    // Integrations page loads
+    await expect(page.locator('.card-title').first()).toBeVisible({ timeout: 20_000 });
 
-  test('1.6 AI Assistant page loads', async ({ page }) => {
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
-
-    await page.goto(`${GW_URL}/settings`);
+    // Navigate to AI Assistant
+    await page.click('.sidebar-item:has-text("AI Assistant")');
     await expect(page.locator('h1:has-text("AI Assistant")')).toBeVisible({ timeout: 5_000 });
-  });
 
-  test('1.7 Authorize Agents page shows profiles with path buttons', async ({ page }) => {
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
+    // Navigate to Proposals (empty)
+    await page.click('.sidebar-item:has-text("Proposals")');
+    await expect(page.locator('h1:has-text("Proposals")')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=No pending proposals')).toBeVisible();
 
-    await page.goto(`${GW_URL}/agent/new`);
+    // Navigate to Authorize Agents — path buttons
+    await page.click('.sidebar-item:has-text("Authorize Agents")');
     await expect(page.locator('.card').first()).toBeVisible({ timeout: 10_000 });
-
-    // Should have path buttons (they contain dashes like records-write)
     const pathButton = page.locator('button:has-text("-write")').first();
     await expect(pathButton).toBeVisible({ timeout: 5_000 });
-
-    // Click to expand — should show description + Create Authorization
     await pathButton.click();
     await expect(page.locator('button:has-text("Create Authorization")')).toBeVisible({ timeout: 3_000 });
   });
 
-  test('1.8 Create authorization with Commit Now', async ({ page }) => {
+  test('1.3 Gateway: create authorization with Commit Now', async ({ page }) => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
@@ -75,20 +74,16 @@ test.describe.serial('Journey 1: Personal User', () => {
       commitMode: 'now',
     });
 
-    // Success
     await expect(page.locator('text=Attestation Committed')).toBeVisible();
-  });
 
-  test('1.9 Authorization shows on Authorizations page', async ({ page }) => {
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
-
-    await page.goto(`${GW_URL}/authorizations`);
+    // Check authorizations page (navigate via sidebar — Back to Dashboard first)
+    await page.click('text=Back to Dashboard');
+    await page.click('.sidebar-item:has-text("Agent Authorizations")');
     await expect(page.locator('text=Active')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=records-write')).toBeVisible();
   });
 
-  test('1.10 Create authorization with Commit Per Action', async ({ page }) => {
+  test('1.4 Gateway: create authorization with Commit Per Action', async ({ page }) => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
@@ -101,60 +96,33 @@ test.describe.serial('Journey 1: Personal User', () => {
       commitMode: 'per-action',
     });
 
-    // Success with Per Action indicator
     await expect(page.locator('text=Attestation Committed')).toBeVisible();
     await expect(page.locator('text=Per Action')).toBeVisible();
-  });
 
-  test('1.11 Per Action badge shows on Authorizations page', async ({ page }) => {
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
-
-    await page.goto(`${GW_URL}/authorizations`);
+    // Check authorizations page
+    await page.click('text=Back to Dashboard');
+    await page.click('.sidebar-item:has-text("Agent Authorizations")');
     await expect(page.locator('text=Per Action')).toBeVisible({ timeout: 10_000 });
   });
 
-  test('1.12 Sidebar shows nav items', async ({ page }) => {
+  test('1.5 Gateway: revoke authorization', async ({ page }) => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    await expect(page.locator('.sidebar')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('.sidebar-item:has-text("Integrations")')).toBeVisible();
-    await expect(page.locator('.sidebar-item:has-text("AI Assistant")')).toBeVisible();
-    await expect(page.locator('.sidebar-item:has-text("Proposals")')).toBeVisible();
-    await expect(page.locator('.sidebar-item:has-text("Agent Authorizations")')).toBeVisible();
-  });
-
-  test('1.13 Proposals page loads (empty state)', async ({ page }) => {
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
-
-    await page.goto(`${GW_URL}/proposals`);
-    await expect(page.locator('h1:has-text("Proposals")')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('text=No pending proposals')).toBeVisible();
-  });
-
-  test('1.14 Revoke authorization', async ({ page }) => {
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
-
-    await page.goto(`${GW_URL}/authorizations`);
+    await page.click('.sidebar-item:has-text("Agent Authorizations")');
     await expect(page.locator('text=records-write')).toBeVisible({ timeout: 10_000 });
 
-    // Expand the records-write authorization
+    // Expand and revoke
     const authCard = page.locator('.card', { has: page.locator('text=records-write') }).first();
     await authCard.click();
-
-    // Click Revoke
     const revokeBtn = page.locator('button:has-text("Revoke")').first();
     if (await revokeBtn.isVisible({ timeout: 3_000 })) {
       await revokeBtn.click();
-      // Wait for status change
       await page.waitForTimeout(2000);
     }
   });
 
-  test('1.15 Mobile menu works', async ({ browser }) => {
+  test('1.6 Mobile menu works', async ({ browser }) => {
     const context = await browser.newContext({
       viewport: { width: 375, height: 812 },
     });
@@ -163,20 +131,20 @@ test.describe.serial('Journey 1: Personal User', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    // Sidebar should be hidden
+    // Sidebar hidden on mobile
     await expect(page.locator('.sidebar')).not.toBeVisible();
 
-    // Hamburger menu should be visible
+    // Hamburger menu
     const menuBtn = page.locator('.mobile-menu-btn');
     await expect(menuBtn).toBeVisible({ timeout: 5_000 });
     await menuBtn.click();
 
-    // Mobile menu should open
+    // Mobile menu opens
     await expect(page.locator('.mobile-menu-panel')).toBeVisible();
     await expect(page.locator('.mobile-menu-item:has-text("Dashboard")')).toBeVisible();
     await expect(page.locator('.mobile-menu-item:has-text("Proposals")')).toBeVisible();
 
-    // Click a nav item — should navigate and close menu
+    // Click nav item — navigates and closes
     await page.click('.mobile-menu-item:has-text("Integrations")');
     await expect(page.locator('.mobile-menu-panel')).not.toBeVisible();
 

@@ -170,26 +170,21 @@ export async function registerOnSP(page: Page, name: string): Promise<string> {
  * Sign in to the gateway through the browser login form.
  */
 export async function signInToGateway(page: Page, apiKey: string): Promise<void> {
-  // Log console errors for debugging
-  page.on('console', msg => {
-    if (msg.type() === 'error') console.error(`[BROWSER] ${msg.text()}`);
-  });
-
   await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
   await page.locator('input[type="password"]').fill(apiKey);
   await page.locator('button:has-text("Sign In")').click();
 
-  // Wait for button to show "Signing in..." confirming the click registered
+  // Wait for sidebar or onboarding. If login hangs, retry once.
   try {
-    await page.locator('button:has-text("Signing in")').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.locator('.sidebar').or(page.locator('text=Single Domain')).first().waitFor({ state: 'visible', timeout: 10_000 });
   } catch {
-    // If "Signing in" never appeared, the click didn't register — retry
-    console.error('[E2E] Sign In click did not register, retrying...');
+    // Login may have hung — reload and try again
+    console.error('[E2E] Gateway login slow, retrying...');
+    await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
+    await page.locator('input[type="password"]').fill(apiKey);
     await page.locator('button:has-text("Sign In")').click();
+    await page.locator('.sidebar').or(page.locator('text=Single Domain')).first().waitFor({ state: 'visible', timeout: 20_000 });
   }
-
-  // Wait for sidebar (dashboard) or onboarding
-  await page.locator('.sidebar').or(page.locator('text=Single Domain')).first().waitFor({ state: 'visible', timeout: 30_000 });
 }
 
 /**
@@ -228,8 +223,8 @@ export async function createAuthorization(
     commitMode: 'now' | 'per-action';
   },
 ): Promise<void> {
-  // Navigate to Authorize Agents
-  await page.goto(`${GW_URL}/agent/new`);
+  // Navigate to Authorize Agents via sidebar (preserves SPA state)
+  await page.click('.sidebar-item:has-text("Authorize Agents")');
   await page.waitForSelector('.card', { timeout: 10_000 });
 
   // Click path button
@@ -237,16 +232,15 @@ export async function createAuthorization(
   await page.waitForSelector('button:has-text("Create Authorization")', { timeout: 5_000 });
   await page.click('button:has-text("Create Authorization")');
 
-  // Step 1: Bounds — fill numeric inputs
-  for (const [_label, value] of Object.entries(opts.bounds)) {
-    const input = page.locator('.stepper-input, input[type="number"]').first();
+  // Step 1: Bounds — fill stepper inputs
+  for (const [, value] of Object.entries(opts.bounds)) {
+    const input = page.locator('.stepper-input').first();
     if (await input.isVisible({ timeout: 3_000 })) {
       await input.fill(value);
     }
   }
-  // Click confirm/continue
-  const confirmBtn = page.locator('button:has-text("Confirm"), button:has-text("Continue")').first();
-  await confirmBtn.click();
+  // Click "Next: Problem Statement" or similar
+  await page.click('button:has-text("Next")');
 
   // Step 2: Problem
   await page.waitForSelector('textarea', { timeout: 5_000 });

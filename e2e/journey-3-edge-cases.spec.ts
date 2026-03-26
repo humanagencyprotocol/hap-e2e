@@ -160,38 +160,29 @@ test.describe.serial('Journey 3: Edge Cases', () => {
     expect(rejectData.status).toBe('rejected');
   });
 
-  test('3.4 Gateway step indicator shows correct labels', async ({ page }) => {
+  test('3.4 Gateway: step indicator, path buttons, integrations', async ({ page }) => {
     await signInToGateway(page, userKey);
     await handleOnboarding(page);
 
-    await page.goto(`${GW_URL}/agent/new`);
+    // Navigate to Authorize Agents via sidebar
+    await page.click('.sidebar-item:has-text("Authorize Agents")');
     await page.waitForSelector('.card', { timeout: 10_000 });
 
-    // Click a write path
+    // Path buttons should exist
+    const pathButtons = page.locator('button:has-text("-")');
+    const count = await pathButtons.count();
+    expect(count).toBeGreaterThan(0);
+
+    // Click a write path and start wizard
     const pathBtn = page.locator('button:has-text("-write")').first();
     if (await pathBtn.isVisible({ timeout: 3_000 })) {
       await pathBtn.click();
       await page.click('button:has-text("Create Authorization")');
 
-      // Step labels should be visible
+      // Step labels
       await expect(page.locator('text=Bounds')).toBeVisible({ timeout: 5_000 });
-
-      // Cancel button should be on the right
       await expect(page.locator('button:has-text("Cancel")')).toBeVisible();
     }
-  });
-
-  test('3.5 Authorize Agents path buttons show status colors', async ({ page }) => {
-    await signInToGateway(page, userKey);
-    await handleOnboarding(page);
-
-    await page.goto(`${GW_URL}/agent/new`);
-    await page.waitForSelector('.card', { timeout: 10_000 });
-
-    // Path buttons should exist and have colored dots
-    const pathButtons = page.locator('button:has-text("-")');
-    const count = await pathButtons.count();
-    expect(count).toBeGreaterThan(0);
   });
 
   test('3.6 Gateway health check', async ({ request }) => {
