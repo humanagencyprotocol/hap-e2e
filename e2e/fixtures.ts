@@ -2,17 +2,18 @@
  * Shared fixtures for Playwright browser e2e tests.
  *
  * Starts SP + gateway (MCP server + control plane) as child processes.
- * Provides authenticated browser pages for SP and gateway UIs.
+ * All auth happens through browser forms — no API shortcuts.
  */
 
-import { test as base, type Browser, type Page, type APIRequestContext } from '@playwright/test';
+import { test as base, expect, type Page } from '@playwright/test';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// ─── Paths ───────────────────────────────────────────────────────────────────
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 const ROOT = join(__dirname, '..', '..');
 const SP_DIR = join(ROOT, 'hap-sp');
 const GW_DIR = join(ROOT, 'hap-gateway');
@@ -21,8 +22,8 @@ const PROFILES_DIR = join(ROOT, 'hap-profiles');
 // ─── Ports ───────────────────────────────────────────────────────────────────
 
 export const SP_PORT = 19100;
-export const GW_CP_PORT = 19402;  // Control plane (serves UI)
-export const GW_MCP_PORT = 19430; // MCP server
+export const GW_CP_PORT = 19402;
+export const GW_MCP_PORT = 19430;
 
 export const SP_URL = `http://localhost:${SP_PORT}`;
 export const GW_URL = `http://localhost:${GW_CP_PORT}`;
@@ -32,69 +33,45 @@ export const GW_MCP_URL = `http://localhost:${GW_MCP_PORT}`;
 
 const processes: ChildProcess[] = [];
 let dataDir: string | null = null;
-let serversStarted = false;
+let serversReady = false;
 
-function getDataDir(): string {
-  if (!dataDir) {
-    dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-browser-'));
-  }
-  return dataDir;
+function pipe(proc: ChildProcess, tag: string): void {
+  proc.stdout?.on('data', (c: Buffer) => c.toString().split('\n').filter(Boolean).forEach(l => console.error(`[${tag}] ${l}`)));
+  proc.stderr?.on('data', (c: Buffer) => c.toString().split('\n').filter(Boolean).forEach(l => console.error(`[${tag}] ${l}`)));
 }
 
-function pipeOutput(proc: ChildProcess, tag: string): void {
-  proc.stdout?.on('data', (chunk: Buffer) => {
-    for (const line of chunk.toString().split('\n').filter(Boolean)) {
-      console.error(`[${tag}] ${line}`);
-    }
-  });
-  proc.stderr?.on('data', (chunk: Buffer) => {
-    for (const line of chunk.toString().split('\n').filter(Boolean)) {
-      console.error(`[${tag}] ${line}`);
-    }
-  });
-}
-
-async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
+async function waitFor(url: string, ms: number): Promise<void> {
   const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch { /* not ready */ }
+  while (Date.now() - start < ms) {
+    try { const r = await fetch(url); if (r.ok) return; } catch { /* retry */ }
     await new Promise(r => setTimeout(r, 1000));
   }
-  throw new Error(`Health check timed out: ${url}`);
+  throw new Error(`Timeout waiting for ${url}`);
 }
 
 export async function startServers(): Promise<void> {
-  if (serversStarted) return;
+  if (serversReady) return;
 
   // Build gateway
   console.error('[E2E] Building gateway...');
-  execSync('pnpm build', { cwd: GW_DIR, stdio: 'pipe', timeout: 60_000 });
-  console.error('[E2E] Gateway build complete.');
+  execSync('pnpm build', { cwd: GW_DIR, stdio: 'pipe', timeout: 90_000 });
+  console.error('[E2E] Build complete.');
 
   // Start SP
-  console.error(`[E2E] Starting SP on port ${SP_PORT}...`);
   const sp = spawn('npx', ['next', 'dev', '-p', String(SP_PORT)], {
     cwd: SP_DIR,
-    env: {
-      ...process.env,
-      ALLOW_REGISTRATION: 'true',
-      SP_KV_REST_API_URL: '',
-      SP_KV_REST_API_TOKEN: '',
-    },
+    env: { ...process.env, ALLOW_REGISTRATION: 'true', SP_KV_REST_API_URL: '', SP_KV_REST_API_TOKEN: '' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   processes.push(sp);
-  pipeOutput(sp, 'SP');
-  await waitForHealth(`${SP_URL}/api/sp/pubkey`, 60_000);
-  console.error(`[E2E] SP ready.`);
+  pipe(sp, 'SP');
+  await waitFor(`${SP_URL}/api/sp/pubkey`, 60_000);
+  console.error('[E2E] SP ready.');
 
-  const dd = getDataDir();
+  // Temp data dir
+  dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-'));
 
   // Start gateway MCP server
-  console.error(`[E2E] Starting gateway MCP on port ${GW_MCP_PORT}...`);
   const mcp = spawn('node', ['apps/mcp-server/dist/http.mjs'], {
     cwd: GW_DIR,
     env: {
@@ -102,36 +79,36 @@ export async function startServers(): Promise<void> {
       HAP_MCP_PORT: String(GW_MCP_PORT),
       HAP_SP_URL: SP_URL,
       HAP_PROFILES_DIR: PROFILES_DIR,
-      HAP_DATA_DIR: dd,
+      HAP_INTEGRATIONS_DIR: join(GW_DIR, 'content', 'integrations'),
+      HAP_DATA_DIR: dataDir,
       HAP_MODE: 'personal',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   processes.push(mcp);
-  pipeOutput(mcp, 'MCP');
-  await waitForHealth(`${GW_MCP_URL}/health`, 30_000);
-  console.error(`[E2E] Gateway MCP ready.`);
+  pipe(mcp, 'MCP');
+  await waitFor(`${GW_MCP_URL}/health`, 30_000);
+  console.error('[E2E] MCP ready.');
 
   // Start gateway control plane
-  console.error(`[E2E] Starting gateway control plane on port ${GW_CP_PORT}...`);
   const cp = spawn('node', ['apps/control-plane/dist/index.mjs'], {
     cwd: GW_DIR,
     env: {
       ...process.env,
       HAP_CP_PORT: String(GW_CP_PORT),
       HAP_SP_URL: SP_URL,
-      HAP_MCP_INTERNAL_URL: GW_MCP_URL,
+      HAP_MCP_INTERNAL_URL: `http://127.0.0.1:${GW_MCP_PORT}`,
       HAP_UI_DIST: join(GW_DIR, 'apps/ui/dist'),
-      HAP_DATA_DIR: dd,
+      HAP_DATA_DIR: dataDir,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   processes.push(cp);
-  pipeOutput(cp, 'CP');
-  await waitForHealth(`${GW_URL}/health`, 15_000);
-  console.error(`[E2E] Gateway control plane ready.`);
+  pipe(cp, 'CP');
+  await waitFor(`${GW_URL}/health`, 15_000);
+  console.error('[E2E] Control plane ready.');
 
-  serversStarted = true;
+  serversReady = true;
 }
 
 export async function stopServers(): Promise<void> {
@@ -145,101 +122,132 @@ export async function stopServers(): Promise<void> {
     if (proc.exitCode == null) proc.kill('SIGKILL');
   }
   processes.length = 0;
+  if (dataDir) { try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* */ } dataDir = null; }
+  serversReady = false;
+}
 
-  if (dataDir) {
-    try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best-effort */ }
-    dataDir = null;
+// ─── Browser helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Register a new user through the SP browser UI.
+ * Returns the API key displayed on the get-started page.
+ */
+export async function registerOnSP(page: Page, name: string): Promise<string> {
+  const email = `${name.toLowerCase().replace(/\s/g, '')}-${Date.now()}@test.com`;
+
+  await page.goto(`${SP_URL}/get-started`);
+  await page.waitForSelector('input#name', { timeout: 10_000 });
+  await page.fill('input#name', name);
+  await page.fill('input#email', email);
+  await page.click('button:has-text("Create Account")');
+
+  // Wait for get-started flow to load (logged in state)
+  await page.waitForSelector('text=Personal', { timeout: 15_000 });
+
+  // Click Personal mode to reveal API key
+  await page.click('button:has-text("Personal")');
+
+  // Wait for API key to appear in readonly input
+  await page.waitForSelector('input[readonly]', { timeout: 10_000 });
+  const apiKey = await page.locator('input[readonly]').first().inputValue();
+  if (!apiKey) throw new Error('Could not extract API key from get-started page');
+  return apiKey;
+}
+
+/**
+ * Sign in to the gateway through the browser login form.
+ */
+export async function signInToGateway(page: Page, apiKey: string): Promise<void> {
+  await page.goto(`${GW_URL}/login`);
+  await page.waitForSelector('input[type="password"]', { timeout: 10_000 });
+  await page.fill('input[type="password"]', apiKey);
+  await page.click('button:has-text("Sign In")');
+  await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 15_000 });
+}
+
+/**
+ * Handle onboarding if shown (select Single Domain for personal use).
+ */
+export async function handleOnboarding(page: Page): Promise<void> {
+  if (page.url().includes('/onboarding')) {
+    await page.click('text=Single Domain');
+    await page.waitForURL(url => !url.toString().includes('/onboarding'), { timeout: 10_000 });
   }
-  serversStarted = false;
-}
-
-// ─── Auth helpers ────────────────────────────────────────────────────────────
-
-/**
- * Register a user on the SP via API. Returns API key.
- */
-export async function registerUser(
-  request: APIRequestContext,
-  name: string,
-  email: string,
-): Promise<{ id: string; apiKey: string; did: string }> {
-  const res = await request.post(`${SP_URL}/api/auth/register`, {
-    data: { name, email },
-  });
-  if (!res.ok()) throw new Error(`Register failed: ${res.status()}`);
-  const data = await res.json();
-  return { id: data.user.id, apiKey: data.apiKey, did: data.user.did ?? `did:hap:${data.user.id}` };
 }
 
 /**
- * Login to the SP and get a session cookie.
+ * Sign in to the SP dashboard through the browser login form.
  */
-export async function loginSP(request: APIRequestContext, apiKey: string): Promise<string> {
-  const res = await request.post(`${SP_URL}/api/auth/session`, {
-    headers: { 'x-api-key': apiKey },
-  });
-  if (!res.ok()) throw new Error(`SP login failed: ${res.status()}`);
-  const setCookie = res.headers()['set-cookie'] ?? '';
-  const match = setCookie.match(/hap-session=([^;]+)/);
-  if (!match) throw new Error('No hap-session cookie');
-  return match[1];
+export async function signInToSP(page: Page, apiKey: string): Promise<void> {
+  await page.goto(`${SP_URL}/login`);
+  await page.waitForSelector('input#apiKey', { timeout: 10_000 });
+  await page.fill('input#apiKey', apiKey);
+  await page.click('button:has-text("Sign in")');
+  await page.waitForURL(url => url.toString().includes('/dashboard'), { timeout: 15_000 });
 }
 
 /**
- * Create an authenticated browser page for the gateway UI.
+ * Navigate through the gate wizard and create an authorization.
+ * Assumes the page is already on the gateway and logged in.
  */
-export async function gatewayPage(browser: Browser, apiKey: string): Promise<Page> {
-  const context = await browser.newContext({ baseURL: GW_URL });
-  const page = await context.newPage();
+export async function createAuthorization(
+  page: Page,
+  opts: {
+    pathButtonText: string;       // e.g. "records-write"
+    bounds: Record<string, string>; // field label → value
+    problem: string;
+    objective: string;
+    tradeoffs: string;
+    commitMode: 'now' | 'per-action';
+  },
+): Promise<void> {
+  // Navigate to Authorize Agents
+  await page.goto(`${GW_URL}/agent/new`);
+  await page.waitForSelector('.card', { timeout: 10_000 });
 
-  // Login via gateway's auth endpoint
-  const res = await page.request.post(`${GW_URL}/auth/login`, {
-    data: { apiKey },
-  });
+  // Click path button
+  await page.click(`button:has-text("${opts.pathButtonText}")`);
+  await page.waitForSelector('button:has-text("Create Authorization")', { timeout: 5_000 });
+  await page.click('button:has-text("Create Authorization")');
 
-  if (res.ok()) {
-    const setCookie = res.headers()['set-cookie'] ?? '';
-    const match = setCookie.match(/hap-session=([^;]+)/);
-    if (match) {
-      await context.addCookies([{
-        name: 'hap-session',
-        value: match[1],
-        domain: 'localhost',
-        path: '/',
-      }]);
+  // Step 1: Bounds — fill numeric inputs
+  for (const [_label, value] of Object.entries(opts.bounds)) {
+    const input = page.locator('.stepper-input, input[type="number"]').first();
+    if (await input.isVisible({ timeout: 3_000 })) {
+      await input.fill(value);
     }
   }
+  // Click confirm/continue
+  const confirmBtn = page.locator('button:has-text("Confirm"), button:has-text("Continue")').first();
+  await confirmBtn.click();
 
-  return page;
-}
+  // Step 2: Problem
+  await page.waitForSelector('textarea', { timeout: 5_000 });
+  await page.fill('textarea', opts.problem);
+  await page.click('button:has-text("Continue")');
 
-/**
- * Create an authenticated browser page for the SP dashboard.
- */
-export async function spPage(browser: Browser, apiKey: string): Promise<Page> {
-  const context = await browser.newContext({ baseURL: SP_URL });
-  const page = await context.newPage();
+  // Step 3: Objective
+  await page.waitForSelector('textarea', { timeout: 5_000 });
+  await page.fill('textarea', opts.objective);
+  await page.click('button:has-text("Continue")');
 
-  const res = await page.request.post(`${SP_URL}/api/auth/session`, {
-    headers: { 'x-api-key': apiKey },
-  });
-  if (!res.ok()) throw new Error(`SP login failed: ${res.status()}`);
+  // Step 4: Tradeoffs
+  await page.waitForSelector('textarea', { timeout: 5_000 });
+  await page.fill('textarea', opts.tradeoffs);
+  await page.click('button:has-text("Continue")');
 
-  const setCookie = res.headers()['set-cookie'] ?? '';
-  const match = setCookie.match(/hap-session=([^;]+)/);
-  if (match) {
-    await context.addCookies([{
-      name: 'hap-session',
-      value: match[1],
-      domain: 'localhost',
-      path: '/',
-    }]);
+  // Step 5: Review — choose commitment mode
+  if (opts.commitMode === 'per-action') {
+    await page.click('text=Commit Per Action');
   }
+  // Default is Commit Now (already selected)
 
-  return page;
+  // Click Authorize
+  await page.click('button:has-text("Authorize")');
+
+  // Wait for success
+  await page.waitForSelector('text=Attestation Committed', { timeout: 15_000 });
 }
 
-// ─── Test setup ──────────────────────────────────────────────────────────────
-
-export const test = base.extend({});
-export { expect } from '@playwright/test';
+export const test = base;
+export { expect };

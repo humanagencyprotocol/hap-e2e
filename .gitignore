@@ -3,3 +3,4 @@ dist/
 .env
 .test-data/
 *.log
+test-results/
