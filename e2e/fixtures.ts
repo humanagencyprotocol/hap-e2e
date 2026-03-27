@@ -271,5 +271,49 @@ export async function createAuthorization(
   await page.locator('text=Attestation Committed').or(page.locator('text=Active Agent Authorizations')).first().waitFor({ state: 'visible', timeout: 15_000 });
 }
 
+// ─── SP API helpers (for setup that doesn't have UI) ─────────────────────
+
+export async function spApiAttest(
+  request: import('@playwright/test').APIRequestContext,
+  apiKey: string,
+  data: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const res = await request.post(`${SP_URL}/api/sp/attest`, {
+    headers: { 'x-api-key': apiKey },
+    data,
+  });
+  if (!res.ok()) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`Attest failed: ${res.status()} ${JSON.stringify(body)}`);
+  }
+  return res.json();
+}
+
+export async function spApiReceipt(
+  request: import('@playwright/test').APIRequestContext,
+  apiKey: string,
+  data: Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await request.post(`${SP_URL}/api/sp/receipt`, {
+    headers: { 'x-api-key': apiKey },
+    data,
+  });
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status(), body };
+}
+
+// ─── Gateway internal API helpers ────────────────────────────────────────
+
+export async function gatewayConfigureSession(
+  request: import('@playwright/test').APIRequestContext,
+  apiKey: string,
+): Promise<void> {
+  // Login via control plane to establish session
+  const res = await request.post(`${GW_URL}/auth/login`, {
+    data: { apiKey },
+  });
+  if (!res.ok()) throw new Error(`Gateway login failed: ${res.status()}`);
+}
+
 export const test = base;
 export { expect };
