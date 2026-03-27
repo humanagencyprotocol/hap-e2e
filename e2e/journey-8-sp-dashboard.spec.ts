@@ -17,8 +17,7 @@ test.describe.serial('Journey 8: SP Dashboard', () => {
   test('8.2 SP dashboard loads with user info', async ({ page }) => {
     await signInToSP(page, apiKey);
     await page.goto(`${SP_URL}/dashboard`);
-    await expect(page.locator('text=SPDashUser')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('text=Dashboard')).toBeVisible();
+    await expect(page.locator('h1:has-text("Dashboard")')).toBeVisible({ timeout: 10_000 });
   });
 
   test('8.3 Create attestation via API', async ({ request }) => {

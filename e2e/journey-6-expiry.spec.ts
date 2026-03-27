@@ -65,8 +65,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
     await page.click('.sidebar-item:has-text("Agent Authorizations")');
 
     // Click "Expired" tab
-    const expiredTab = page.locator('button:has-text("Expired")').or(page.locator('text=Expired').first());
-    await expiredTab.click();
+    await page.locator('button:has-text("Expired")').first().click();
     await expect(page.locator('text=records-write')).toBeVisible({ timeout: 10_000 });
   });
 
