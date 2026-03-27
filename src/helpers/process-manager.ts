@@ -71,6 +71,7 @@ export class ProcessManager {
     spUrl: string;
     spApiKey: string;
     profilesDir: string;
+    mode?: 'personal' | 'team';
   }): Promise<ChildProcess> {
     const dataDir = this.getDataDir();
     console.error(`[E2E] Starting gateway on port ${opts.port}...`);
@@ -86,7 +87,9 @@ export class ProcessManager {
           HAP_SP_URL: opts.spUrl,
           HAP_SP_API_KEY: opts.spApiKey,
           HAP_PROFILES_DIR: opts.profilesDir,
+          HAP_INTEGRATIONS_DIR: join(ROOT, 'hap-gateway', 'content', 'integrations'),
           HAP_DATA_DIR: dataDir,
+          HAP_MODE: opts.mode ?? 'personal',
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       },

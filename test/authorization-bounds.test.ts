@@ -213,7 +213,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     // Verify the detail message references the per-transaction limit
     expect(String(result.body.detail)).toMatch(/per-transaction|amount/i);
     expect(result.body.limit).toBe(25);
-    expect(result.body.requested).toBe(30);
+    expect(result.body.actual).toBe(30);
   });
 
   it('second $20 receipt succeeds (cumulative: $40, under daily max $50)', async () => {

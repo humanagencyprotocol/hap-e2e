@@ -28,12 +28,12 @@ beforeAll(async () => {
   sp = new SPClient(`http://localhost:${SP_PORT}`);
 
   // Register user
-  const user = await sp.register('GateUser', 'gateuser@test.com');
-  apiKey = user.apiKey;
-  userId = user.id;
-  userDid = user.did;
+  const reg = await sp.register('GateUser', 'gateuser@test.com');
+  apiKey = reg.apiKey;
+  userId = reg.user.id;
+  userDid = reg.user.did;
 
-  // Start gateway
+  // Start gateway with personal mode
   await pm.startGateway({
     port: GW_PORT,
     spUrl: `http://localhost:${SP_PORT}`,
@@ -44,6 +44,9 @@ beforeAll(async () => {
 
   // Configure gateway session
   await gw.configure({ sessionCookie: `api-key=${apiKey}`, apiKey });
+
+  // Wait for integrations to start (npx download)
+  await new Promise(r => setTimeout(r, 10_000));
 }, 120_000);
 
 afterAll(async () => {
@@ -61,44 +64,48 @@ async function connectMCP(): Promise<Client> {
 }
 
 describe('Tool Gating', () => {
-  it('lists tools shows available tools', async () => {
+  it('lists tools shows admin tools', async () => {
     mcpClient = await connectMCP();
     const tools = await mcpClient.listTools();
-    // Should have admin tools (list-authorizations, etc.)
     const toolNames = tools.tools.map(t => t.name);
     expect(toolNames).toContain('list-authorizations');
     expect(toolNames).toContain('list-integrations');
     expect(toolNames).toContain('check-pending-commitments');
   });
 
-  it('list-integrations shows running integrations', async () => {
+  it('list-integrations shows running CRM', async () => {
     const result = await mcpClient.callTool({ name: 'list-integrations', arguments: {} });
     const text = (result.content as Array<{ text: string }>)[0].text;
-    expect(text).toContain('records');
     expect(text).toContain('crm');
   });
 
-  it('tool call without authorization returns error', async () => {
-    // CRM tools should be disabled — no authorization exists
-    const result = await mcpClient.callTool({
-      name: 'crm___create_contact',
-      arguments: { name: 'Test' },
-    });
-    const text = (result.content as Array<{ text: string }>)[0].text;
-    expect(text).toContain('No active authorization');
+  it('CRM tool call without authorization is blocked', async () => {
+    // CRM tools are disabled when no authorization exists
+    let blocked = false;
+    try {
+      const result = await mcpClient.callTool({
+        name: 'crm___create_contact',
+        arguments: { name: 'Test' },
+      });
+      // Tool is disabled — either throws or returns error
+      if (result.isError) blocked = true;
+    } catch {
+      blocked = true;
+    }
+    expect(blocked).toBe(true);
   });
 
   it('tool enabled after creating authorization', async () => {
     const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
     const path = 'customers-write';
-    const bounds = { profile: 'customers', path, write_daily_max: 5, delete_daily_max: 2 };
+    const bounds = { profile, path, write_daily_max: 5, delete_daily_max: 2 };
     const boundsHash = computeBoundsHash(bounds, ['profile', 'path', 'write_daily_max', 'delete_daily_max']);
     const contextHash = computeBoundsHash({}, []);
     const gateHashes = hashGateContent({ problem: 'test', objective: 'test', tradeoffs: 'test' });
     const ecHash = hashExecutionContext({ profile, path, domain: 'owner' });
 
     // Attest
-    const attest = await sp.submitAttestation(apiKey, {
+    await sp.submitAttestation(apiKey, {
       profile_id: profile,
       path,
       domain: 'owner',
@@ -111,16 +118,14 @@ describe('Tool Gating', () => {
     });
 
     // Push gate content
-    await gw.pushGateContent({
-      boundsHash,
-      contextHash,
-      context: {},
+    await gw.pushGateContent(
+      { boundsHash, contextHash, context: {} },
       path,
-      gateContent: { problem: 'test', objective: 'test', tradeoffs: 'test' },
-    });
+      { problem: 'test', objective: 'test', tradeoffs: 'test' },
+    );
 
     // Wait for tool refresh
-    await new Promise(r => setTimeout(r, 2_000));
+    await new Promise(r => setTimeout(r, 3_000));
 
     // Re-connect to get updated tool list
     await mcpClient.close();

@@ -27,5 +27,6 @@ export default defineConfig({
     sequence: { concurrent: false },
     fileParallelism: false,
     env: loadDotenv(),
+    exclude: ['e2e/**', 'node_modules/**'],
   },
 });
