@@ -1,0 +1,146 @@
+/**
+ * Tool Gating Tests — verifies MCP tools are enabled/disabled based on authorization state.
+ *
+ * Uses CRM integration (personal mode auto-registered).
+ * Connects via MCP SSE client to test actual tool call responses.
+ */
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { ProcessManager } from '../src/helpers/process-manager';
+import { SPClient } from '../src/helpers/sp-client';
+import { GatewayClient } from '../src/helpers/gateway-client';
+import { computeBoundsHash, hashGateContent, hashExecutionContext } from '../src/helpers/crypto';
+
+const SP_PORT = 16200;
+const GW_PORT = 16230;
+const pm = new ProcessManager();
+let sp: SPClient;
+let gw: GatewayClient;
+let apiKey: string;
+let userId: string;
+let userDid: string;
+let mcpClient: Client;
+
+beforeAll(async () => {
+  pm.buildGateway();
+  await pm.startSP(SP_PORT);
+  sp = new SPClient(`http://localhost:${SP_PORT}`);
+
+  // Register user
+  const user = await sp.register('GateUser', 'gateuser@test.com');
+  apiKey = user.apiKey;
+  userId = user.id;
+  userDid = user.did;
+
+  // Start gateway
+  await pm.startGateway({
+    port: GW_PORT,
+    spUrl: `http://localhost:${SP_PORT}`,
+    spApiKey: apiKey,
+    profilesDir: `${process.cwd()}/../hap-profiles`,
+  });
+  gw = new GatewayClient(`http://localhost:${GW_PORT}`);
+
+  // Configure gateway session
+  await gw.configure({ sessionCookie: `api-key=${apiKey}`, apiKey });
+}, 120_000);
+
+afterAll(async () => {
+  if (mcpClient) {
+    try { await mcpClient.close(); } catch { /* */ }
+  }
+  await pm.killAll();
+});
+
+async function connectMCP(): Promise<Client> {
+  const transport = new SSEClientTransport(new URL(`http://localhost:${GW_PORT}/sse`));
+  const client = new Client({ name: 'test-agent', version: '1.0.0' }, { capabilities: {} });
+  await client.connect(transport);
+  return client;
+}
+
+describe('Tool Gating', () => {
+  it('lists tools shows available tools', async () => {
+    mcpClient = await connectMCP();
+    const tools = await mcpClient.listTools();
+    // Should have admin tools (list-authorizations, etc.)
+    const toolNames = tools.tools.map(t => t.name);
+    expect(toolNames).toContain('list-authorizations');
+    expect(toolNames).toContain('list-integrations');
+    expect(toolNames).toContain('check-pending-commitments');
+  });
+
+  it('list-integrations shows running integrations', async () => {
+    const result = await mcpClient.callTool({ name: 'list-integrations', arguments: {} });
+    const text = (result.content as Array<{ text: string }>)[0].text;
+    expect(text).toContain('records');
+    expect(text).toContain('crm');
+  });
+
+  it('tool call without authorization returns error', async () => {
+    // CRM tools should be disabled — no authorization exists
+    const result = await mcpClient.callTool({
+      name: 'crm___create_contact',
+      arguments: { name: 'Test' },
+    });
+    const text = (result.content as Array<{ text: string }>)[0].text;
+    expect(text).toContain('No active authorization');
+  });
+
+  it('tool enabled after creating authorization', async () => {
+    const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
+    const path = 'customers-write';
+    const bounds = { profile: 'customers', path, write_daily_max: 5, delete_daily_max: 2 };
+    const boundsHash = computeBoundsHash(bounds, ['profile', 'path', 'write_daily_max', 'delete_daily_max']);
+    const contextHash = computeBoundsHash({}, []);
+    const gateHashes = hashGateContent({ problem: 'test', objective: 'test', tradeoffs: 'test' });
+    const ecHash = hashExecutionContext({ profile, path, domain: 'owner' });
+
+    // Attest
+    const attest = await sp.submitAttestation(apiKey, {
+      profile_id: profile,
+      path,
+      domain: 'owner',
+      did: userDid,
+      bounds,
+      bounds_hash: boundsHash,
+      context_hash: contextHash,
+      gate_content_hashes: gateHashes,
+      execution_context_hash: ecHash,
+    });
+
+    // Push gate content
+    await gw.pushGateContent({
+      boundsHash,
+      contextHash,
+      context: {},
+      path,
+      gateContent: { problem: 'test', objective: 'test', tradeoffs: 'test' },
+    });
+
+    // Wait for tool refresh
+    await new Promise(r => setTimeout(r, 2_000));
+
+    // Re-connect to get updated tool list
+    await mcpClient.close();
+    mcpClient = await connectMCP();
+
+    // CRM read tool should now work
+    const result = await mcpClient.callTool({
+      name: 'crm___find_contacts',
+      arguments: {},
+    });
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('write tool within bounds succeeds', async () => {
+    const result = await mcpClient.callTool({
+      name: 'crm___create_contact',
+      arguments: { name: 'Test Contact', type: 'customer' },
+    });
+    expect(result.isError).toBeFalsy();
+    const text = (result.content as Array<{ text: string }>)[0].text;
+    expect(text).toContain('Test Contact');
+  });
+});
