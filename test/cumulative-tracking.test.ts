@@ -40,7 +40,7 @@ beforeAll(async () => {
 
   // Create authorization with write_daily_max = 3
   const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
-  const path = 'customers-write';
+  const path = profile;
   const bounds = { profile: 'customers', write_daily_max: 3, delete_daily_max: 1 };
   const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);

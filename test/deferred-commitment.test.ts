@@ -41,7 +41,7 @@ beforeAll(async () => {
 
   // Create authorization with deferred commitment
   const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
-  const path = 'customers-write';
+  const path = profile;
   const bounds = { profile: 'customers', write_daily_max: 10, delete_daily_max: 5 };
   boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
@@ -136,7 +136,7 @@ describe('Deferred Commitment', () => {
   it('immediate commitment tool call executes directly', async () => {
     // Create a new authorization WITHOUT deferred commitment for records
     const profile = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
-    const path = 'records-write';
+    const path = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
     const bounds = { profile: 'records', read_access: 'all', write_daily_max: 10, delete_access: 'own_24h', archive_access: 'all' };
     const bh = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access']);
     const ch = computeBoundsHash({}, []);

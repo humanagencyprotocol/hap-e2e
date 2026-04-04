@@ -97,7 +97,7 @@ describe('Tool Gating', () => {
 
   it('tool enabled after creating authorization', async () => {
     const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
-    const path = 'customers-write';
+    const path = profile;
     const bounds = { profile, write_daily_max: 5, delete_daily_max: 2 };
     const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
     const contextHash = computeBoundsHash({}, []);
