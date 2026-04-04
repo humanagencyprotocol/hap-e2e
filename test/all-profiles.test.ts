@@ -78,6 +78,8 @@ interface ProfileTestConfig {
   dailyLimitField: string;
   /** The daily limit value in bounds */
   dailyLimitValue: number;
+  /** Gate style: 'intent' (v0.4) or 'legacy' (v0.3 problem/objective/tradeoffs) */
+  gateStyle?: 'intent' | 'legacy';
 }
 
 const PROFILES: ProfileTestConfig[] = [
@@ -115,6 +117,7 @@ const PROFILES: ProfileTestConfig[] = [
     readToolName: 'list_payments',
     dailyLimitField: 'transaction_count_daily_max',
     dailyLimitValue: 3,
+    gateStyle: 'legacy', // charge profile uses v0.3 problem/objective/tradeoff gates
   },
   {
     profileId: 'github.com/humanagencyprotocol/hap-profiles/purchase@0.4',
@@ -290,10 +293,14 @@ const PROFILES: ProfileTestConfig[] = [
   },
 ];
 
-const GATE_CONTENT = {
+const GATE_CONTENT_LEGACY = {
   problem: 'E2E profile validation test.',
   objective: 'Verify all profiles work end-to-end through the gateway.',
   tradeoffs: 'Accepts test-level risk for validation purposes.',
+};
+
+const GATE_CONTENT_V4 = {
+  intent: 'E2E profile validation: verify all profiles work end-to-end through the gateway.',
 };
 
 // ── Lifecycle ─────────────────────────────────────────────
@@ -329,7 +336,8 @@ for (const profile of PROFILES) {
     let contextHash: string;
 
     it('creates attestation', async () => {
-      const gateContentHashes = hashGateContent(GATE_CONTENT);
+      const gateContent = profile.gateStyle === 'legacy' ? GATE_CONTENT_LEGACY : GATE_CONTENT_V4;
+      const gateContentHashes = hashGateContent(gateContent);
       const executionContextHash = hashExecutionContext({
         ...Object.fromEntries(
           Object.entries(profile.context).map(([k, v]) => [k, v]),
@@ -367,10 +375,11 @@ for (const profile of PROFILES) {
         apiKey: user.apiKey,
       });
 
+      const gateContent = profile.gateStyle === 'legacy' ? GATE_CONTENT_LEGACY : GATE_CONTENT_V4;
       await gw.pushGateContent(
         { boundsHash, contextHash, context: profile.context as Record<string, string | number> },
         profile.path,
-        GATE_CONTENT,
+        gateContent,
       );
     });
 

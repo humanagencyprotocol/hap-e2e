@@ -34,18 +34,29 @@ export class GatewayClient {
   // ── Gate Content ────────────────────────────────────────
 
   async pushGateContent(
-    hashOrOpts: string | { boundsHash: string; contextHash: string; context?: Record<string, unknown> },
-    path: string,
-    gateContent: { problem: string; objective: string; tradeoffs: string },
+    hashOrOpts:
+      | string
+      | { boundsHash: string; contextHash: string; context?: Record<string, unknown> }
+      | { boundsHash: string; contextHash: string; context?: Record<string, unknown>; path: string; gateContent: { intent?: string; problem?: string; objective?: string; tradeoffs?: string } },
+    path?: string,
+    gateContent?: { intent?: string; problem?: string; objective?: string; tradeoffs?: string },
   ): Promise<void> {
-    const body = typeof hashOrOpts === 'string'
-      ? { frameHash: hashOrOpts, path, gateContent }
-      : { boundsHash: hashOrOpts.boundsHash, contextHash: hashOrOpts.contextHash, context: hashOrOpts.context, path, gateContent };
+    let body: Record<string, unknown>;
+
+    if (typeof hashOrOpts === 'string') {
+      body = { frameHash: hashOrOpts, path, gateContent };
+    } else if ('path' in hashOrOpts && 'gateContent' in hashOrOpts) {
+      // All-in-one object form: { boundsHash, contextHash, context, path, gateContent }
+      const { path: p, gateContent: gc, ...rest } = hashOrOpts as { boundsHash: string; contextHash: string; context?: Record<string, unknown>; path: string; gateContent: Record<string, string> };
+      body = { ...rest, path: p, gateContent: gc };
+    } else {
+      body = { boundsHash: hashOrOpts.boundsHash, contextHash: hashOrOpts.contextHash, context: hashOrOpts.context, path, gateContent };
+    }
 
     const res = await this.request('POST', '/internal/gate-content', body);
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(`pushGateContent failed (${res.status}): ${JSON.stringify(body)}`);
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(`pushGateContent failed (${res.status}): ${JSON.stringify(errBody)}`);
     }
   }
 

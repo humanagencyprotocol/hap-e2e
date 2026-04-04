@@ -71,10 +71,9 @@ const CONTEXT = {
   allowed_domains: TEST_DOMAIN,
 };
 
+// email profile uses v0.4 intent gate
 const GATE_CONTENT = {
-  problem: 'E2E test: need agent to send email on behalf of user.',
-  objective: 'Enable automated email sending within bounded recipients.',
-  tradeoffs: 'Accepts risk of emails sent to authorized recipients only.',
+  intent: 'E2E test: need agent to send email on behalf of user. Enable automated email sending within bounded recipients.',
 };
 
 // ── Shared state ────────────────────────────────────────────────────────────

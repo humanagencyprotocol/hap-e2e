@@ -45,7 +45,7 @@ beforeAll(async () => {
   const bounds = { profile: 'customers', path, write_daily_max: 10, delete_daily_max: 5 };
   boundsHash = computeBoundsHash(bounds, ['profile', 'path', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
-  const gateHashes = hashGateContent({ problem: 'test', objective: 'test', tradeoffs: 'test' });
+  const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
   const ecHash = hashExecutionContext({ profile, path, domain: 'owner' });
 
   await sp.submitAttestation(apiKey, {
@@ -66,7 +66,7 @@ beforeAll(async () => {
     contextHash,
     context: {},
     path,
-    gateContent: { problem: 'test', objective: 'test', tradeoffs: 'test' },
+    gateContent: { intent: 'test' },
   });
 
   await new Promise(r => setTimeout(r, 2_000));
@@ -161,7 +161,7 @@ describe('Deferred Commitment', () => {
       contextHash: ch,
       context: {},
       path,
-      gateContent: { problem: 'test', objective: 'test', tradeoffs: 'test' },
+      gateContent: { intent: 'test' },
     });
 
     await new Promise(r => setTimeout(r, 2_000));

@@ -9,18 +9,24 @@ export function sha256Hash(text: string): string {
 }
 
 /**
- * Hash gate content fields (problem, objective, tradeoffs).
- * Returns object with same keys, values as "sha256:<hex>".
+ * Hash gate content fields.
+ *
+ * v0.4 profiles: pass { intent } → returns { intent: 'sha256:...' }
+ * v0.3 profiles: pass { problem, objective, tradeoffs } → returns hashed versions
  */
 export function hashGateContent(content: {
-  problem: string;
-  objective: string;
-  tradeoffs: string;
-}): { problem: string; objective: string; tradeoffs: string } {
+  intent?: string;
+  problem?: string;
+  objective?: string;
+  tradeoffs?: string;
+}): Record<string, string> {
+  if (content.intent !== undefined) {
+    return { intent: sha256Hash(content.intent) };
+  }
   return {
-    problem: sha256Hash(content.problem),
-    objective: sha256Hash(content.objective),
-    tradeoffs: sha256Hash(content.tradeoffs),
+    problem: sha256Hash(content.problem ?? ''),
+    objective: sha256Hash(content.objective ?? ''),
+    tradeoffs: sha256Hash(content.tradeoffs ?? ''),
   };
 }
 

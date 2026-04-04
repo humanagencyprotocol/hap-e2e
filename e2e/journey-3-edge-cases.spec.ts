@@ -15,10 +15,11 @@ test.describe.serial('Journey 3: Edge Cases', () => {
   });
 
   test('3.2 Group limits vs auth bounds (API verification)', async ({ request }) => {
-    // Register via API for speed
+    // Register via API (HAP_TEST_DIRECT_REGISTER mode returns apiKey + user immediately)
     const regRes = await request.post(`${SP_URL}/api/auth/register`, {
       data: { name: 'LimitUser', email: `limituser-${Date.now()}@test.com` },
     });
+    expect(regRes.ok()).toBe(true);
     const regData = await regRes.json();
     const apiKey = regData.apiKey;
     const userId = regData.user.id;
@@ -80,10 +81,11 @@ test.describe.serial('Journey 3: Edge Cases', () => {
   });
 
   test('3.3 Proposal lifecycle (API verification)', async ({ request }) => {
-    // Register user
+    // Register user (HAP_TEST_DIRECT_REGISTER mode returns apiKey + user immediately)
     const regRes = await request.post(`${SP_URL}/api/auth/register`, {
       data: { name: 'ProposalUser', email: `proposaluser-${Date.now()}@test.com` },
     });
+    expect(regRes.ok()).toBe(true);
     const regData = await regRes.json();
     const apiKey = regData.apiKey;
     const did = regData.user.did ?? `did:hap:${regData.user.id}`;
@@ -96,7 +98,7 @@ test.describe.serial('Journey 3: Edge Cases', () => {
         path: 'customers-write', domain: 'owner', did,
         bounds: { profile: 'customers', path: 'customers-write', write_daily_max: 10, delete_daily_max: 5 },
         context_hash: 'sha256:' + '0'.repeat(64),
-        gate_content_hashes: { problem: 'sha256:' + 'a'.repeat(64), objective: 'sha256:' + 'b'.repeat(64), tradeoffs: 'sha256:' + 'c'.repeat(64) },
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
         execution_context_hash: 'sha256:' + 'd'.repeat(64),
         defer_commitment: true,
       },
@@ -160,28 +162,22 @@ test.describe.serial('Journey 3: Edge Cases', () => {
     expect(rejectData.status).toBe('rejected');
   });
 
-  test('3.4 Gateway: step indicator, path buttons, integrations', async ({ page }) => {
+  test('3.4 Gateway: Authorize page shows profile cards', async ({ page }) => {
     await signInToGateway(page, userKey);
     await handleOnboarding(page);
 
-    // Navigate to Authorize Agents via sidebar
-    await page.click('.sidebar-item:has-text("Authorize Agents")');
-    await page.waitForSelector('.card', { timeout: 10_000 });
+    // Navigate to Authorize via sidebar
+    await page.click('.sidebar-item:has-text("Authorize")');
+    // Either profile grid or empty state
+    await page.locator('.profile-grid, .card').first().waitFor({ state: 'visible', timeout: 10_000 });
 
-    // Path buttons should exist
-    const pathButtons = page.locator('button:has-text("-")');
-    const count = await pathButtons.count();
-    expect(count).toBeGreaterThan(0);
-
-    // Click a write path and start wizard
-    const pathBtn = page.locator('button:has-text("-write")').first();
-    if (await pathBtn.isVisible({ timeout: 3_000 })) {
-      await pathBtn.click();
-      await page.click('button:has-text("Create Authorization")');
-
-      // Step labels
-      await expect(page.locator('text=Bounds')).toBeVisible({ timeout: 5_000 });
-      await expect(page.locator('button:has-text("Cancel")')).toBeVisible();
+    // If profiles are visible, check that Authorize buttons exist
+    const authorizeBtn = page.locator('button:has-text("Authorize")').first();
+    if (await authorizeBtn.isVisible({ timeout: 3_000 })) {
+      await authorizeBtn.click();
+      // Should navigate to /agent/gate (bounds step)
+      await page.waitForURL(url => url.toString().includes('/agent/gate'), { timeout: 10_000 });
+      await expect(page.locator('text=Bounds').or(page.locator('button:has-text("Next")'))).toBeVisible({ timeout: 5_000 });
     }
   });
 

@@ -36,10 +36,9 @@ const CONTEXT = {
   contact_type: 'customer,lead',
 };
 
+// customers profile uses v0.4 intent gate
 const GATE_CONTENT = {
-  problem: 'Need agent to manage customer contacts and deals for E2E testing.',
-  objective: 'Enable automated CRM operations within bounded daily limits.',
-  tradeoffs: 'Accepts risk of up to 10 CRM write operations per day.',
+  intent: 'Need agent to manage customer contacts and deals for E2E testing. Enable automated CRM operations within bounded daily limits.',
 };
 
 // ── Clients ───────────────────────────────────────────────

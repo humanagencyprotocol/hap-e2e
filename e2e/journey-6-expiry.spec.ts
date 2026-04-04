@@ -34,7 +34,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
       did,
       bounds: { profile: 'records', path: 'records-write', write_daily_max: 5 },
       context_hash: 'sha256:' + '0'.repeat(64),
-      gate_content_hashes: { problem: 'sha256:' + 'a'.repeat(64), objective: 'sha256:' + 'b'.repeat(64), tradeoffs: 'sha256:' + 'c'.repeat(64) },
+      gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
       execution_context_hash: 'sha256:' + 'd'.repeat(64),
       ttl: 60, // 60 second TTL
     });
@@ -46,7 +46,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    await page.click('.sidebar-item:has-text("Agent Authorizations")');
+    await page.click('.sidebar-item:has-text("Authorizations")');
     await expect(page.locator('.status-badge:has-text("Active")')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=records-write')).toBeVisible();
   });
@@ -62,7 +62,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
     await handleOnboarding(page);
 
     // Check authorizations page — should show expired
-    await page.click('.sidebar-item:has-text("Agent Authorizations")');
+    await page.click('.sidebar-item:has-text("Authorizations")');
 
     // Click "Expired" tab
     await page.locator('button:has-text("Expired")').first().click();

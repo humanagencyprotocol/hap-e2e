@@ -101,7 +101,7 @@ describe('Tool Gating', () => {
     const bounds = { profile, path, write_daily_max: 5, delete_daily_max: 2 };
     const boundsHash = computeBoundsHash(bounds, ['profile', 'path', 'write_daily_max', 'delete_daily_max']);
     const contextHash = computeBoundsHash({}, []);
-    const gateHashes = hashGateContent({ problem: 'test', objective: 'test', tradeoffs: 'test' });
+    const gateHashes = hashGateContent({ intent: 'test' });
     const ecHash = hashExecutionContext({ profile, path, domain: 'owner' });
 
     // Attest
@@ -121,7 +121,7 @@ describe('Tool Gating', () => {
     await gw.pushGateContent(
       { boundsHash, contextHash, context: {} },
       path,
-      { problem: 'test', objective: 'test', tradeoffs: 'test' },
+      { intent: 'test' },
     );
 
     // Wait for tool refresh

@@ -47,6 +47,7 @@ export class ProcessManager {
       env: {
         ...process.env,
         ALLOW_REGISTRATION: 'true',
+        HAP_TEST_DIRECT_REGISTER: 'true',
         PORT: String(port),
         // No Redis env vars → in-memory storage
         SP_KV_REST_API_URL: '',

@@ -26,16 +26,15 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await handleOnboarding(page);
 
     await createAuthorization(page, {
-      pathButtonText: 'records-write',
+      profileName: 'Records',
       bounds: { write_daily_max: '10' },
-      problem: 'Agent needs to store research',
-      objective: 'Persistent knowledge management',
-      tradeoffs: 'Write access to personal records',
+      intent: 'Agent needs to store research for persistent knowledge management',
+      title: 'Records: agent storage',
       commitMode: 'now',
     });
 
     // Verify success
-    await page.locator('text=Attestation Committed').or(page.locator('text=Active Agent Authorizations')).first().waitFor({ state: 'visible', timeout: 15_000 });
+    await page.locator('text=Authorization Created').waitFor({ state: 'visible', timeout: 15_000 });
   });
 
   test('5.3 Create authorization with Commit Per Action via API', async ({ request }) => {
@@ -53,7 +52,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
       did: userDid,
       bounds: { profile: 'customers', path: 'customers-write', write_daily_max: 5, delete_daily_max: 2 },
       context_hash: 'sha256:' + '0'.repeat(64),
-      gate_content_hashes: { problem: 'sha256:' + 'a'.repeat(64), objective: 'sha256:' + 'b'.repeat(64), tradeoffs: 'sha256:' + 'c'.repeat(64) },
+      gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
       execution_context_hash: 'sha256:' + 'd'.repeat(64),
       defer_commitment: true,
     });
@@ -85,7 +84,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    await page.click('.sidebar-item:has-text("Agent Proposals")');
+    await page.click('.sidebar-item:has-text("Pending Reviews")');
     await expect(page.locator('h1:has-text("Proposals")')).toBeVisible({ timeout: 10_000 });
 
     // Should show the pending proposal
@@ -97,7 +96,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    await page.click('.sidebar-item:has-text("Agent Proposals")');
+    await page.click('.sidebar-item:has-text("Pending Reviews")');
     await expect(page.locator('text=crm___create_contact')).toBeVisible({ timeout: 15_000 });
 
     // Click Commit
@@ -126,7 +125,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     // View in browser and reject
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
-    await page.click('.sidebar-item:has-text("Agent Proposals")');
+    await page.click('.sidebar-item:has-text("Pending Reviews")');
     await expect(page.locator('text=crm___delete_contact')).toBeVisible({ timeout: 15_000 });
 
     await page.click('button:has-text("Reject")');

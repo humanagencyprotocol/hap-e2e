@@ -131,7 +131,7 @@ export class SPClient {
     apiKey: string,
     body: {
       profile_id: string;
-      group_id: string;
+      group_id?: string;
       /** v0.3 frame (kept for backward compat) */
       frame?: Record<string, unknown>;
       /** v0.4 bounds */
