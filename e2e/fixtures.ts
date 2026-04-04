@@ -7,7 +7,7 @@
 
 import { test as base, expect, type Page, type Browser, type APIRequestContext } from '@playwright/test';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,14 +31,24 @@ export const GW_MCP_URL = `http://localhost:${GW_MCP_PORT}`;
 
 // ─── Test users ──────────────────────────────────────────────────────────────
 
-export const ALICE = { name: 'Alice', apiKey: '', id: '', did: '', email: 'alice@test.com' };
-export const BOB = { name: 'Bob', apiKey: '', id: '', did: '', email: 'bob@test.com' };
+export const ALICE = { name: 'Alice', apiKey: '', id: '', did: '', email: '' };
+export const BOB = { name: 'Bob', apiKey: '', id: '', did: '', email: '' };
 
-let usersRegistered = false;
+// In global setup: register users and write to file.
+// In test workers: load from file.
+export async function ensureUsersRegistered(): Promise<void> {
+  if (ALICE.apiKey) return;
 
-async function ensureUsersRegistered(): Promise<void> {
-  if (usersRegistered) return;
+  // Try loading from file first (test worker)
+  try {
+    const { readFileSync } = await import('node:fs');
+    const data = JSON.parse(readFileSync(join(__dirname, '.test-users.json'), 'utf-8'));
+    Object.assign(ALICE, data.alice);
+    Object.assign(BOB, data.bob);
+    if (ALICE.apiKey) return;
+  } catch { /* not saved yet — register */ }
 
+  // Register (global setup process)
   for (const user of [ALICE, BOB]) {
     const res = await fetch(`${SP_URL}/api/auth/register`, {
       method: 'POST',
@@ -52,9 +62,14 @@ async function ensureUsersRegistered(): Promise<void> {
     user.did = data.user.did;
     user.email = data.user.email;
   }
-
-  usersRegistered = true;
 }
+
+// Auto-load users when imported in test workers
+try {
+  const data = JSON.parse(readFileSync(join(__dirname, '.test-users.json'), 'utf-8'));
+  Object.assign(ALICE, data.alice);
+  Object.assign(BOB, data.bob);
+} catch { /* global setup hasn't run yet */ }
 
 // ─── Profile IDs ─────────────────────────────────────────────────────────────
 

@@ -4,3 +4,4 @@ dist/
 .test-data/
 *.log
 test-results/
+.test-users.json
