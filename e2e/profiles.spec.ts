@@ -5,7 +5,8 @@ test.describe('Profiles API', () => {
     const res = await request.get(`${SP_URL}/api/profiles`);
     expect(res.ok()).toBe(true);
 
-    const profiles = await res.json();
+    const data = await res.json();
+    const profiles = data.profiles ?? data;
     expect(profiles.length).toBeGreaterThanOrEqual(3);
 
     for (const p of profiles) {
