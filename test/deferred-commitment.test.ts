@@ -42,8 +42,8 @@ beforeAll(async () => {
   // Create authorization with deferred commitment
   const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
   const path = 'customers-write';
-  const bounds = { profile: 'customers', path, write_daily_max: 10, delete_daily_max: 5 };
-  boundsHash = computeBoundsHash(bounds, ['profile', 'path', 'write_daily_max', 'delete_daily_max']);
+  const bounds = { profile: 'customers', write_daily_max: 10, delete_daily_max: 5 };
+  boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
   const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
   const ecHash = hashExecutionContext({ profile, path, domain: 'owner' });
@@ -137,8 +137,8 @@ describe('Deferred Commitment', () => {
     // Create a new authorization WITHOUT deferred commitment for records
     const profile = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
     const path = 'records-write';
-    const bounds = { profile: 'records', path, write_daily_max: 10 };
-    const bh = computeBoundsHash(bounds, ['profile', 'path', 'write_daily_max']);
+    const bounds = { profile: 'records', read_access: 'all', write_daily_max: 10, delete_access: 'own_24h', archive_access: 'all' };
+    const bh = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access']);
     const ch = computeBoundsHash({}, []);
     const gh = hashGateContent({ problem: 'test', objective: 'test', tradeoffs: 'test' });
     const eh = hashExecutionContext({ profile, path, domain: 'owner' });

@@ -32,7 +32,7 @@ test.describe.serial('Journey 8: SP Dashboard', () => {
       path: 'charge-routine',
       domain: 'owner',
       did,
-      bounds: { profile: 'charge', path: 'charge-routine', amount_max: 50, amount_daily_max: 200, amount_monthly_max: 2000, transaction_count_daily_max: 10 },
+      bounds: { profile: 'charge', amount_max: 50, amount_daily_max: 200, amount_monthly_max: 2000, transaction_count_daily_max: 10 },
       context_hash: 'sha256:' + '0'.repeat(64),
       gate_content_hashes: { problem: 'sha256:' + 'a'.repeat(64), objective: 'sha256:' + 'b'.repeat(64), tradeoffs: 'sha256:' + 'c'.repeat(64) },
       execution_context_hash: 'sha256:' + 'd'.repeat(64),
@@ -55,9 +55,8 @@ test.describe.serial('Journey 8: SP Dashboard', () => {
     const receipt1 = await spApiReceipt(request, apiKey, {
       attestationHash: boundsHash,
       profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4',
-      path: 'charge-routine',
       action: 'charge',
-      executionContext: { amount: 25, action_type: 'charge' },
+      executionContext: { amount: 25 },
       amount: 25,
     });
     expect(receipt1.status).toBe(201);
@@ -66,9 +65,8 @@ test.describe.serial('Journey 8: SP Dashboard', () => {
     const receipt2 = await spApiReceipt(request, apiKey, {
       attestationHash: boundsHash,
       profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4',
-      path: 'charge-routine',
       action: 'charge',
-      executionContext: { amount: 15, action_type: 'charge' },
+      executionContext: { amount: 15 },
       amount: 15,
     });
     expect(receipt2.status).toBe(201);
@@ -84,9 +82,8 @@ test.describe.serial('Journey 8: SP Dashboard', () => {
     const receipt = await spApiReceipt(request, apiKey, {
       attestationHash: boundsHash,
       profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4',
-      path: 'charge-routine',
       action: 'charge',
-      executionContext: { amount: 60, action_type: 'charge' },
+      executionContext: { amount: 60 },
       amount: 60,
     });
     expect(receipt.status).toBe(403);
@@ -112,9 +109,8 @@ test.describe.serial('Journey 8: SP Dashboard', () => {
     const receipt = await spApiReceipt(request, apiKey, {
       attestationHash: boundsHash,
       profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4',
-      path: 'charge-routine',
       action: 'charge',
-      executionContext: { amount: 10, action_type: 'charge' },
+      executionContext: { amount: 10 },
       amount: 10,
     });
     expect(receipt.status).toBe(403);

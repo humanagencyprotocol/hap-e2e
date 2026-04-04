@@ -192,7 +192,7 @@ export class SPClient {
     body: {
       attestationHash: string;
       profileId: string;
-      path: string;
+      path?: string;
       action: string;
       amount?: number;
       executionContext?: Record<string, unknown>;

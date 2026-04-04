@@ -32,7 +32,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
       path: 'records-write',
       domain: 'owner',
       did,
-      bounds: { profile: 'records', path: 'records-write', write_daily_max: 5 },
+      bounds: { profile: 'records', read_access: 'all', write_daily_max: 5, delete_access: 'own_24h', archive_access: 'all' },
       context_hash: 'sha256:' + '0'.repeat(64),
       gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
       execution_context_hash: 'sha256:' + 'd'.repeat(64),
@@ -86,7 +86,6 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
       data: {
         attestationHash: boundsHash,
         profileId: 'github.com/humanagencyprotocol/hap-profiles/records@0.4',
-        path: 'records-write',
         action: 'create_record',
         executionContext: {},
       },

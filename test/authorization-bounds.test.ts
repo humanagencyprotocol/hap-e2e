@@ -35,7 +35,6 @@ const EXEC_PATH = 'charge-routine';
 
 const BOUNDS_KEY_ORDER = [
   'profile',
-  'path',
   'amount_max',
   'amount_daily_max',
   'amount_monthly_max',
@@ -46,7 +45,6 @@ const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
 /** Tight authorization bounds — the human-defined limits under test. */
 const TIGHT_BOUNDS = {
   profile: PROFILE_ID,
-  path: EXEC_PATH,
   amount_max: 25,
   amount_daily_max: 50,
   amount_monthly_max: 1000,
@@ -190,7 +188,6 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     const result = await sp.postReceipt(agentApiKey, {
       attestationHash,
       profileId: PROFILE_ID,
-      path: EXEC_PATH,
       action: 'charge',
       amount: 20,
     });
@@ -203,7 +200,6 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     const result = await sp.postReceipt(agentApiKey, {
       attestationHash,
       profileId: PROFILE_ID,
-      path: EXEC_PATH,
       action: 'charge',
       amount: 30,
     });
@@ -220,7 +216,6 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     const result = await sp.postReceipt(agentApiKey, {
       attestationHash,
       profileId: PROFILE_ID,
-      path: EXEC_PATH,
       action: 'charge',
       amount: 20,
     });
@@ -242,7 +237,6 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     const result = await sp.postReceipt(agentApiKey, {
       attestationHash,
       profileId: PROFILE_ID,
-      path: EXEC_PATH,
       action: 'charge',
       amount: 20,
     });
@@ -259,7 +253,6 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     const result = await sp.postReceipt(agentApiKey, {
       attestationHash,
       profileId: PROFILE_ID,
-      path: EXEC_PATH,
       action: 'charge',
       amount: 5,
     });

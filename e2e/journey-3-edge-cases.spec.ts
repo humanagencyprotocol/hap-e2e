@@ -54,8 +54,8 @@ test.describe.serial('Journey 3: Edge Cases', () => {
       headers: { 'x-api-key': apiKey },
       data: {
         profile_id: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4',
-        path: 'charge-routine', domain: 'finance', did,
-        bounds: { profile: 'charge', path: 'charge-routine', amount_max: 100, amount_daily_max: 500, amount_monthly_max: 5000, transaction_count_daily_max: 20 },
+        domain: 'finance', did,
+        bounds: { profile: 'charge', amount_max: 100, amount_daily_max: 500, amount_monthly_max: 5000, transaction_count_daily_max: 20 },
         context_hash: 'sha256:' + '0'.repeat(64),
         gate_content_hashes: { problem: 'sha256:' + 'a'.repeat(64), objective: 'sha256:' + 'b'.repeat(64), tradeoffs: 'sha256:' + 'c'.repeat(64) },
         execution_context_hash: 'sha256:' + 'd'.repeat(64),
@@ -68,14 +68,14 @@ test.describe.serial('Journey 3: Edge Cases', () => {
     // $40 succeeds (under group $50)
     const r1 = await request.post(`${SP_URL}/api/sp/receipt`, {
       headers: { 'x-api-key': apiKey },
-      data: { attestationHash: boundsHash, profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4', path: 'charge-routine', action: 'charge', executionContext: { amount: 40 }, amount: 40 },
+      data: { attestationHash: boundsHash, profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4', action: 'charge', executionContext: { amount: 40 }, amount: 40 },
     });
     expect(r1.ok()).toBe(true);
 
     // $60 fails (exceeds group $50, even though auth allows $100)
     const r2 = await request.post(`${SP_URL}/api/sp/receipt`, {
       headers: { 'x-api-key': apiKey },
-      data: { attestationHash: boundsHash, profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4', path: 'charge-routine', action: 'charge', executionContext: { amount: 60 }, amount: 60 },
+      data: { attestationHash: boundsHash, profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4', action: 'charge', executionContext: { amount: 60 }, amount: 60 },
     });
     expect(r2.status()).toBe(403);
   });
@@ -95,8 +95,8 @@ test.describe.serial('Journey 3: Edge Cases', () => {
       headers: { 'x-api-key': apiKey },
       data: {
         profile_id: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
-        path: 'customers-write', domain: 'owner', did,
-        bounds: { profile: 'customers', path: 'customers-write', write_daily_max: 10, delete_daily_max: 5 },
+        domain: 'owner', did,
+        bounds: { profile: 'customers', write_daily_max: 10, delete_daily_max: 5 },
         context_hash: 'sha256:' + '0'.repeat(64),
         gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
         execution_context_hash: 'sha256:' + 'd'.repeat(64),

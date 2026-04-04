@@ -25,13 +25,12 @@ const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
 /** v0.4 bounds key order (from the charge profile). */
-const BOUNDS_KEY_ORDER = ['profile', 'path', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
 /** v0.4 context key order. */
 const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
 
 const BOUNDS = {
   profile: PROFILE_ID,
-  path: EXEC_PATH,
   amount_max: 100,
   amount_daily_max: 500,
   amount_monthly_max: 5000,

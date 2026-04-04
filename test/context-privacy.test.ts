@@ -23,13 +23,12 @@ const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
 const EXEC_PATH = 'charge-routine';
 
 /** v0.4 bounds key order (from the charge profile). */
-const BOUNDS_KEY_ORDER = ['profile', 'path', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
 /** v0.4 context key order. */
 const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
 
 const BOUNDS = {
   profile: PROFILE_ID,
-  path: EXEC_PATH,
   amount_max: 100,
   amount_daily_max: 500,
   amount_monthly_max: 5000,
@@ -203,7 +202,6 @@ describe('Context Privacy', () => {
       const receiptRequest = {
         attestationHash: boundsHash,
         profileId: PROFILE_ID,
-        path: EXEC_PATH,
         action: 'charge',
         amount: 50,
         // executionContext field on the SP receipt endpoint accepts arbitrary KV for audit —

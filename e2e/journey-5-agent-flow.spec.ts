@@ -50,7 +50,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
       path: 'customers-write',
       domain: 'owner',
       did: userDid,
-      bounds: { profile: 'customers', path: 'customers-write', write_daily_max: 5, delete_daily_max: 2 },
+      bounds: { profile: 'customers', write_daily_max: 5, delete_daily_max: 2 },
       context_hash: 'sha256:' + '0'.repeat(64),
       gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
       execution_context_hash: 'sha256:' + 'd'.repeat(64),
@@ -146,7 +146,6 @@ test.describe.serial('Journey 5: Agent Flow', () => {
       data: {
         attestationHash: boundsHash,
         profileId: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
-        path: 'customers-write',
         action: 'create_contact',
         executionContext: { contact_type: 'customer' },
       },

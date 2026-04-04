@@ -22,12 +22,11 @@ const EXEC_PATH = 'customers-write';
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'path', 'write_daily_max', 'delete_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'write_daily_max', 'delete_daily_max'];
 const CONTEXT_KEY_ORDER = ['contact_type'];
 
 const BOUNDS = {
   profile: PROFILE_ID,
-  path: EXEC_PATH,
   write_daily_max: 10,
   delete_daily_max: 5,
 };

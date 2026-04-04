@@ -53,7 +53,7 @@ const EXEC_PATH = 'email-send';
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'path', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max'];
 const CONTEXT_KEY_ORDER = ['allowed_recipients', 'allowed_domains'];
 
 const TEST_RECIPIENT = 'andreas@sublin.app';
@@ -61,7 +61,6 @@ const TEST_DOMAIN = 'sublin.app';
 
 const BOUNDS = {
   profile: PROFILE_ID,
-  path: EXEC_PATH,
   recipient_max: 5,
   send_daily_max: 10,
 };
@@ -259,7 +258,6 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Send (authorized)', () => {
     const result = await sp.postReceipt(userApiKey, {
       attestationHash,
       profileId: PROFILE_ID,
-      path: EXEC_PATH,
       action: 'send',
       executionContext: {
         recipient_count: 1,
