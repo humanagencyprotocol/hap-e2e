@@ -46,7 +46,7 @@ test.describe.serial('Journey 8: SP Dashboard', () => {
     await page.goto(`${SP_URL}/dashboard/attestations`);
 
     // Should show at least one attestation
-    await expect(page.locator('text=charge')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('td:has-text("charge")').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=Active').or(page.locator('text=active')).first()).toBeVisible();
   });
 

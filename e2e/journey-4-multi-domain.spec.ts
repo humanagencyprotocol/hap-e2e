@@ -19,10 +19,10 @@ test.describe.serial('Journey 4: Multi-Domain Attestation', () => {
     await signInToSP(page, aliceKey);
     await page.goto(`${SP_URL}/dashboard/groups/new`);
     await page.fill('input#name', 'Multi-Domain Team');
-    await page.click('button:has-text("Create Group")');
+    await page.click('button:has-text("Create Team")');
     await expect(page.locator('input[readonly]')).toBeVisible({ timeout: 15_000 });
     inviteCode = await page.locator('input[readonly]').inputValue();
-    await page.click('text=Go to Group');
+    await page.click('text=Go to Team');
     groupId = page.url().split('/dashboard/groups/')[1]?.split('?')[0] ?? '';
   });
 
@@ -63,10 +63,7 @@ test.describe.serial('Journey 4: Multi-Domain Attestation', () => {
       headers: { 'x-api-key': aliceKey },
       data: {
         pathDomains: {
-          'github.com/humanagencyprotocol/hap-profiles/charge@0.4': {
-            'charge-routine': ['finance'],
-            'charge-reviewed': ['finance', 'compliance'],
-          },
+          'github.com/humanagencyprotocol/hap-profiles/charge@0.4': ['finance', 'compliance'],
         },
       },
     });

@@ -85,7 +85,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await handleOnboarding(page);
 
     await page.click('.sidebar-item:has-text("Pending Reviews")');
-    await expect(page.locator('h1:has-text("Proposals")')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('h1:has-text("Pending Reviews")')).toBeVisible({ timeout: 10_000 });
 
     // Should show the pending proposal
     await expect(page.locator('text=crm___create_contact')).toBeVisible({ timeout: 15_000 });

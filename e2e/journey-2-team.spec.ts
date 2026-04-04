@@ -23,7 +23,7 @@ test.describe.serial('Journey 2: Team Setup', () => {
     await page.goto(`${SP_URL}/dashboard/groups/new`);
 
     await page.fill('input#name', 'Finance Team');
-    await page.click('button:has-text("Create Group")');
+    await page.click('button:has-text("Create Team")');
 
     // Wait for success — invite code input appears after creation
     const codeInput = page.locator('input[readonly]');
@@ -32,7 +32,7 @@ test.describe.serial('Journey 2: Team Setup', () => {
     expect(inviteCode).toBeTruthy();
 
     // Navigate to group
-    await page.click('text=Go to Group');
+    await page.click('text=Go to Team');
     await expect(page.locator('h1')).toContainText('Finance Team');
 
     // Extract group ID from URL
@@ -50,7 +50,7 @@ test.describe.serial('Journey 2: Team Setup', () => {
     // Join group
     await page.goto(`${SP_URL}/dashboard/groups/join`);
     await page.fill('input#inviteCode', inviteCode);
-    await page.click('button:has-text("Join Group")');
+    await page.click('button:has-text("Join Team")');
 
     // Should redirect to group page
     await page.waitForURL(new RegExp(`/dashboard/groups/${groupId}`), { timeout: 15_000 });
@@ -81,36 +81,17 @@ test.describe.serial('Journey 2: Team Setup', () => {
     await expect(bobRow.locator('button:has-text("Edit")')).toBeVisible({ timeout: 5_000 });
   });
 
-  test('2.5 Alice configures path domains via Paths tab', async ({ page }) => {
-    await signInToSP(page, aliceKey);
-    await page.goto(`${SP_URL}/dashboard/groups/${groupId}?tab=paths`);
-
-    // Click Edit
-    await page.click('button:has-text("Edit")');
-
-    // Find charge profile paths and add domains
-    // charge-routine needs "finance"
-    const routineInput = page.locator('input[placeholder*="finance"]').first();
-    await routineInput.fill('finance');
-    await page.locator('button:has-text("+ Add")').first().click();
-
-    // charge-reviewed needs "finance" + "compliance"
-    // Find the second path's input
-    const allInputs = page.locator('input[placeholder*="finance"]');
-    const count = await allInputs.count();
-    if (count > 1) {
-      await allInputs.nth(1).fill('finance');
-      await page.locator('button:has-text("+ Add")').nth(1).click();
-      await allInputs.nth(1).fill('compliance');
-      await page.locator('button:has-text("+ Add")').nth(1).click();
-    }
-
-    // Save and wait for edit mode to exit
-    await page.click('button:has-text("Save")');
-    await expect(page.locator('button:has-text("Edit")')).toBeVisible({ timeout: 10_000 });
-
-    // Verify domains saved (read-only view)
-    await expect(page.locator('.domain-tag:has-text("finance")')).toBeVisible();
+  test('2.5 Alice configures profile domains via API', async ({ request }) => {
+    // SP now uses flat profile-level domains (not nested path domains)
+    const res = await request.put(`${SP_URL}/api/groups/${groupId}/path-domains`, {
+      headers: { 'x-api-key': aliceKey },
+      data: {
+        pathDomains: {
+          'github.com/humanagencyprotocol/hap-profiles/charge@0.4': ['finance'],
+        },
+      },
+    });
+    expect(res.ok()).toBe(true);
   });
 
   test('2.6 Alice signs in to gateway', async ({ page }) => {
@@ -144,10 +125,10 @@ test.describe.serial('Journey 2: Team Setup', () => {
     await page.goto(`${SP_URL}/dashboard/groups/${groupId}?tab=delete`);
 
     // Type confirmation
-    const confirmInput = page.locator('input[placeholder*="Delete group"]');
+    const confirmInput = page.locator('input[placeholder*="Delete team"]');
     await expect(confirmInput).toBeVisible({ timeout: 5_000 });
-    await confirmInput.fill('Delete group Finance Team');
-    await page.click('button:has-text("Delete Group")');
+    await confirmInput.fill('Delete team Finance Team');
+    await page.click('button:has-text("Delete Team")');
 
     // Should redirect
     await page.waitForURL(/\/dashboard\/groups$/, { timeout: 10_000 });

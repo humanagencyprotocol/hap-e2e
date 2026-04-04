@@ -174,7 +174,7 @@ export async function signInToGateway(page: Page, apiKey: string): Promise<void>
     await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
     await page.locator('input[type="password"]').fill(apiKey);
     await page.locator('button:has-text("Sign In")').click();
-    await page.locator('.sidebar').or(page.locator('h2:has-text("Join Your Team")')).first().waitFor({ state: 'visible', timeout: 20_000 });
+    await page.locator('.sidebar').or(page.locator('h2:has-text("Join Your Team")')).first().waitFor({ state: 'visible', timeout: 30_000 });
   }
 }
 

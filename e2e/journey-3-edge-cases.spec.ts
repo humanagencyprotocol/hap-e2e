@@ -40,7 +40,7 @@ test.describe.serial('Journey 3: Edge Cases', () => {
 
     await request.put(`${SP_URL}/api/groups/${groupId}/path-domains`, {
       headers: { 'x-api-key': apiKey },
-      data: { pathDomains: { 'github.com/humanagencyprotocol/hap-profiles/charge@0.4': { 'charge-routine': ['finance'] } } },
+      data: { pathDomains: { 'github.com/humanagencyprotocol/hap-profiles/charge@0.4': ['finance'] } },
     });
 
     // Set group limit: $50 per tx
@@ -57,7 +57,7 @@ test.describe.serial('Journey 3: Edge Cases', () => {
         domain: 'finance', did,
         bounds: { profile: 'charge', amount_max: 100, amount_daily_max: 500, amount_monthly_max: 5000, transaction_count_daily_max: 20 },
         context_hash: 'sha256:' + '0'.repeat(64),
-        gate_content_hashes: { problem: 'sha256:' + 'a'.repeat(64), objective: 'sha256:' + 'b'.repeat(64), tradeoffs: 'sha256:' + 'c'.repeat(64) },
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
         execution_context_hash: 'sha256:' + 'd'.repeat(64),
         group_id: groupId,
       },
