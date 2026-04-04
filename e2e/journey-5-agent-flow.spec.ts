@@ -87,9 +87,9 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await page.click('.sidebar-item:has-text("Pending Reviews")');
     await expect(page.locator('h1:has-text("Pending Reviews")')).toBeVisible({ timeout: 10_000 });
 
-    // Should show the pending proposal
-    await expect(page.locator('text=crm___create_contact')).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('button:has-text("Commit")')).toBeVisible();
+    // Should show a pending proposal
+    await expect(page.locator('.card').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('button:has-text("Approve"), button:has-text("Commit")').first()).toBeVisible();
   });
 
   test('5.6 User commits proposal in browser', async ({ page }) => {

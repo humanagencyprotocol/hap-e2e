@@ -1,11 +1,11 @@
 /**
- * Shared fixtures for Playwright browser e2e tests.
+ * Shared fixtures for Playwright e2e tests.
  *
- * Starts SP + gateway (MCP server + control plane) as child processes.
- * All auth happens through browser forms — no API shortcuts.
+ * Global setup starts SP + gateway. Tests use ALICE/BOB (registered on first use)
+ * and helpers for common operations.
  */
 
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type Page, type Browser, type APIRequestContext } from '@playwright/test';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,6 +28,45 @@ export const GW_MCP_PORT = 19430;
 export const SP_URL = `http://localhost:${SP_PORT}`;
 export const GW_URL = `http://localhost:${GW_CP_PORT}`;
 export const GW_MCP_URL = `http://localhost:${GW_MCP_PORT}`;
+
+// ─── Test users ──────────────────────────────────────────────────────────────
+
+export const ALICE = { name: 'Alice', apiKey: '', id: '', did: '', email: 'alice@test.com' };
+export const BOB = { name: 'Bob', apiKey: '', id: '', did: '', email: 'bob@test.com' };
+
+let usersRegistered = false;
+
+async function ensureUsersRegistered(): Promise<void> {
+  if (usersRegistered) return;
+
+  for (const user of [ALICE, BOB]) {
+    const res = await fetch(`${SP_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: user.name, email: `${user.name.toLowerCase()}-${Date.now()}@test.com` }),
+    });
+    if (!res.ok) throw new Error(`Failed to register ${user.name}: ${res.status}`);
+    const data = await res.json() as { apiKey: string; user: { id: string; did: string; email: string } };
+    user.apiKey = data.apiKey;
+    user.id = data.user.id;
+    user.did = data.user.did;
+    user.email = data.user.email;
+  }
+
+  usersRegistered = true;
+}
+
+// ─── Profile IDs ─────────────────────────────────────────────────────────────
+
+export const PROFILE_IDS = [
+  'github.com/humanagencyprotocol/hap-profiles/charge@0.4',
+  'github.com/humanagencyprotocol/hap-profiles/purchase@0.4',
+  'github.com/humanagencyprotocol/hap-profiles/email@0.4',
+  'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
+  'github.com/humanagencyprotocol/hap-profiles/schedule@0.4',
+  'github.com/humanagencyprotocol/hap-profiles/publish@0.4',
+  'github.com/humanagencyprotocol/hap-profiles/records@0.4',
+] as const;
 
 // ─── Process management ──────────────────────────────────────────────────────
 
@@ -52,7 +91,6 @@ async function waitFor(url: string, ms: number): Promise<void> {
 export async function startServers(): Promise<void> {
   if (serversReady) return;
 
-  // Build gateway
   console.error('[E2E] Building gateway...');
   execSync('pnpm build', { cwd: GW_DIR, stdio: 'pipe', timeout: 90_000 });
   console.error('[E2E] Build complete.');
@@ -74,7 +112,6 @@ export async function startServers(): Promise<void> {
   await waitFor(`${SP_URL}/api/sp/pubkey`, 60_000);
   console.error('[E2E] SP ready.');
 
-  // Temp data dir
   dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-'));
 
   // Start gateway MCP server
@@ -113,6 +150,10 @@ export async function startServers(): Promise<void> {
   await waitFor(`${GW_URL}/health`, 15_000);
   console.error('[E2E] Control plane ready.');
 
+  // Register test users
+  await ensureUsersRegistered();
+  console.error('[E2E] Test users registered.');
+
   serversReady = true;
 }
 
@@ -134,27 +175,35 @@ export async function stopServers(): Promise<void> {
 // ─── Browser helpers ─────────────────────────────────────────────────────────
 
 /**
- * Register a new user via the SP API directly (HAP_TEST_DIRECT_REGISTER mode).
- * Returns the API key from the registration response.
+ * Create an authenticated page — logs in via SP API session endpoint,
+ * sets the session cookie, and returns the page.
  */
-export async function registerOnSP(page: Page, name: string): Promise<string> {
-  const email = `${name.toLowerCase().replace(/\s/g, '')}-${Date.now()}@test.com`;
+export async function authenticatedPage(browser: Browser, apiKey: string, baseURL?: string): Promise<Page> {
+  const url = baseURL ?? SP_URL;
+  const context = await browser.newContext({ baseURL: url });
+  const page = await context.newPage();
 
-  // In HAP_TEST_DIRECT_REGISTER mode, the register endpoint creates the account
-  // immediately (no email verification or waitlist) and returns the API key.
-  const res = await page.request.post(`${SP_URL}/api/auth/register`, {
-    data: { name, email },
-    headers: { 'Content-Type': 'application/json' },
+  // Create session via API
+  const res = await page.request.post(`${url}/api/auth/session`, {
+    headers: { 'X-API-Key': apiKey },
   });
+  if (!res.ok()) throw new Error(`Login failed: ${res.status()}`);
 
-  if (!res.ok()) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(`Registration failed (${res.status()}): ${JSON.stringify(body)}`);
+  // Extract session cookie from response headers
+  const cookies = res.headers()['set-cookie'];
+  if (cookies) {
+    const match = cookies.match(/hap-session=([^;]+)/);
+    if (match) {
+      await context.addCookies([{
+        name: 'hap-session',
+        value: match[1],
+        domain: new URL(url).hostname,
+        path: '/',
+      }]);
+    }
   }
 
-  const data = await res.json();
-  if (!data.apiKey) throw new Error('No API key in registration response');
-  return data.apiKey as string;
+  return page;
 }
 
 /**
@@ -165,29 +214,14 @@ export async function signInToGateway(page: Page, apiKey: string): Promise<void>
   await page.locator('input[type="password"]').fill(apiKey);
   await page.locator('button:has-text("Sign In")').click();
 
-  // Wait for sidebar or onboarding. If login hangs, retry once.
   try {
-    await page.locator('.sidebar').or(page.locator('h2:has-text("Join Your Team")')).first().waitFor({ state: 'visible', timeout: 10_000 });
+    await page.locator('.sidebar').first().waitFor({ state: 'visible', timeout: 10_000 });
   } catch {
-    // Login may have hung — reload and try again
     console.error('[E2E] Gateway login slow, retrying...');
     await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
     await page.locator('input[type="password"]').fill(apiKey);
     await page.locator('button:has-text("Sign In")').click();
-    await page.locator('.sidebar').or(page.locator('h2:has-text("Join Your Team")')).first().waitFor({ state: 'visible', timeout: 30_000 });
-  }
-}
-
-/**
- * Handle onboarding if shown (only appears in team mode — skip to dashboard).
- * In personal mode the gateway skips onboarding entirely.
- */
-export async function handleOnboarding(page: Page): Promise<void> {
-  if (page.url().includes('/onboarding')) {
-    // Onboarding in team mode requires joining/creating a group.
-    // For personal-mode tests this should not be reached.
-    // If it is, wait for a redirect (e.g. auto-skip) or proceed.
-    await page.waitForURL(url => !url.toString().includes('/onboarding'), { timeout: 10_000 });
+    await page.locator('.sidebar').first().waitFor({ state: 'visible', timeout: 30_000 });
   }
 }
 
@@ -202,20 +236,14 @@ export async function signInToSP(page: Page, apiKey: string): Promise<void> {
   await page.waitForURL(url => url.toString().includes('/dashboard'), { timeout: 15_000 });
 }
 
-/**
- * Navigate through the gate wizard and create an authorization.
- * Assumes the page is already on the gateway and logged in.
- *
- * New wizard flow (v0.4):
- *   Authorize page → profile card "Authorize" button
- *   → /agent/gate: Bounds (stepper) → intent textarea → "Continue to Review"
- *   → /agent/review: commitment toggle + title input → "Authorize" button
- *   → success card "Authorization Created"
- */
+export async function handleOnboarding(page: Page): Promise<void> {
+  if (page.url().includes('/onboarding')) {
+    await page.waitForURL(url => !url.toString().includes('/onboarding'), { timeout: 10_000 });
+  }
+}
+
 /**
  * Activate an integration through the browser UI.
- * Navigates to integrations page, clicks Activate on the matching card.
- * The page must already be logged in to the gateway.
  */
 export async function activateIntegration(page: Page, integrationName: string): Promise<void> {
   await page.click('.sidebar-item:has-text("Integrations")');
@@ -224,78 +252,16 @@ export async function activateIntegration(page: Page, integrationName: string): 
   const card = page.locator('.card', { has: page.locator(`text=${integrationName}`) }).first();
   await card.scrollIntoViewIfNeeded();
 
-  // Click the Activate button (text is "Activate {name}" for personalDefault integrations)
   const activateBtn = card.locator('button:has-text("Activate")');
   await activateBtn.waitFor({ state: 'visible', timeout: 10_000 });
   await activateBtn.click();
-
-  // Wait for "Running" status — npx downloads may take a while
   await card.locator('text=Running').waitFor({ state: 'visible', timeout: 60_000 });
 }
 
-export async function createAuthorization(
-  page: Page,
-  opts: {
-    /** Profile short name to match in the card, e.g. "records" or "customers" */
-    profileName: string;
-    bounds: Record<string, string>; // field label → numeric value (passed as string)
-    intent: string;
-    title: string;
-    commitMode: 'now' | 'per-action';
-  },
-): Promise<void> {
-  // Navigate to Authorize via sidebar
-  await page.click('.sidebar-item:has-text("Authorize")');
-  await page.waitForSelector('.profile-grid', { timeout: 10_000 });
-
-  // Click the Authorize button on the matching profile card
-  const profileCard = page.locator('.card', { has: page.locator(`text=${opts.profileName}`) }).first();
-  await profileCard.locator('button:has-text("Authorize")').click();
-
-  // Wait for /agent/gate (bounds step)
-  await page.waitForURL(url => url.toString().includes('/agent/gate'), { timeout: 10_000 });
-
-  // Bounds step: click stepper + buttons to set values
-  for (const [, value] of Object.entries(opts.bounds)) {
-    const numValue = parseInt(value, 10);
-    const plusBtn = page.locator('.stepper-btn').last();
-    for (let i = 0; i < numValue; i++) {
-      await plusBtn.click();
-    }
-  }
-  await page.locator('button:has-text("Next")').click();
-
-  // Intent step (step 3 in the wizard)
-  await page.waitForSelector('textarea', { timeout: 5_000 });
-  await page.fill('textarea', opts.intent);
-  await page.locator('button:has-text("Continue to Review")').click();
-
-  // Wait for /agent/review
-  await page.waitForURL(url => url.toString().includes('/agent/review'), { timeout: 10_000 });
-
-  // Review: choose commitment mode
-  if (opts.commitMode === 'per-action') {
-    await page.locator('button', { hasText: 'Review Each Action' }).click();
-  } else {
-    await page.locator('button', { hasText: 'Automatic' }).click();
-  }
-
-  // Fill required title
-  await page.locator('input[placeholder*="e.g."]').fill(opts.title);
-
-  // Click Authorize button — it's the last button containing "Authorize" on the page
-  // (the sidebar has a link, not a button, so button selector is safe)
-  const authorizeBtns = page.locator('button', { hasText: /^Authorize/ });
-  await authorizeBtns.last().click();
-
-  // Wait for success card
-  await page.locator('text=Authorization Created').or(page.locator('text=Attestation Committed')).first().waitFor({ state: 'visible', timeout: 15_000 });
-}
-
-// ─── SP API helpers (for setup that doesn't have UI) ─────────────────────
+// ─── SP API helpers ──────────────────────────────────────────────────────────
 
 export async function spApiAttest(
-  request: import('@playwright/test').APIRequestContext,
+  request: APIRequestContext,
   apiKey: string,
   data: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
@@ -311,7 +277,7 @@ export async function spApiAttest(
 }
 
 export async function spApiReceipt(
-  request: import('@playwright/test').APIRequestContext,
+  request: APIRequestContext,
   apiKey: string,
   data: Record<string, unknown>,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -321,19 +287,6 @@ export async function spApiReceipt(
   });
   const body = await res.json().catch(() => ({}));
   return { status: res.status(), body };
-}
-
-// ─── Gateway internal API helpers ────────────────────────────────────────
-
-export async function gatewayConfigureSession(
-  request: import('@playwright/test').APIRequestContext,
-  apiKey: string,
-): Promise<void> {
-  // Login via control plane to establish session
-  const res = await request.post(`${GW_URL}/auth/login`, {
-    data: { apiKey },
-  });
-  if (!res.ok()) throw new Error(`Gateway login failed: ${res.status()}`);
 }
 
 export const test = base;

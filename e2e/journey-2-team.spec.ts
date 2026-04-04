@@ -97,13 +97,13 @@ test.describe.serial('Journey 2: Team Setup', () => {
   test('2.6 Alice signs in to gateway', async ({ page }) => {
     await signInToGateway(page, aliceKey);
     await handleOnboarding(page);
-    await expect(page.locator('text=Dashboard')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.sidebar-item:has-text("Dashboard")')).toBeVisible({ timeout: 5_000 });
   });
 
   test('2.7 Bob signs in to gateway', async ({ page }) => {
     await signInToGateway(page, bobKey);
     await handleOnboarding(page);
-    await expect(page.locator('text=Dashboard')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.sidebar-item:has-text("Dashboard")')).toBeVisible({ timeout: 5_000 });
   });
 
   test('2.8 Group limits configured via SP dashboard', async ({ page }) => {

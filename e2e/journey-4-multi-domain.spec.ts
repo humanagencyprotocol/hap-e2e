@@ -31,7 +31,7 @@ test.describe.serial('Journey 4: Multi-Domain Attestation', () => {
     await signInToSP(page, bobKey);
     await page.goto(`${SP_URL}/dashboard/groups/join`);
     await page.fill('input#inviteCode', inviteCode);
-    await page.click('button:has-text("Join Group")');
+    await page.click('button:has-text("Join Team")');
     await expect(page.locator('h1:has-text("Multi-Domain Team")')).toBeVisible({ timeout: 15_000 });
   });
 

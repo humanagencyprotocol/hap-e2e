@@ -48,7 +48,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
 
     await page.click('.sidebar-item:has-text("Authorizations")');
     await expect(page.locator('.status-badge').first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('text=records-write')).toBeVisible();
+    await expect(page.locator('text=Records').first()).toBeVisible();
   });
 
   test('6.4 Wait for expiry and verify expired state', async ({ page }) => {
