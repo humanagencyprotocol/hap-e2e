@@ -296,6 +296,83 @@ export async function activateIntegration(page: Page, integrationName: string): 
   await card.locator('text=Running').waitFor({ state: 'visible', timeout: 60_000 });
 }
 
+/**
+ * Register a new user via the SP API (HAP_TEST_DIRECT_REGISTER mode).
+ * Returns the plain API key.
+ */
+export async function registerOnSP(page: Page, name: string): Promise<string> {
+  const email = `${name.toLowerCase().replace(/\s/g, '')}-${Date.now()}@test.com`;
+  const res = await page.request.post(`${SP_URL}/api/auth/register`, {
+    data: { name, email },
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok()) throw new Error(`Registration failed: ${res.status()}`);
+  const data = await res.json();
+  if (!data.apiKey) throw new Error('No API key in registration response');
+  return data.apiKey as string;
+}
+
+/**
+ * Navigate through the gate wizard and create an authorization.
+ * Page must be logged into the gateway with integrations running.
+ */
+export async function createAuthorization(
+  page: Page,
+  opts: {
+    profileName: string;
+    bounds: Record<string, string>;
+    intent: string;
+    title: string;
+    commitMode: 'now' | 'per-action';
+  },
+): Promise<void> {
+  // Navigate to Authorize via sidebar
+  await page.click('.sidebar-item:has-text("Authorize")');
+  await page.waitForSelector('.profile-grid', { timeout: 10_000 });
+
+  // Click the Authorize button on the matching profile card
+  const profileCard = page.locator('.card', { has: page.locator(`text=${opts.profileName}`) }).first();
+  await profileCard.locator('button:has-text("Authorize")').click();
+
+  // Wait for /agent/gate (bounds step)
+  await page.waitForURL(url => url.toString().includes('/agent/gate'), { timeout: 10_000 });
+
+  // Bounds step: click stepper + buttons to set values
+  for (const [, value] of Object.entries(opts.bounds)) {
+    const numValue = parseInt(value, 10);
+    const plusBtn = page.locator('.stepper-btn').last();
+    for (let i = 0; i < numValue; i++) {
+      await plusBtn.click();
+    }
+  }
+  await page.locator('button:has-text("Next")').click();
+
+  // Intent step
+  await page.waitForSelector('textarea', { timeout: 5_000 });
+  await page.fill('textarea', opts.intent);
+  await page.locator('button:has-text("Continue to Review")').click();
+
+  // Wait for /agent/review
+  await page.waitForURL(url => url.toString().includes('/agent/review'), { timeout: 10_000 });
+
+  // Review: choose commitment mode
+  if (opts.commitMode === 'per-action') {
+    await page.locator('button', { hasText: 'Review Each Action' }).click();
+  } else {
+    await page.locator('button', { hasText: 'Automatic' }).click();
+  }
+
+  // Fill title
+  await page.locator('input[placeholder*="e.g."]').fill(opts.title);
+
+  // Click Authorize button
+  const authorizeBtns = page.locator('button', { hasText: /^Authorize/ });
+  await authorizeBtns.last().click();
+
+  // Wait for success
+  await page.locator('text=Authorization Created').or(page.locator('text=Attestation Committed')).first().waitFor({ state: 'visible', timeout: 15_000 });
+}
+
 // ─── SP API helpers ──────────────────────────────────────────────────────────
 
 export async function spApiAttest(
