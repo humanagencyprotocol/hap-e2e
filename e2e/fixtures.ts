@@ -222,13 +222,15 @@ export async function activateIntegration(page: Page, integrationName: string): 
   await page.waitForSelector('.card', { timeout: 10_000 });
 
   const card = page.locator('.card', { has: page.locator(`text=${integrationName}`) }).first();
-  const activateBtn = card.locator('button:has-text("Activate"), button:has-text("Start")');
+  await card.scrollIntoViewIfNeeded();
 
-  if (await activateBtn.isVisible({ timeout: 3_000 })) {
-    await activateBtn.click();
-    // Wait for "Running" status
-    await card.locator('text=Running').waitFor({ state: 'visible', timeout: 30_000 });
-  }
+  // Click the Activate button (text is "Activate {name}" for personalDefault integrations)
+  const activateBtn = card.locator('button:has-text("Activate")');
+  await activateBtn.waitFor({ state: 'visible', timeout: 10_000 });
+  await activateBtn.click();
+
+  // Wait for "Running" status — npx downloads may take a while
+  await card.locator('text=Running').waitFor({ state: 'visible', timeout: 60_000 });
 }
 
 export async function createAuthorization(
@@ -281,11 +283,13 @@ export async function createAuthorization(
   // Fill required title
   await page.locator('input[placeholder*="e.g."]').fill(opts.title);
 
-  // Click Authorize (disabled until title is filled)
-  await page.locator('button.btn-primary.btn-lg').click();
+  // Click Authorize button — it's the last button containing "Authorize" on the page
+  // (the sidebar has a link, not a button, so button selector is safe)
+  const authorizeBtns = page.locator('button', { hasText: /^Authorize/ });
+  await authorizeBtns.last().click();
 
   // Wait for success card
-  await page.locator('text=Authorization Created').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('text=Authorization Created').or(page.locator('text=Attestation Committed')).first().waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 // ─── SP API helpers (for setup that doesn't have UI) ─────────────────────
