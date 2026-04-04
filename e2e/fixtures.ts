@@ -212,6 +212,25 @@ export async function signInToSP(page: Page, apiKey: string): Promise<void> {
  *   → /agent/review: commitment toggle + title input → "Authorize" button
  *   → success card "Authorization Created"
  */
+/**
+ * Activate an integration through the browser UI.
+ * Navigates to integrations page, clicks Activate on the matching card.
+ * The page must already be logged in to the gateway.
+ */
+export async function activateIntegration(page: Page, integrationName: string): Promise<void> {
+  await page.click('.sidebar-item:has-text("Integrations")');
+  await page.waitForSelector('.card', { timeout: 10_000 });
+
+  const card = page.locator('.card', { has: page.locator(`text=${integrationName}`) }).first();
+  const activateBtn = card.locator('button:has-text("Activate"), button:has-text("Start")');
+
+  if (await activateBtn.isVisible({ timeout: 3_000 })) {
+    await activateBtn.click();
+    // Wait for "Running" status
+    await card.locator('text=Running').waitFor({ state: 'visible', timeout: 30_000 });
+  }
+}
+
 export async function createAuthorization(
   page: Page,
   opts: {

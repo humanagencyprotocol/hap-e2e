@@ -7,7 +7,7 @@
  * Each test gets a fresh page, so we must login + do all checks in one test,
  * navigating via sidebar clicks (SPA navigation) not page.goto (full reload).
  */
-import { test, expect, registerOnSP, signInToGateway, handleOnboarding, createAuthorization, SP_URL, GW_URL } from './fixtures';
+import { test, expect, registerOnSP, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL } from './fixtures';
 
 test.describe.serial('Journey 1: Personal User', () => {
   let apiKey: string;
@@ -50,7 +50,16 @@ test.describe.serial('Journey 1: Personal User', () => {
     await page.locator('.profile-grid, .card').first().waitFor({ state: 'visible', timeout: 10_000 });
   });
 
-  test('1.3 Gateway: create authorization with Automatic commit', async ({ page }) => {
+  test('1.3 Gateway: activate integrations', async ({ page }) => {
+    await signInToGateway(page, apiKey);
+    await handleOnboarding(page);
+
+    // Activate personal default integrations (CRM + Records)
+    await activateIntegration(page, 'Records');
+    await activateIntegration(page, 'CRM');
+  });
+
+  test('1.4 Gateway: create authorization with Automatic commit', async ({ page }) => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
@@ -70,7 +79,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     await expect(page.locator('.status-badge:has-text("Active")')).toBeVisible({ timeout: 10_000 });
   });
 
-  test('1.4 Gateway: create authorization with Review Each Action commit', async ({ page }) => {
+  test('1.5 Gateway: create authorization with Review Each Action commit', async ({ page }) => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
@@ -91,7 +100,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     await expect(page.locator('text=Review Mode').or(page.locator('text=per-action'))).toBeVisible({ timeout: 10_000 });
   });
 
-  test('1.5 Gateway: revoke authorization', async ({ page }) => {
+  test('1.6 Gateway: revoke authorization', async ({ page }) => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
@@ -106,7 +115,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     }
   });
 
-  test('1.6 Mobile menu works', async ({ browser }) => {
+  test('1.7 Mobile menu works', async ({ browser }) => {
     const context = await browser.newContext({
       viewport: { width: 375, height: 812 },
     });
