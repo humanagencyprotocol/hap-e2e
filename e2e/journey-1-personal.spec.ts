@@ -97,7 +97,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     // Navigate to authorizations to verify Review Mode
     await page.click('button:has-text("Back to Dashboard")');
     await page.click('.sidebar-item:has-text("Authorizations")');
-    await expect(page.locator('text=Review Mode').or(page.locator('text=per-action'))).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Review Mode', { exact: true })).toBeVisible({ timeout: 10_000 });
   });
 
   test('1.6 Gateway: revoke authorization', async ({ page }) => {
