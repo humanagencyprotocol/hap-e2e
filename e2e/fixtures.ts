@@ -198,11 +198,34 @@ export async function authenticatedPage(browser: Browser, apiKey: string, baseUR
   const context = await browser.newContext({ baseURL: url });
   const page = await context.newPage();
 
-  // Create session via API
-  const res = await page.request.post(`${url}/api/auth/session`, {
+  // Create session via API — if 401, re-register with fresh email
+  // (Next.js dev recompilation may reset in-memory store)
+  let res = await page.request.post(`${url}/api/auth/session`, {
     headers: { 'X-API-Key': apiKey },
   });
-  if (!res.ok()) throw new Error(`Login failed: ${res.status()}`);
+  if (!res.ok()) {
+    console.error(`[E2E] Session 401 for key ${apiKey.slice(0,8)}..., re-registering...`);
+    // Find which user this key belongs to and re-register with fresh email
+    const user = apiKey === ALICE.apiKey ? ALICE : BOB;
+    const regRes = await fetch(`${SP_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: user.name, email: `${user.name.toLowerCase()}-${Date.now()}@test.com` }),
+    });
+    if (regRes.ok) {
+      const data = await regRes.json() as { apiKey: string; user: { id: string; did: string; email: string } };
+      user.apiKey = data.apiKey;
+      user.id = data.user.id;
+      user.did = data.user.did;
+      user.email = data.user.email;
+      writeFileSync(join(__dirname, '.test-users.json'), JSON.stringify({ alice: ALICE, bob: BOB }));
+    }
+    // Retry with new key
+    res = await page.request.post(`${url}/api/auth/session`, {
+      headers: { 'X-API-Key': user.apiKey },
+    });
+    if (!res.ok()) throw new Error(`Login failed after re-register: ${res.status()}`);
+  }
 
   // Extract session cookie from response headers
   const cookies = res.headers()['set-cookie'];
