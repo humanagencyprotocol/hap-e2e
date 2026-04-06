@@ -55,7 +55,6 @@ function sleep(ms: number): Promise<void> {
 interface ProfileTestConfig {
   profileId: string;
   profileShort: string;
-  path: string;
   boundsKeyOrder: string[];
   contextKeyOrder: string[];
   bounds: Record<string, unknown>;
@@ -86,7 +85,6 @@ const PROFILES: ProfileTestConfig[] = [
   {
     profileId: 'github.com/humanagencyprotocol/hap-profiles/charge@0.4',
     profileShort: 'charge',
-    path: 'charge-routine',
     boundsKeyOrder: ['profile', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'],
     contextKeyOrder: ['currency', 'action_type'],
     bounds: {
@@ -121,7 +119,6 @@ const PROFILES: ProfileTestConfig[] = [
   {
     profileId: 'github.com/humanagencyprotocol/hap-profiles/purchase@0.4',
     profileShort: 'purchase',
-    path: 'purchase-routine',
     boundsKeyOrder: ['profile', 'spend_max', 'spend_daily_max', 'spend_monthly_max', 'transaction_count_daily_max'],
     contextKeyOrder: ['currency', 'category', 'allowed_vendors'],
     bounds: {
@@ -155,7 +152,6 @@ const PROFILES: ProfileTestConfig[] = [
   {
     profileId: 'github.com/humanagencyprotocol/hap-profiles/email@0.4',
     profileShort: 'email',
-    path: 'email-send',
     boundsKeyOrder: ['profile', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max'],
     contextKeyOrder: ['allowed_recipients', 'allowed_domains'],
     bounds: {
@@ -195,7 +191,6 @@ const PROFILES: ProfileTestConfig[] = [
   {
     profileId: 'github.com/humanagencyprotocol/hap-profiles/schedule@0.4',
     profileShort: 'schedule',
-    path: 'schedule-book',
     boundsKeyOrder: ['profile', 'booking_daily_max', 'booking_duration_max', 'lookahead_days_max'],
     contextKeyOrder: ['allowed_calendars', 'allowed_attendees', 'allowed_domains'],
     bounds: {
@@ -228,7 +223,6 @@ const PROFILES: ProfileTestConfig[] = [
   {
     profileId: 'github.com/humanagencyprotocol/hap-profiles/publish@0.4',
     profileShort: 'publish',
-    path: 'publish-post',
     boundsKeyOrder: ['profile', 'post_daily_max', 'post_monthly_max'],
     contextKeyOrder: ['allowed_platforms', 'content_type', 'audience'],
     bounds: {
@@ -260,7 +254,6 @@ const PROFILES: ProfileTestConfig[] = [
   {
     profileId: 'github.com/humanagencyprotocol/hap-profiles/records@0.4',
     profileShort: 'records',
-    path: 'records-write',
     boundsKeyOrder: ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access'],
     contextKeyOrder: [],
     bounds: {
@@ -357,7 +350,6 @@ for (const profile of PROFILES) {
         context_hash: contextHash,
         domain: 'owner',
         did: user.did,
-        path: profile.path,
         gate_content_hashes: gateContentHashes,
         execution_context_hash: executionContextHash,
       });
@@ -375,7 +367,7 @@ for (const profile of PROFILES) {
       const gateContent = profile.gateStyle === 'legacy' ? GATE_CONTENT_LEGACY : GATE_CONTENT_V4;
       await gw.pushGateContent(
         { boundsHash, contextHash, context: profile.context as Record<string, string | number> },
-        profile.path,
+        profile.id,
         gateContent,
       );
     });

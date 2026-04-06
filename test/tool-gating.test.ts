@@ -84,7 +84,7 @@ describe('Tool Gating', () => {
     let blocked = false;
     try {
       const result = await mcpClient.callTool({
-        name: 'crm___create_contact',
+        name: 'crm__create_contact',
         arguments: { name: 'Test' },
       });
       // Tool is disabled — either throws or returns error
@@ -102,12 +102,11 @@ describe('Tool Gating', () => {
     const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
     const contextHash = computeBoundsHash({}, []);
     const gateHashes = hashGateContent({ intent: 'test' });
-    const ecHash = hashExecutionContext({ profile, path, domain: 'owner' });
+    const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
     // Attest
     await sp.submitAttestation(apiKey, {
       profile_id: profile,
-      path,
       domain: 'owner',
       did: userDid,
       bounds,
@@ -124,16 +123,24 @@ describe('Tool Gating', () => {
       { intent: 'test' },
     );
 
-    // Wait for tool refresh
-    await new Promise(r => setTimeout(r, 3_000));
+    // Wait for gate content to be processed and tools to refresh
+    await new Promise(r => setTimeout(r, 5_000));
 
     // Re-connect to get updated tool list
     await mcpClient.close();
     mcpClient = await connectMCP();
 
+    // Check tools are now available
+    const tools = await mcpClient.listTools();
+    const crmTools = tools.tools.filter(t => t.name.startsWith('crm__'));
+    if (crmTools.length === 0) {
+      console.error('No CRM tools enabled. Total tools:', tools.tools.length,
+        'names:', tools.tools.map(t => t.name).join(', '));
+    }
+
     // CRM read tool should now work
     const result = await mcpClient.callTool({
-      name: 'crm___find_contacts',
+      name: 'crm__find_contacts',
       arguments: {},
     });
     expect(result.isError).toBeFalsy();
@@ -141,9 +148,12 @@ describe('Tool Gating', () => {
 
   it('write tool within bounds succeeds', async () => {
     const result = await mcpClient.callTool({
-      name: 'crm___create_contact',
+      name: 'crm__create_contact',
       arguments: { name: 'Test Contact', type: 'customer' },
     });
+    if (result.isError) {
+      console.error('Write tool error:', JSON.stringify(result.content));
+    }
     expect(result.isError).toBeFalsy();
     const text = (result.content as Array<{ text: string }>)[0].text;
     expect(text).toContain('Test Contact');

@@ -46,11 +46,10 @@ beforeAll(async () => {
   boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
   const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
-  const ecHash = hashExecutionContext({ profile, path, domain: 'owner' });
+  const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
   await sp.submitAttestation(apiKey, {
     profile_id: profile,
-    path,
     domain: 'owner',
     did: userDid,
     bounds,
@@ -61,13 +60,11 @@ beforeAll(async () => {
     defer_commitment: true,
   });
 
-  await gw.pushGateContent({
-    boundsHash,
-    contextHash,
-    context: {},
+  await gw.pushGateContent(
+    { boundsHash, contextHash, context: {} },
     path,
-    gateContent: { intent: 'test' },
-  });
+    { intent: 'test' },
+  );
 
   await new Promise(r => setTimeout(r, 2_000));
 
@@ -86,7 +83,7 @@ describe('Deferred Commitment', () => {
 
   it('tool call with deferred commitment returns proposal', async () => {
     const result = await mcpClient.callTool({
-      name: 'crm___create_contact',
+      name: 'crm__create_contact',
       arguments: { name: 'Deferred Contact', type: 'customer' },
     });
     const text = (result.content as Array<{ text: string }>)[0].text;
@@ -140,12 +137,11 @@ describe('Deferred Commitment', () => {
     const bounds = { profile: 'records', read_access: 'all', write_daily_max: 10, delete_access: 'own_24h', archive_access: 'all' };
     const bh = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access']);
     const ch = computeBoundsHash({}, []);
-    const gh = hashGateContent({ problem: 'test', objective: 'test', tradeoffs: 'test' });
-    const eh = hashExecutionContext({ profile, path, domain: 'owner' });
+    const gh = hashGateContent({ intent: 'test' });
+    const eh = hashExecutionContext({ profile, domain: 'owner' });
 
     await sp.submitAttestation(apiKey, {
       profile_id: profile,
-      path,
       domain: 'owner',
       did: userDid,
       bounds,
@@ -156,13 +152,11 @@ describe('Deferred Commitment', () => {
       // NO defer_commitment — immediate
     });
 
-    await gw.pushGateContent({
-      boundsHash: bh,
-      contextHash: ch,
-      context: {},
+    await gw.pushGateContent(
+      { boundsHash: bh, contextHash: ch, context: {} },
       path,
-      gateContent: { intent: 'test' },
-    });
+      { intent: 'test' },
+    );
 
     await new Promise(r => setTimeout(r, 2_000));
 
@@ -174,7 +168,7 @@ describe('Deferred Commitment', () => {
 
     // Records tool should execute immediately (no proposal)
     const result = await mcpClient.callTool({
-      name: 'records___create_record',
+      name: 'records__create_record',
       arguments: { type: 'note', title: 'Test Note', content: 'Immediate execution' },
     });
     expect(result.isError).toBeFalsy();

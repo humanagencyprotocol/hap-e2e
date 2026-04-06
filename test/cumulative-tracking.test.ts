@@ -45,11 +45,10 @@ beforeAll(async () => {
   const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
   const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
-  const ecHash = hashExecutionContext({ profile, path, domain: 'owner' });
+  const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
   await sp.submitAttestation(apiKey, {
     profile_id: profile,
-    path,
     domain: 'owner',
     did: userDid,
     bounds,
@@ -59,13 +58,11 @@ beforeAll(async () => {
     execution_context_hash: ecHash,
   });
 
-  await gw.pushGateContent({
-    boundsHash,
-    contextHash,
-    context: {},
+  await gw.pushGateContent(
+    { boundsHash, contextHash, context: {} },
     path,
-    gateContent: { intent: 'test' },
-  });
+    { intent: 'test' },
+  );
 
   await new Promise(r => setTimeout(r, 2_000));
 
@@ -82,7 +79,7 @@ afterAll(async () => {
 describe('Cumulative Tracking', () => {
   it('1st write succeeds', async () => {
     const result = await mcpClient.callTool({
-      name: 'crm___create_contact',
+      name: 'crm__create_contact',
       arguments: { name: 'Contact 1', type: 'customer' },
     });
     expect(result.isError).toBeFalsy();
@@ -90,7 +87,7 @@ describe('Cumulative Tracking', () => {
 
   it('2nd write succeeds', async () => {
     const result = await mcpClient.callTool({
-      name: 'crm___create_contact',
+      name: 'crm__create_contact',
       arguments: { name: 'Contact 2', type: 'customer' },
     });
     expect(result.isError).toBeFalsy();
@@ -98,7 +95,7 @@ describe('Cumulative Tracking', () => {
 
   it('3rd write succeeds (at limit)', async () => {
     const result = await mcpClient.callTool({
-      name: 'crm___create_contact',
+      name: 'crm__create_contact',
       arguments: { name: 'Contact 3', type: 'customer' },
     });
     expect(result.isError).toBeFalsy();
@@ -106,7 +103,7 @@ describe('Cumulative Tracking', () => {
 
   it('4th write blocked (exceeds write_daily_max=3)', async () => {
     const result = await mcpClient.callTool({
-      name: 'crm___create_contact',
+      name: 'crm__create_contact',
       arguments: { name: 'Contact 4', type: 'customer' },
     });
     // Should be blocked by SP receipt pre-flight or gatekeeper
@@ -116,7 +113,7 @@ describe('Cumulative Tracking', () => {
 
   it('read tools still work after write limit', async () => {
     const result = await mcpClient.callTool({
-      name: 'crm___find_contacts',
+      name: 'crm__find_contacts',
       arguments: {},
     });
     expect(result.isError).toBeFalsy();

@@ -69,7 +69,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
         frame_hash: boundsHash,
         profile_id: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
         pending_domains: ['owner'],
-        tool: 'crm___create_contact',
+        tool: 'crm__create_contact',
         tool_args: { name: 'Jane Smith', email: 'jane@example.com', type: 'customer' },
         execution_context: { contact_type: 'customer' },
       },

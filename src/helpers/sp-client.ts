@@ -140,7 +140,7 @@ export class SPClient {
       context_hash?: string;
       domain: string;
       did: string;
-      path: string;
+      path?: string;
       gate_content_hashes: Record<string, string>;
       execution_context_hash: string;
     },
