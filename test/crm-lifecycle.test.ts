@@ -17,7 +17,7 @@ const GW_URL = `http://localhost:${GW_PORT}`;
 
 const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
 const PROFILE_SHORT = 'customers';
-const EXEC_PATH = PROFILE;
+const EXEC_PATH = PROFILE_ID;
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
