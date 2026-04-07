@@ -40,11 +40,7 @@ const CONTEXT = {
   action_type: 'charge',
 };
 
-const GATE_CONTENT = {
-  problem: 'Test purchasing authority for context privacy validation.',
-  objective: 'Verify context values never leave local custody.',
-  tradeoffs: 'Accepts risk of charges up to configured limits.',
-};
+const GATE_CONTENT = { intent: 'Test purchasing authority for context privacy validation. Verify context values never leave local custody.' };
 
 // ── State ─────────────────────────────────────────────────
 

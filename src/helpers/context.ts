@@ -17,9 +17,7 @@ export interface TestContext {
   inviteCode: string | null;
   frameHash: string | null;
   gateContent: {
-    problem: string;
-    objective: string;
-    tradeoffs: string;
+    intent: string;
   };
   mcpClient: Client | null;
 }
@@ -34,9 +32,7 @@ export const ctx: TestContext = {
   inviteCode: null,
   frameHash: null,
   gateContent: {
-    problem: 'Test purchasing authority for E2E validation.',
-    objective: 'Enable automated payment processing up to bounded limits.',
-    tradeoffs: 'Accepts risk of charges up to configured limits.',
+    intent: 'Test purchasing authority for E2E validation. Enable automated payment processing up to bounded limits. Accepts risk of charges up to configured limits.',
   },
   mcpClient: null,
 };

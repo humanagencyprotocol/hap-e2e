@@ -114,7 +114,7 @@ const PROFILES: ProfileTestConfig[] = [
     readToolName: 'list_payments',
     dailyLimitField: 'transaction_count_daily_max',
     dailyLimitValue: 3,
-    gateStyle: 'legacy', // charge profile uses v0.3 problem/objective/tradeoff gates
+    
   },
   {
     profileId: 'github.com/humanagencyprotocol/hap-profiles/purchase@0.4',

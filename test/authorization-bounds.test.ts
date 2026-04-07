@@ -68,11 +68,7 @@ const GENEROUS_LIMITS = {
   },
 };
 
-const GATE_CONTENT = {
-  problem: 'Authorization bounds enforcement test.',
-  objective: 'Validate that per-tx, daily amount, and daily count limits are enforced.',
-  tradeoffs: 'Accepts risk up to the configured tight bounds.',
-};
+const GATE_CONTENT = { intent: 'Authorization bounds enforcement test. Validate per-tx, daily amount, and daily count limits.' };
 
 // ── Shared test state ─────────────────────────────────────────────────────────
 
