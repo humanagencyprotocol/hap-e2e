@@ -41,7 +41,7 @@ beforeAll(async () => {
   // Create authorization with write_daily_max = 3
   const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
   const path = profile;
-  const bounds = { profile: 'customers', write_daily_max: 3, delete_daily_max: 1 };
+  const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4', write_daily_max: 3, delete_daily_max: 1 };
   const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
   const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
@@ -82,7 +82,7 @@ describe('Cumulative Tracking', () => {
       name: 'crm__create_contact',
       arguments: { name: 'Contact 1', type: 'customer' },
     });
-    expect(result.isError).toBeFalsy();
+    if (result.isError) console.error("TOOL_ERR:", JSON.stringify(result.content)); expect(result.isError).toBeFalsy();
   });
 
   it('2nd write succeeds', async () => {
@@ -90,7 +90,7 @@ describe('Cumulative Tracking', () => {
       name: 'crm__create_contact',
       arguments: { name: 'Contact 2', type: 'customer' },
     });
-    expect(result.isError).toBeFalsy();
+    if (result.isError) console.error("TOOL_ERR:", JSON.stringify(result.content)); expect(result.isError).toBeFalsy();
   });
 
   it('3rd write succeeds (at limit)', async () => {
@@ -98,7 +98,7 @@ describe('Cumulative Tracking', () => {
       name: 'crm__create_contact',
       arguments: { name: 'Contact 3', type: 'customer' },
     });
-    expect(result.isError).toBeFalsy();
+    if (result.isError) console.error("TOOL_ERR:", JSON.stringify(result.content)); expect(result.isError).toBeFalsy();
   });
 
   it('4th write blocked (exceeds write_daily_max=3)', async () => {
@@ -116,6 +116,6 @@ describe('Cumulative Tracking', () => {
       name: 'crm__find_contacts',
       arguments: {},
     });
-    expect(result.isError).toBeFalsy();
+    if (result.isError) console.error("TOOL_ERR:", JSON.stringify(result.content)); expect(result.isError).toBeFalsy();
   });
 });
