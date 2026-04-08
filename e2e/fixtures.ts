@@ -246,20 +246,22 @@ export async function authenticatedPage(browser: Browser, apiKey: string, baseUR
 
 /**
  * Sign in to the gateway through the browser login form.
+ * Waits for the URL to leave /login rather than checking .sidebar (hidden on mobile).
  */
 export async function signInToGateway(page: Page, apiKey: string): Promise<void> {
   await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
+  await page.locator('input[type="password"]').waitFor({ state: 'visible', timeout: 10_000 });
   await page.locator('input[type="password"]').fill(apiKey);
   await page.locator('button:has-text("Sign In")').click();
 
   try {
-    await page.locator('.sidebar').first().waitFor({ state: 'visible', timeout: 10_000 });
+    await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 10_000 });
   } catch {
     console.error('[E2E] Gateway login slow, retrying...');
     await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
     await page.locator('input[type="password"]').fill(apiKey);
     await page.locator('button:has-text("Sign In")').click();
-    await page.locator('.sidebar').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 30_000 });
   }
 }
 
@@ -282,6 +284,8 @@ export async function handleOnboarding(page: Page): Promise<void> {
 
 /**
  * Activate an integration through the browser UI.
+ * Skips activation if the integration is already running (e.g. personalDefault
+ * integrations auto-register on gateway startup).
  */
 export async function activateIntegration(page: Page, integrationName: string): Promise<void> {
   await page.click('.sidebar-item:has-text("Integrations")');
@@ -289,6 +293,11 @@ export async function activateIntegration(page: Page, integrationName: string): 
 
   const card = page.locator('.card', { has: page.locator(`text=${integrationName}`) }).first();
   await card.scrollIntoViewIfNeeded();
+
+  // If already running, nothing to do.
+  if (await card.locator('text=Running').isVisible()) {
+    return;
+  }
 
   const activateBtn = card.locator('button:has-text("Activate")');
   await activateBtn.waitFor({ state: 'visible', timeout: 10_000 });
