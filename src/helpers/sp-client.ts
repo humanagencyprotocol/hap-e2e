@@ -46,6 +46,15 @@ export class SPClient {
 
   // ── Groups ──────────────────────────────────────────────
 
+  async getPersonalGroupId(apiKey: string): Promise<string> {
+    const res = await this.request('GET', '/api/groups', undefined, apiKey);
+    if (!res.ok) throw new Error(`getGroups failed (${res.status})`);
+    const data = await res.json() as { groups: Array<{ id: string; name: string; allowLazyEnable?: boolean }> };
+    const personal = data.groups.find(g => g.allowLazyEnable || g.name === 'Personal');
+    if (!personal) throw new Error('No personal group found');
+    return personal.id;
+  }
+
   async createGroup(
     apiKey: string,
     name: string,

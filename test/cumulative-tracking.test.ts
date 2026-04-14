@@ -18,6 +18,7 @@ let sp: SPClient;
 let gw: GatewayClient;
 let apiKey: string;
 let userDid: string;
+let groupId: string;
 let mcpClient: Client;
 
 beforeAll(async () => {
@@ -25,9 +26,12 @@ beforeAll(async () => {
   await pm.startSP(SP_PORT);
   sp = new SPClient(`http://localhost:${SP_PORT}`);
 
-  const user = await sp.register('CumUser', 'cumuser@test.com');
+  const user = await sp.register('CumUser', `cumuser-${Date.now()}@test.com`);
   apiKey = user.apiKey;
   userDid = user.user.did;
+
+  // Get auto-provisioned personal group (allows lazy profile enable)
+  groupId = await sp.getPersonalGroupId(apiKey);
 
   await pm.startGateway({
     port: GW_PORT,
@@ -38,17 +42,18 @@ beforeAll(async () => {
   gw = new GatewayClient(`http://localhost:${GW_PORT}`);
   await gw.configure({ sessionCookie: `api-key=${apiKey}`, apiKey });
 
-  // Create authorization with write_daily_max = 3
+  // Create authorization with write_daily_max = 3, delete_daily_max = 1
   const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
   const path = profile;
   const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4', write_daily_max: 3, delete_daily_max: 1 };
   const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
-  const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
+  const gateHashes = hashGateContent({ intent: 'test' });
   const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
   await sp.submitAttestation(apiKey, {
     profile_id: profile,
+    group_id: groupId,
     domain: 'owner',
     did: userDid,
     bounds,
@@ -56,6 +61,7 @@ beforeAll(async () => {
     context_hash: contextHash,
     gate_content_hashes: gateHashes,
     execution_context_hash: ecHash,
+    commitment_mode: 'automatic',
   });
 
   await gw.pushGateContent(
@@ -64,7 +70,40 @@ beforeAll(async () => {
     { intent: 'test' },
   );
 
-  await new Promise(r => setTimeout(r, 2_000));
+  // Add CRM integration with action_type in staticExecution
+  await gw.addIntegration({
+    id: 'crm',
+    name: 'CRM',
+    command: 'npx',
+    args: ['-y', '@humanagencyp/crm-mcp@latest'],
+    envKeys: {},
+    profile: 'customers',
+    enabled: true,
+    toolGating: {
+      default: {
+        executionMapping: {},
+        staticExecution: { contact_type: 'customer' },
+      },
+      overrides: {
+        create_contact: { executionMapping: { type: 'contact_type' }, staticExecution: { action_type: 'write' } },
+        update_contact: { executionMapping: {}, staticExecution: { action_type: 'write' } },
+        delete_contact: { executionMapping: {}, staticExecution: { action_type: 'delete' } },
+        log_activity: { executionMapping: {}, staticExecution: { action_type: 'write' } },
+        create_deal: { executionMapping: {}, staticExecution: { action_type: 'write' } },
+        update_deal: { executionMapping: {}, staticExecution: { action_type: 'write' } },
+        create_task: { executionMapping: {}, staticExecution: { action_type: 'write' } },
+        complete_task: { executionMapping: {}, staticExecution: { action_type: 'write' } },
+        find_contacts: { category: 'read' },
+        get_timeline: { category: 'read' },
+        get_pipeline: { category: 'read' },
+        list_tasks: { category: 'read' },
+        export_crm: { category: 'read' },
+      },
+    },
+  });
+
+  // Wait for CRM MCP server to start
+  await new Promise(r => setTimeout(r, 8_000));
 
   const transport = new SSEClientTransport(new URL(`http://localhost:${GW_PORT}/sse`));
   mcpClient = new Client({ name: 'test-agent', version: '1.0.0' }, { capabilities: {} });
@@ -107,8 +146,9 @@ describe('Cumulative Tracking', () => {
       arguments: { name: 'Contact 4', type: 'customer' },
     });
     // Should be blocked by SP receipt pre-flight or gatekeeper
+    expect(result.isError).toBe(true);
     const text = (result.content as Array<{ text: string }>)[0].text;
-    expect(text.toLowerCase()).toContain('limit');
+    expect(text.toLowerCase()).toMatch(/limit|blocked|exceed/);
   });
 
   it('read tools still work after write limit', async () => {

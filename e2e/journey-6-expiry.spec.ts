@@ -71,8 +71,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
       action: 'create_record',
       executionContext: {},
     });
-    // Should be rejected (expired/forbidden) or succeed if SP doesn't check TTL
-    // TODO: SP receipt endpoint should check attestation TTL
-    expect([201, 403].includes(receipt.status)).toBe(true);
+    // SP must reject receipts for expired attestations
+    expect(receipt.status).toBe(403);
   });
 });
