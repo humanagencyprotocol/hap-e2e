@@ -79,6 +79,7 @@ const GATE_CONTENT = {
 
 let userApiKey = '';
 let userDid = '';
+let personalGroupId = '';
 let attestationHash = '';
 let mcpClient: Client | null = null;
 
@@ -107,13 +108,13 @@ async function submitEmailAttestation(bounds: Record<string, unknown>): Promise<
 
   const result = await sp.submitAttestation(userApiKey, {
     profile_id: PROFILE_ID,
-    group_id: '',  // personal mode — no group governance
+    group_id: personalGroupId,
     bounds,
     bounds_hash: boundsHash,
     context_hash: contextHash,
     domain: 'communications',
     did: userDid,
-    path: EXEC_PATH,
+    commitment_mode: 'automatic',
     gate_content_hashes: gateContentHashes,
     execution_context_hash: executionContextHash,
   });
@@ -157,12 +158,13 @@ beforeAll(async () => {
   // 2. Start SP
   await pm.startSP(SP_PORT);
 
-  // 3. Register test user (personal mode — no group needed)
+  // 3. Register test user and resolve personal group id (required in v0.4)
   const user = await sp.register('Email E2E', `email-e2e-${Date.now()}@test.local`);
   userApiKey = user.apiKey;
   userDid = user.user.did;
+  personalGroupId = await sp.getPersonalGroupId(userApiKey);
 
-  console.error(`[E2E-Email] Registered user: ${user.user.id}`);
+  console.error(`[E2E-Email] Registered user: ${user.user.id} (group ${personalGroupId})`);
 
   // 4. Start gateway with user's API key
   await pm.startGateway({
@@ -267,6 +269,31 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Send (authorized)', () => {
     });
     // Should succeed (we're within limits)
     expect(result.status).toBe(201);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Block 2b: Out-of-scope recipient — Gatekeeper must reject
+// ═════════════════════════════════════════════════════════════════════════════
+// Declared context: allowed_recipients = TEST_RECIPIENT only.
+// Sending to any other address must be blocked locally by the Gatekeeper's
+// subset check — the SP holds only context_hash and cannot enforce this.
+
+describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Out-of-scope recipient', () => {
+  it('send to recipient outside allowed_recipients → blocked by Gatekeeper', async () => {
+    const result = await mcpClient!.callTool({
+      name: 'gmail__send_message',
+      arguments: {
+        to: ['stranger@example.com'],
+        subject: 'HAP E2E out-of-scope',
+        body: 'This should never be delivered — Gatekeeper must reject.',
+      },
+    });
+
+    const text = (result.content as Array<{ text?: string }>)[0]?.text ?? '';
+    expect(result.isError).toBe(true);
+    expect(text).toMatch(/not in authorized set|BOUND_EXCEEDED|allowed_recipients|allowed_domains/i);
+    console.error(`[E2E-Email] Correctly blocked out-of-scope recipient: ${text}`);
   });
 });
 

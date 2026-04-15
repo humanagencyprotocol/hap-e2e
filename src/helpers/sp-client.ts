@@ -140,16 +140,16 @@ export class SPClient {
     apiKey: string,
     body: {
       profile_id: string;
-      group_id?: string;
-      /** v0.3 frame (kept for backward compat) */
-      frame?: Record<string, unknown>;
+      /** v0.4 requires group_id on every attestation (use personal group for individual flows). */
+      group_id: string;
       /** v0.4 bounds */
       bounds?: Record<string, unknown>;
       bounds_hash?: string;
-      context_hash?: string;
+      context_hash: string;
       domain: string;
       did: string;
-      path?: string;
+      /** v0.4: 'automatic' (receipt issued at call time) or 'review' (agent submits proposal, human commits) */
+      commitment_mode: 'automatic' | 'review';
       gate_content_hashes: Record<string, string>;
       execution_context_hash: string;
     },

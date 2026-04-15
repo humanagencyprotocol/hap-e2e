@@ -47,6 +47,7 @@ const sp = new SPClient(SP_URL);
 const gw = new GatewayClient(GW_URL);
 
 let user: { id: string; name: string; email: string; did: string; apiKey: string };
+let personalGroupId: string;
 let boundsHash: string;
 let contextHash: string;
 let mcpClient: Client;
@@ -66,10 +67,11 @@ beforeAll(async () => {
   // 2. Start SP
   await pm.startSP(SP_PORT);
 
-  // 3. Register test user (personal mode — no group)
+  // 3. Register test user and resolve personal group id (required in v0.4)
   const result = await sp.register('CRM Test User', `crm-e2e-${Date.now()}@test.local`);
   user = { ...result.user, apiKey: result.apiKey };
-  console.error(`[CRM E2E] Registered user ${user.id}`);
+  personalGroupId = await sp.getPersonalGroupId(user.apiKey);
+  console.error(`[CRM E2E] Registered user ${user.id} (group ${personalGroupId})`);
 
   // 4. Start gateway with user's API key
   await pm.startGateway({
@@ -104,12 +106,13 @@ describe('Authorization', () => {
 
     const result = await sp.submitAttestation(user.apiKey, {
       profile_id: PROFILE_ID,
+      group_id: personalGroupId,
       bounds: BOUNDS,
       bounds_hash: boundsHash,
       context_hash: contextHash,
       domain: 'owner',
       did: user.did,
-      path: EXEC_PATH,
+      commitment_mode: 'automatic',
       gate_content_hashes: gateContentHashes,
       execution_context_hash: executionContextHash,
     });
@@ -203,6 +206,35 @@ describe('Gateway Configuration', () => {
       console.error('[CRM E2E] All tools:', tools.map(t => t.name).join(', '));
     }
     expect(crmTools.length).toBeGreaterThan(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// Block 2b: Out-of-scope contact_type — Gatekeeper must reject
+// ══════════════════════════════════════════════════════════
+// Declared context: contact_type = 'customer,lead'.
+// create_contact maps tool arg `type` → execution context `contact_type`.
+// Calling with type='vendor' violates the subset constraint and must be
+// rejected locally by the Gatekeeper (the SP holds only context_hash).
+//
+// Placed BEFORE any write ops to avoid an unrelated known bug that disables
+// CRM write tools after several successful calls.
+
+describe('Scope Enforcement — contact_type subset', () => {
+  it('create_contact with type outside allowed set → blocked by Gatekeeper', async () => {
+    const result = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'Out-of-scope Vendor',
+        email: 'vendor@example.com',
+        type: 'vendor',
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ text?: string }>)[0]?.text ?? '';
+    expect(text).toMatch(/not in authorized set|BOUND_EXCEEDED|contact_type/i);
+    console.error(`[CRM E2E] Correctly blocked out-of-scope contact_type: ${text}`);
   });
 });
 
