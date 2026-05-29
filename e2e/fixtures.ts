@@ -40,19 +40,24 @@ export const BOB = { name: 'Bob', apiKey: '', id: '', did: '', email: '' };
 
 // In global setup: register users and write to file.
 // In test workers: load from file.
-export async function ensureUsersRegistered(): Promise<void> {
-  if (ALICE.apiKey) return;
-
-  // Try loading from file first (test worker)
-  try {
-    const { readFileSync } = await import('node:fs');
-    const data = JSON.parse(readFileSync(join(__dirname, '.test-users.json'), 'utf-8'));
-    Object.assign(ALICE, data.alice);
-    Object.assign(BOB, data.bob);
+export async function ensureUsersRegistered(force = false): Promise<void> {
+  if (!force) {
     if (ALICE.apiKey) return;
-  } catch { /* not saved yet — register */ }
 
-  // Register (global setup process)
+    // Try loading from file first (test worker — global setup wrote fresh keys
+    // for the currently-running AS).
+    try {
+      const { readFileSync } = await import('node:fs');
+      const data = JSON.parse(readFileSync(join(__dirname, '.test-users.json'), 'utf-8'));
+      Object.assign(ALICE, data.alice);
+      Object.assign(BOB, data.bob);
+      if (ALICE.apiKey) return;
+    } catch { /* not saved yet — register */ }
+  }
+
+  // Register fresh against the current AS. The AS is in-memory (no Redis), so
+  // accounts don't survive a server restart — global setup must always register
+  // fresh (force=true) and never trust a stale .test-users.json from a prior run.
   for (const user of [ALICE, BOB]) {
     const res = await fetch(`${SP_URL}/api/auth/register`, {
       method: 'POST',

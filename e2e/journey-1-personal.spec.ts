@@ -7,13 +7,19 @@
  * Each test gets a fresh page, so we must login + do all checks in one test,
  * navigating via sidebar clicks (SPA navigation) not page.goto (full reload).
  */
-import { test, expect, registerOnSP, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL } from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL } from './fixtures';
 
 test.describe.serial('Journey 1: Personal User', () => {
   let apiKey: string;
 
-  test('1.1 Register on SP, get API key', async ({ page }) => {
-    apiKey = await registerOnSP(page, 'Alice');
+  test('1.1 Register on SP, get API key', async () => {
+    // Reuse the stable ALICE account (registered once in global-setup) rather
+    // than minting a fresh user each run. A new account every re-run would
+    // collide with the previous account already in the gateway vault and
+    // trigger the "different account — wipe local data?" modal. Stable account
+    // → no conflict → no wipe.
+    await ensureUsersRegistered();
+    apiKey = ALICE.apiKey;
     expect(apiKey).toBeTruthy();
     expect(apiKey.length).toBeGreaterThan(10);
   });
