@@ -263,15 +263,14 @@ export async function signInToGateway(page: Page, apiKey: string): Promise<void>
   await page.locator('input[type="password"]').fill(apiKey);
   await page.locator('button:has-text("Sign In")').click();
 
-  try {
-    await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 10_000 });
-  } catch {
-    console.error('[E2E] Gateway login slow, retrying...');
-    await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
-    await page.locator('input[type="password"]').fill(apiKey);
-    await page.locator('button:has-text("Sign In")').click();
-    await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 30_000 });
-  }
+  // Single submit with a generous wait — the first login can be slow while the
+  // AS dev server compiles. Do NOT re-click on slowness: a second login()
+  // queues a second navigate('/') that fires late and clobbers the next
+  // navigation (e.g. reverting /integrations back to Dashboard). Then wait for
+  // the Dashboard to render so the post-login navigation has fully settled
+  // before any caller navigates away.
+  await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 45_000 });
+  await expect(page.locator('.page-title')).toBeVisible({ timeout: 15_000 });
 }
 
 /**
