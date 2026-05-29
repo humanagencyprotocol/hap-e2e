@@ -297,10 +297,19 @@ export async function handleOnboarding(page: Page): Promise<void> {
  * integrations auto-register on gateway startup).
  */
 export async function activateIntegration(page: Page, integrationName: string): Promise<void> {
+  // Let the app shell settle (auth/mode resolved, initial Dashboard rendered)
+  // before navigating — clicking too early races the first render and the route
+  // reverts to Dashboard.
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
   await page.click('.sidebar-item:has-text("Integrations")');
-  await page.waitForSelector('.card', { timeout: 10_000 });
+  // Wait for the route + page to settle before looking for cards — otherwise we
+  // race the SPA navigation and match `.card` on the Dashboard "Get Started" panel.
+  await page.waitForURL('**/integrations');
+  await expect(page.locator('.page-title')).toHaveText('Integrations', { timeout: 10_000 });
 
   const card = page.locator('.card', { has: page.locator(`text=${integrationName}`) }).first();
+  await card.waitFor({ state: 'visible', timeout: 10_000 });
   await card.scrollIntoViewIfNeeded();
 
   // If already running, nothing to do.
@@ -344,9 +353,14 @@ export async function createAuthorization(
     commitMode: 'now' | 'per-action';
   },
 ): Promise<void> {
+  // Let the app shell settle before navigating (avoids the initial-render race).
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+
   // Open the authorize picker from the Authorizations page (the dedicated
   // "Authorize" nav item was removed in v0.4).
   await page.click('.sidebar-item:has-text("Authorizations")');
+  await page.waitForURL('**/authorizations**');
   await page.click('button:has-text("New authorization")');
   await page.waitForSelector('.profile-grid', { timeout: 10_000 });
 
