@@ -20,15 +20,17 @@ let apiKey: string;
 let userDid: string;
 let mcpClient: Client;
 let boundsHash: string;
+let groupId: string;
 
 beforeAll(async () => {
   pm.buildGateway();
   await pm.startSP(SP_PORT);
   sp = new SPClient(`http://localhost:${SP_PORT}`);
 
-  const user = await sp.register('DeferUser', 'deferuser@test.com');
+  const user = await sp.register('DeferUser', `deferuser-${Date.now()}@test.com`);
   apiKey = user.apiKey;
   userDid = user.user.did;
+  groupId = await sp.getPersonalGroupId(apiKey);
 
   await pm.startGateway({
     port: GW_PORT,
@@ -48,8 +50,9 @@ beforeAll(async () => {
   const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
   const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
-  await sp.submitAttestation(apiKey, {
+  const att = await sp.submitAttestation(apiKey, {
     profile_id: profile,
+    group_id: groupId,
     domain: 'owner',
     did: userDid,
     bounds,
@@ -57,11 +60,11 @@ beforeAll(async () => {
     context_hash: contextHash,
     gate_content_hashes: gateHashes,
     execution_context_hash: ecHash,
-    defer_commitment: true,
+    commitment_mode: 'review',
   });
 
   await gw.pushGateContent(
-    { boundsHash, contextHash, context: {} },
+    { frameHash: att.frame_hash, boundsHash, contextHash, context: {} },
     path,
     { intent: 'test' },
   );
@@ -134,14 +137,15 @@ describe('Deferred Commitment', () => {
     // Create a new authorization WITHOUT deferred commitment for records
     const profile = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
     const path = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
-    const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/records@0.4', read_access: 'all', write_daily_max: 10, delete_access: 'own_24h', archive_access: 'all' };
+    const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/records@0.4', read_access: 'unlimited', write_daily_max: 10, delete_access: 'allowed', archive_access: 'allowed' };
     const bh = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access']);
     const ch = computeBoundsHash({}, []);
     const gh = hashGateContent({ intent: 'test' });
     const eh = hashExecutionContext({ profile, domain: 'owner' });
 
-    await sp.submitAttestation(apiKey, {
+    const att2 = await sp.submitAttestation(apiKey, {
       profile_id: profile,
+      group_id: groupId,
       domain: 'owner',
       did: userDid,
       bounds,
@@ -149,11 +153,11 @@ describe('Deferred Commitment', () => {
       context_hash: ch,
       gate_content_hashes: gh,
       execution_context_hash: eh,
-      // NO defer_commitment — immediate
+      commitment_mode: 'automatic', // immediate
     });
 
     await gw.pushGateContent(
-      { boundsHash: bh, contextHash: ch, context: {} },
+      { frameHash: att2.frame_hash, boundsHash: bh, contextHash: ch, context: {} },
       path,
       { intent: 'test' },
     );
@@ -171,6 +175,7 @@ describe('Deferred Commitment', () => {
       name: 'records__create_record',
       arguments: { type: 'note', title: 'Test Note', content: 'Immediate execution' },
     });
+    if (result.isError) console.error('RECORDS_ERR:', JSON.stringify(result.content));
     expect(result.isError).toBeFalsy();
     const text = (result.content as Array<{ text: string }>)[0].text;
     expect(text).toContain('Test Note');

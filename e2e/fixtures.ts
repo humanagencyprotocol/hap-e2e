@@ -15,8 +15,8 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, '..', '..');
-const SP_DIR = join(ROOT, 'hap-sp');
-const GW_DIR = join(ROOT, 'hap-gateway');
+const SP_DIR = join(ROOT, 'suveren-as');
+const GW_DIR = join(ROOT, 'suveren-gateway');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
 // ─── Ports ───────────────────────────────────────────────────────────────────
@@ -28,6 +28,10 @@ export const GW_MCP_PORT = 19430;
 export const SP_URL = `http://localhost:${SP_PORT}`;
 export const GW_URL = `http://localhost:${GW_CP_PORT}`;
 export const GW_MCP_URL = `http://localhost:${GW_MCP_PORT}`;
+
+// Shared CP↔MCP internal secret so the control plane and MCP server trust each
+// other's /internal/* calls (both must agree on the value).
+const INTERNAL_SECRET = 'e2e-internal-secret';
 
 // ─── Test users ──────────────────────────────────────────────────────────────
 
@@ -78,7 +82,7 @@ export const PROFILE_IDS = [
   'github.com/humanagencyprotocol/hap-profiles/purchase@0.4',
   'github.com/humanagencyprotocol/hap-profiles/email@0.4',
   'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
-  'github.com/humanagencyprotocol/hap-profiles/schedule@0.4',
+  'github.com/humanagencyprotocol/hap-profiles/calendar@0.4',
   'github.com/humanagencyprotocol/hap-profiles/publish@0.4',
   'github.com/humanagencyprotocol/hap-profiles/records@0.4',
 ] as const;
@@ -107,25 +111,26 @@ export async function startServers(): Promise<void> {
   if (serversReady) return;
 
   console.error('[E2E] Building gateway...');
-  execSync('pnpm build', { cwd: GW_DIR, stdio: 'pipe', timeout: 90_000 });
+  execSync('pnpm build', { cwd: GW_DIR, stdio: 'pipe', timeout: 180_000 });
   console.error('[E2E] Build complete.');
 
-  // Start SP
+  // Start the Authority Server (formerly "SP")
   const sp = spawn('npx', ['next', 'dev', '-p', String(SP_PORT)], {
     cwd: SP_DIR,
     env: {
       ...process.env,
       ALLOW_REGISTRATION: 'true',
-      HAP_TEST_DIRECT_REGISTER: 'true',
+      SUVEREN_TEST_DIRECT_REGISTER: 'true',
       SP_KV_REST_API_URL: '',
       SP_KV_REST_API_TOKEN: '',
+      SUVEREN_ALLOW_EPHEMERAL: '1',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   processes.push(sp);
-  pipe(sp, 'SP');
-  await waitFor(`${SP_URL}/api/sp/pubkey`, 60_000);
-  console.error('[E2E] SP ready.');
+  pipe(sp, 'AS');
+  await waitFor(`${SP_URL}/api/as/pubkey`, 60_000);
+  console.error('[E2E] Authority Server ready.');
 
   dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-'));
 
@@ -134,11 +139,14 @@ export async function startServers(): Promise<void> {
     cwd: GW_DIR,
     env: {
       ...process.env,
-      HAP_MCP_PORT: String(GW_MCP_PORT),
-      HAP_SP_URL: SP_URL,
-      HAP_PROFILES_DIR: PROFILES_DIR,
-      HAP_INTEGRATIONS_DIR: join(GW_DIR, 'content', 'integrations'),
-      HAP_DATA_DIR: dataDir,
+      SUVEREN_MCP_PORT: String(GW_MCP_PORT),
+      SUVEREN_AS_URL: SP_URL,
+      SUVEREN_PROFILES_DIR: PROFILES_DIR,
+      // Read-only manifest source; runtime installs go to a separate dir.
+      SUVEREN_MANIFESTS_DIR: join(GW_DIR, 'content', 'integrations'),
+      SUVEREN_INTEGRATIONS_DIR: join(dataDir, 'integrations'),
+      SUVEREN_DATA_DIR: dataDir,
+      SUVEREN_INTERNAL_SECRET: INTERNAL_SECRET,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -152,11 +160,12 @@ export async function startServers(): Promise<void> {
     cwd: GW_DIR,
     env: {
       ...process.env,
-      HAP_CP_PORT: String(GW_CP_PORT),
-      HAP_SP_URL: SP_URL,
-      HAP_MCP_INTERNAL_URL: `http://127.0.0.1:${GW_MCP_PORT}`,
-      HAP_UI_DIST: join(GW_DIR, 'apps/ui/dist'),
-      HAP_DATA_DIR: dataDir,
+      SUVEREN_CP_PORT: String(GW_CP_PORT),
+      SUVEREN_AS_URL: SP_URL,
+      SUVEREN_MCP_INTERNAL_URL: `http://127.0.0.1:${GW_MCP_PORT}`,
+      SUVEREN_DATA_DIR: dataDir,
+      SUVEREN_INTERNAL_SECRET: INTERNAL_SECRET,
+      HAP_UI_DIST: join(GW_DIR, 'apps/ui/dist'), // still HAP_-prefixed in v0.4
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -335,8 +344,10 @@ export async function createAuthorization(
     commitMode: 'now' | 'per-action';
   },
 ): Promise<void> {
-  // Navigate to Authorize via sidebar
-  await page.click('.sidebar-item:has-text("Authorize")');
+  // Open the authorize picker from the Authorizations page (the dedicated
+  // "Authorize" nav item was removed in v0.4).
+  await page.click('.sidebar-item:has-text("Authorizations")');
+  await page.click('button:has-text("New authorization")');
   await page.waitForSelector('.profile-grid', { timeout: 10_000 });
 
   // Click the Authorize button on the matching profile card
@@ -389,7 +400,7 @@ export async function spApiAttest(
   apiKey: string,
   data: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const res = await request.post(`${SP_URL}/api/sp/attest`, {
+  const res = await request.post(`${SP_URL}/api/as/attest`, {
     headers: { 'x-api-key': apiKey },
     data,
   });
@@ -405,7 +416,7 @@ export async function spApiReceipt(
   apiKey: string,
   data: Record<string, unknown>,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const res = await request.post(`${SP_URL}/api/sp/receipt`, {
+  const res = await request.post(`${SP_URL}/api/as/receipt`, {
     headers: { 'x-api-key': apiKey },
     data,
   });

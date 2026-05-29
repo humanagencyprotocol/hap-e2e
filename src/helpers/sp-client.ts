@@ -98,38 +98,29 @@ export class SPClient {
     return res.json();
   }
 
-  async setLimits(
+  /**
+   * v0.4 profile config — replaces the removed `setLimits` and `setPathDomains`
+   * (both 410 in v0.4). `caps` are the per-bound thresholds above which approval
+   * is required; `approvers` are the userIds who can approve above-cap requests.
+   * PUT /api/groups/:id/profile-config/:profileId — body { approvers, caps? }.
+   * For personal-group bound-enforcement flows this is usually NOT needed: the
+   * attestation's own bounds are enforced directly.
+   */
+  async setProfileConfig(
     apiKey: string,
     groupId: string,
-    limits: Record<string, unknown>,
-  ): Promise<unknown> {
+    profileId: string,
+    config: { approvers: string[]; caps?: Record<string, number> },
+  ): Promise<{ profileId: string; config: { approvers: string[]; caps?: Record<string, number> } }> {
     const res = await this.request(
       'PUT',
-      `/api/groups/${groupId}/limits`,
-      { limits },
+      `/api/groups/${groupId}/profile-config/${profileId}`,
+      config,
       apiKey,
     );
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(`setLimits failed (${res.status}): ${JSON.stringify(body)}`);
-    }
-    return res.json();
-  }
-
-  async setPathDomains(
-    apiKey: string,
-    groupId: string,
-    pathDomains: Record<string, Record<string, string[]>>,
-  ): Promise<unknown> {
-    const res = await this.request(
-      'PUT',
-      `/api/groups/${groupId}/path-domains`,
-      { pathDomains },
-      apiKey,
-    );
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(`setPathDomains failed (${res.status}): ${JSON.stringify(body)}`);
+      throw new Error(`setProfileConfig failed (${res.status}): ${JSON.stringify(body)}`);
     }
     return res.json();
   }
@@ -164,7 +155,7 @@ export class SPClient {
     attested_domains: string[];
     required_domains: string[];
   }> {
-    const res = await this.request('POST', '/api/sp/attest', body, apiKey);
+    const res = await this.request('POST', '/api/as/attest', body, apiKey);
     if (!res.ok) {
       const respBody = await res.json().catch(() => ({}));
       throw new Error(`submitAttestation failed (${res.status}): ${JSON.stringify(respBody)}`);
@@ -193,7 +184,7 @@ export class SPClient {
   // ── Receipts ────────────────────────────────────────────
 
   /**
-   * POST /api/sp/receipt — submit an execution receipt for limit enforcement.
+   * POST /api/as/receipt — submit an execution receipt for limit enforcement.
    * Returns status and response body; does NOT throw on 403.
    */
   async postReceipt(
@@ -201,13 +192,13 @@ export class SPClient {
     body: {
       attestationHash: string;
       profileId: string;
-      path?: string;
       action: string;
+      actionType?: string;
       amount?: number;
       executionContext?: Record<string, unknown>;
     },
   ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const res = await this.request('POST', '/api/sp/receipt', body, apiKey);
+    const res = await this.request('POST', '/api/as/receipt', body, apiKey);
     const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { status: res.status, body: responseBody };
   }

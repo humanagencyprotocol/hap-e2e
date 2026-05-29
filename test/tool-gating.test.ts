@@ -20,6 +20,7 @@ let gw: GatewayClient;
 let apiKey: string;
 let userId: string;
 let userDid: string;
+let groupId: string;
 let mcpClient: Client;
 
 beforeAll(async () => {
@@ -28,10 +29,11 @@ beforeAll(async () => {
   sp = new SPClient(`http://localhost:${SP_PORT}`);
 
   // Register user
-  const reg = await sp.register('GateUser', 'gateuser@test.com');
+  const reg = await sp.register('GateUser', `gateuser-${Date.now()}@test.com`);
   apiKey = reg.apiKey;
   userId = reg.user.id;
   userDid = reg.user.did;
+  groupId = await sp.getPersonalGroupId(apiKey);
 
   // Start gateway with personal mode
   await pm.startGateway({
@@ -105,8 +107,9 @@ describe('Tool Gating', () => {
     const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
     // Attest
-    await sp.submitAttestation(apiKey, {
+    const att = await sp.submitAttestation(apiKey, {
       profile_id: profile,
+      group_id: groupId,
       domain: 'owner',
       did: userDid,
       bounds,
@@ -114,11 +117,12 @@ describe('Tool Gating', () => {
       context_hash: contextHash,
       gate_content_hashes: gateHashes,
       execution_context_hash: ecHash,
+      commitment_mode: 'automatic',
     });
 
-    // Push gate content
+    // Push gate content (frameHash = per-user storage key from the attest response)
     await gw.pushGateContent(
-      { boundsHash, contextHash, context: {} },
+      { frameHash: att.frame_hash, boundsHash, contextHash, context: {} },
       path,
       { intent: 'test' },
     );

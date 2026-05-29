@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, computeFrameHash, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
 import { ctx } from '../src/helpers/context.js';
 
 // ── Constants ─────────────────────────────────────────────
@@ -40,17 +40,6 @@ const BOUNDS = {
 const CONTEXT = {
   currency: 'USD',
   action_type: 'charge',
-};
-
-const LIMITS = {
-  [PROFILE_ID]: {
-    [EXEC_PATH]: {
-      charge: {
-        perTransaction: { amount_max: 50 },
-        daily: { amount_max: 150, transaction_count_max: 5 },
-      },
-    },
-  },
 };
 
 // ── Clients ───────────────────────────────────────────────
@@ -127,19 +116,9 @@ describe('SP Setup', () => {
     expect(result.member).toBeTruthy();
   });
 
-  it('Alice configures path domains', async () => {
-    const result = await sp.setPathDomains(ctx.adminUser!.apiKey, ctx.groupId!, {
-      [PROFILE_ID]: {
-        [EXEC_PATH]: ['finance'],
-      },
-    });
-    expect(result).toBeTruthy();
-  });
-
-  it('Alice sets group limits', async () => {
-    const result = await sp.setLimits(ctx.adminUser!.apiKey, ctx.groupId!, LIMITS);
-    expect(result).toBeTruthy();
-  });
+  // v0.4: path-domains and group "limits" endpoints were removed. Team-group
+  // attestations resolve the member's domain to their userId; group ceilings
+  // now live in profile-config (caps + approvers), exercised separately.
 });
 
 // ══════════════════════════════════════════════════════════
@@ -164,14 +143,16 @@ describe('Attestation', () => {
       bounds: BOUNDS,
       bounds_hash: boundsHash,
       context_hash: contextHash,
-      domain: 'finance',
+      // v0.4 team group: the AS resolves the member's domain to their userId.
+      domain: ctx.agentUser!.id,
       did: ctx.agentUser!.did,
-      path: EXEC_PATH,
+      commitment_mode: 'automatic',
       gate_content_hashes: gateContentHashes,
       execution_context_hash: executionContextHash,
     });
 
-    ctx.frameHash = result.bounds_hash ?? result.frame_hash;
+    // frame_hash is the per-user storage key; bounds_hash is the content hash.
+    ctx.frameHash = result.frame_hash;
     expect(ctx.frameHash).toBeTruthy();
     expect(result.status).toMatch(/active|pending/);
     expect(result.blob).toBeTruthy();
@@ -195,7 +176,7 @@ describe('Gateway Configuration', () => {
     const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
     const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
     await gw.pushGateContent(
-      { boundsHash, contextHash, context: CONTEXT },
+      { frameHash: ctx.frameHash, boundsHash, contextHash, context: CONTEXT },
       EXEC_PATH,
       ctx.gateContent,
     );

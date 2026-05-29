@@ -20,7 +20,6 @@ const SP_PORT = 14200;
 const SP_URL = `http://localhost:${SP_PORT}`;
 
 const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
-const EXEC_PATH = 'charge-routine';
 
 /** v0.4 bounds key order (from the charge profile). */
 const BOUNDS_KEY_ORDER = ['profile', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
@@ -47,9 +46,7 @@ const GATE_CONTENT = { intent: 'Test purchasing authority for context privacy va
 const pm = new ProcessManager();
 const sp = new SPClient(SP_URL);
 
-let adminApiKey: string;
 let agentApiKey: string;
-let agentUserId: string;
 let agentDid: string;
 let groupId: string;
 
@@ -63,24 +60,11 @@ beforeAll(async () => {
 
   const ts = Date.now();
 
-  const alice = await sp.register('Alice Privacy', `alice-privacy-${ts}@test.local`);
-  adminApiKey = alice.apiKey;
-
+  // v0.4 personal-group flow: one user, auto-provisioned 'owner' domain.
   const bob = await sp.register('Bob Privacy', `bob-privacy-${ts}@test.local`);
   agentApiKey = bob.apiKey;
-  agentUserId = bob.user.id;
   agentDid = bob.user.did;
-
-  // Set up group
-  const group = await sp.createGroup(adminApiKey, 'Privacy Test Group');
-  groupId = group.group.id;
-  await sp.joinGroup(agentApiKey, group.inviteCode);
-  await sp.setMemberDomains(adminApiKey, groupId, agentUserId, ['finance']);
-  await sp.setPathDomains(adminApiKey, groupId, {
-    [PROFILE_ID]: {
-      [EXEC_PATH]: ['finance'],
-    },
-  });
+  groupId = await sp.getPersonalGroupId(agentApiKey);
 }, 120_000);
 
 afterAll(async () => {
@@ -121,9 +105,9 @@ describe('Context Privacy', () => {
         bounds: BOUNDS,
         bounds_hash: boundsHash,
         context_hash: contextHash,
-        domain: 'finance',
+        domain: 'owner',
         did: agentDid,
-        path: EXEC_PATH,
+        commitment_mode: 'automatic' as const,
         gate_content_hashes: gateContentHashes,
         execution_context_hash: executionContextHash,
       };
@@ -149,7 +133,7 @@ describe('Context Privacy', () => {
       });
 
       // Capture the raw response to inspect all fields
-      const rawResponse = await fetch(`${SP_URL}/api/sp/attest`, {
+      const rawResponse = await fetch(`${SP_URL}/api/as/attest`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -161,9 +145,9 @@ describe('Context Privacy', () => {
           bounds: BOUNDS,
           bounds_hash: boundsHash,
           context_hash: contextHash,
-          domain: 'finance',
+          domain: 'owner',
           did: agentDid,
-          path: EXEC_PATH,
+          commitment_mode: 'automatic',
           gate_content_hashes: gateContentHashes,
           execution_context_hash: executionContextHash,
         }),

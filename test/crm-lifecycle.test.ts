@@ -50,6 +50,7 @@ let user: { id: string; name: string; email: string; did: string; apiKey: string
 let personalGroupId: string;
 let boundsHash: string;
 let contextHash: string;
+let frameHash: string;
 let mcpClient: Client;
 
 function sleep(ms: number): Promise<void> {
@@ -117,10 +118,11 @@ describe('Authorization', () => {
       execution_context_hash: executionContextHash,
     });
 
-    expect(result.bounds_hash ?? result.frame_hash).toBeTruthy();
+    frameHash = result.frame_hash;
+    expect(frameHash).toBeTruthy();
     expect(result.status).toMatch(/active|pending/);
     expect(result.blob).toBeTruthy();
-    console.error(`[CRM E2E] Attestation created: ${result.bounds_hash}`);
+    console.error(`[CRM E2E] Attestation created: ${result.frame_hash}`);
   });
 });
 
@@ -138,7 +140,7 @@ describe('Gateway Configuration', () => {
 
   it('pushes gate content', async () => {
     await gw.pushGateContent(
-      { boundsHash, contextHash, context: CONTEXT },
+      { frameHash, boundsHash, contextHash, context: CONTEXT },
       EXEC_PATH,
       GATE_CONTENT,
     );
@@ -159,14 +161,14 @@ describe('Gateway Configuration', () => {
           staticExecution: { contact_type: 'customer' },
         },
         overrides: {
-          create_contact: { executionMapping: { type: 'contact_type' }, staticExecution: {} },
-          update_contact: { executionMapping: {}, staticExecution: { contact_type: 'customer' } },
-          delete_contact: { executionMapping: {}, staticExecution: { contact_type: 'customer' } },
-          log_activity: { executionMapping: {}, staticExecution: { contact_type: 'customer' } },
-          create_deal: { executionMapping: {}, staticExecution: { contact_type: 'customer' } },
-          update_deal: { executionMapping: {}, staticExecution: { contact_type: 'customer' } },
-          create_task: { executionMapping: {}, staticExecution: { contact_type: 'customer' } },
-          complete_task: { executionMapping: {}, staticExecution: { contact_type: 'customer' } },
+          create_contact: { executionMapping: { type: 'contact_type' }, staticExecution: { action_type: 'write' } },
+          update_contact: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
+          delete_contact: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'delete' } },
+          log_activity: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
+          create_deal: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
+          update_deal: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
+          create_task: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
+          complete_task: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
           find_contacts: { category: 'read' },
           get_timeline: { category: 'read' },
           get_pipeline: { category: 'read' },
@@ -467,7 +469,7 @@ describe('Revocation', () => {
   it('user revokes the authorization', async () => {
     const result = await sp.revokeAttestation(
       user.apiKey,
-      boundsHash,
+      frameHash,
       'CRM E2E test revocation',
     );
     expect(result.revocation).toBeTruthy();

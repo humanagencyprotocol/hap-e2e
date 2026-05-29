@@ -9,34 +9,11 @@ export function sha256Hash(text: string): string {
 }
 
 /**
- * Hash gate content fields.
- *
- * v0.4 profiles: pass { intent } → returns { intent: 'sha256:...' }
- * v0.3 profiles: pass { problem, objective, tradeoffs } → returns hashed versions
+ * Hash the v0.4 gate content. v0.4 uses a single `intent` gate:
+ * pass { intent } → returns { intent: 'sha256:...' }.
  */
-export function hashGateContent(content: {
-  intent?: string;
-  problem?: string;
-  objective?: string;
-  tradeoffs?: string;
-}): Record<string, string> {
-  if (content.intent !== undefined) {
-    return { intent: sha256Hash(content.intent) };
-  }
-  return {
-    problem: sha256Hash(content.problem ?? ''),
-    objective: sha256Hash(content.objective ?? ''),
-    tradeoffs: sha256Hash(content.tradeoffs ?? ''),
-  };
-}
-
-/**
- * Build the canonical frame string and compute its hash.
- * Uses the spend profile's keyOrder: profile, path, amount_max, currency, action_type.
- */
-export function computeFrameHash(frame: Record<string, unknown>, keyOrder: string[]): string {
-  const lines = keyOrder.map((key) => `${key}=${String(frame[key])}`);
-  return sha256Hash(lines.join('\n'));
+export function hashGateContent(content: { intent: string }): Record<string, string> {
+  return { intent: sha256Hash(content.intent) };
 }
 
 /**

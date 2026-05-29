@@ -29,7 +29,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     await expect(page.locator('.sidebar')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Integrations")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("AI Assistant")')).toBeVisible();
-    await expect(page.locator('.sidebar-item:has-text("Pending Reviews")')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("Pending Approvals")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Authorizations")')).toBeVisible();
 
     // Navigate to Integrations via sidebar
@@ -40,13 +40,14 @@ test.describe.serial('Journey 1: Personal User', () => {
     await page.click('.sidebar-item:has-text("AI Assistant")');
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 5_000 });
 
-    // Navigate to Pending Reviews (proposals — empty)
-    await page.click('.sidebar-item:has-text("Pending Reviews")');
+    // Navigate to Pending Approvals (proposals — empty)
+    await page.click('.sidebar-item:has-text("Pending Approvals")');
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 5_000 });
 
-    // Navigate to Authorize — profile grid
-    await page.click('.sidebar-item:has-text("Authorize")');
-    // Either profiles loaded or empty state shown
+    // Open the authorize picker from the Authorizations page (the dedicated
+    // "Authorize" nav item was removed in v0.4).
+    await page.click('.sidebar-item:has-text("Authorizations")');
+    await page.click('button:has-text("New authorization")');
     await page.locator('.profile-grid, .card').first().waitFor({ state: 'visible', timeout: 10_000 });
   });
 
@@ -135,7 +136,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     // Mobile menu opens
     await expect(page.locator('.mobile-menu-panel')).toBeVisible();
     await expect(page.locator('.mobile-menu-item:has-text("Dashboard")')).toBeVisible();
-    await expect(page.locator('.mobile-menu-item:has-text("Pending Reviews")')).toBeVisible();
+    await expect(page.locator('.mobile-menu-item:has-text("Pending Approvals")')).toBeVisible();
 
     // Click nav item — navigates and closes
     await page.click('.mobile-menu-item:has-text("Integrations")');
