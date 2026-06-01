@@ -175,7 +175,6 @@ describe('Deferred Commitment', () => {
       name: 'records__create_record',
       arguments: { type: 'note', title: 'Test Note', content: 'Immediate execution' },
     });
-    if (result.isError) console.error('RECORDS_ERR:', JSON.stringify(result.content));
     expect(result.isError).toBeFalsy();
     const text = (result.content as Array<{ text: string }>)[0].text;
     expect(text).toContain('Test Note');
