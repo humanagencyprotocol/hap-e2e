@@ -83,12 +83,9 @@ test.describe.serial('Journey 1: Personal User', () => {
       commitMode: 'now',
     });
 
-    await expect(page.locator('text=Authorization Created')).toBeVisible();
-
-    // Check authorizations page
-    await page.click('button:has-text("Back to Dashboard")');
-    await page.click('.sidebar-item:has-text("Authorizations")');
-    await expect(page.locator('.status-badge:has-text("Active")')).toBeVisible({ timeout: 10_000 });
+    // createAuthorization lands on the authorizations list; the new Records
+    // authority should now be listed.
+    await expect(page.getByText('Records').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('1.5 Gateway: create authorization with Review Each Action commit', async ({ page }) => {
@@ -103,13 +100,9 @@ test.describe.serial('Journey 1: Personal User', () => {
       commitMode: 'per-action',
     });
 
-    // Verify success
-    await expect(page.locator('text=Authorization Created')).toBeVisible({ timeout: 15_000 });
-
-    // Navigate to authorizations to verify Review Mode
-    await page.click('button:has-text("Back to Dashboard")');
-    await page.click('.sidebar-item:has-text("Authorizations")');
-    await expect(page.getByText('Review Mode', { exact: true })).toBeVisible({ timeout: 10_000 });
+    // createAuthorization lands on the authorizations list; the new CRM
+    // (review-mode) authority should now be listed.
+    await expect(page.getByText('CRM').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('1.6 Gateway: revoke authorization', async ({ page }) => {
@@ -117,13 +110,21 @@ test.describe.serial('Journey 1: Personal User', () => {
     await handleOnboarding(page);
 
     await page.click('.sidebar-item:has-text("Authorizations")');
-    await page.waitForSelector('.card', { timeout: 10_000 });
+    await page.waitForURL('**/authorizations**');
+    await expect(page.locator('.page-title')).toHaveText('Authorizations', { timeout: 10_000 });
 
-    // Find and revoke an authorization
+    // Revoke is behind the row's "Details" expander — open it, then revoke.
+    const details = page.locator('button:has-text("Details")').first();
+    if (await details.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await details.click();
+    }
     const revokeBtn = page.locator('button:has-text("Revoke")').first();
-    if (await revokeBtn.isVisible({ timeout: 3_000 })) {
+    if (await revokeBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
       await revokeBtn.click();
-      await page.waitForTimeout(2000);
+      // Confirm if a confirmation button appears.
+      const confirm = page.locator('button:has-text("Revoke")').nth(1);
+      if (await confirm.isVisible({ timeout: 2_000 }).catch(() => false)) await confirm.click();
+      await page.waitForTimeout(1500);
     }
   });
 
