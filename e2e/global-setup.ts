@@ -7,7 +7,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default async function globalSetup() {
   await startServers();
-  await ensureUsersRegistered();
+  // Force fresh registration — the AS is in-memory and was just started, so any
+  // keys cached in .test-users.json from a prior session are invalid.
+  await ensureUsersRegistered(true);
 
   // Save user data for test worker processes
   writeFileSync(

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// src/helpers/ → src → hap-e2e → HumanAgencyProtocol
+// src/helpers/ → src → hap-e2e → HAP repo root
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
 interface ManagedProcess {
@@ -28,39 +28,44 @@ export class ProcessManager {
    * Run once before starting the gateway.
    */
   buildGateway(): void {
-    console.error('[E2E] Building gateway...');
+    console.error('[E2E] Building Suveren gateway...');
     execSync('pnpm build', {
-      cwd: join(ROOT, 'hap-gateway'),
+      cwd: join(ROOT, 'suveren-gateway'),
       stdio: 'pipe',
-      timeout: 60_000,
+      timeout: 180_000,
     });
     console.error('[E2E] Gateway build complete.');
   }
 
   /**
-   * Start the SP (Next.js dev server).
+   * Start the Authority Server (Next.js dev server).
+   * Method name kept as `startSP` for caller compatibility; the service is the
+   * Suveren Authority Server (formerly "SP").
    */
   async startSP(port: number): Promise<ChildProcess> {
-    console.error(`[E2E] Starting SP on port ${port}...`);
+    console.error(`[E2E] Starting Authority Server on port ${port}...`);
     const proc = spawn('npx', ['next', 'dev', '-p', String(port)], {
-      cwd: join(ROOT, 'hap-sp'),
+      cwd: join(ROOT, 'suveren-as'),
       env: {
         ...process.env,
         ALLOW_REGISTRATION: 'true',
-        HAP_TEST_DIRECT_REGISTER: 'true',
+        SUVEREN_TEST_DIRECT_REGISTER: 'true',
         PORT: String(port),
-        // No Redis env vars → in-memory storage
+        // No Redis env vars → in-memory storage. The fail-closed guard in
+        // redis.ts/keys.ts only trips in production; the dev escape hatch
+        // makes the intent explicit and keeps CI green regardless of NODE_ENV.
         SP_KV_REST_API_URL: '',
         SP_KV_REST_API_TOKEN: '',
+        SUVEREN_ALLOW_EPHEMERAL: '1',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    this.processes.push({ name: 'sp', proc });
-    this.pipeOutput(proc, 'SP');
+    this.processes.push({ name: 'as', proc });
+    this.pipeOutput(proc, 'AS');
 
-    await this.waitForHealth(`http://localhost:${port}/api/sp/pubkey`, 60_000);
-    console.error(`[E2E] SP ready on port ${port}.`);
+    await this.waitForHealth(`http://localhost:${port}/api/as/pubkey`, 60_000);
+    console.error(`[E2E] Authority Server ready on port ${port}.`);
     return proc;
   }
 
@@ -81,16 +86,20 @@ export class ProcessManager {
       'node',
       ['apps/mcp-server/dist/http.mjs'],
       {
-        cwd: join(ROOT, 'hap-gateway'),
+        cwd: join(ROOT, 'suveren-gateway'),
         env: {
           ...process.env,
-          HAP_MCP_PORT: String(opts.port),
-          HAP_SP_URL: opts.spUrl,
-          HAP_SP_API_KEY: opts.spApiKey,
-          HAP_PROFILES_DIR: opts.profilesDir,
-          HAP_INTEGRATIONS_DIR: join(ROOT, 'hap-gateway', 'content', 'integrations'),
-          HAP_DATA_DIR: dataDir,
-          HAP_MODE: opts.mode ?? 'personal',
+          SUVEREN_MCP_PORT: String(opts.port),
+          SUVEREN_AS_URL: opts.spUrl,
+          SUVEREN_AS_API_KEY: opts.spApiKey,
+          SUVEREN_PROFILES_DIR: opts.profilesDir,
+          // Read-only manifest source. Runtime npm installs go to a SEPARATE
+          // dir (SUVEREN_INTEGRATIONS_DIR) — the two must never be the same.
+          SUVEREN_MANIFESTS_DIR: join(ROOT, 'suveren-gateway', 'content', 'integrations'),
+          SUVEREN_INTEGRATIONS_DIR: join(dataDir, 'integrations'),
+          SUVEREN_DATA_DIR: dataDir,
+          // opts.mode is retained for caller compatibility; the mcp-server no
+          // longer reads a MODE env var (group type is set via the AS).
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       },
