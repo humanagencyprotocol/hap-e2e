@@ -372,6 +372,15 @@ export async function createAuthorization(
   const profileCard = page.locator('.card', { has: page.locator(`text=${opts.profileName}`) }).first();
   await profileCard.locator('button:has-text("Authorize")').click();
 
+  // Integrations with preset templates show a "Quick start" picker first.
+  // Choose "Custom" so we drive bounds/intent/commit ourselves (presets don't
+  // cover every bounds+mode combination). Profiles without templates skip
+  // straight to the gate wizard.
+  const customBtn = page.locator('button:has-text("Custom")');
+  if (await customBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await customBtn.click();
+  }
+
   // Wait for /agent/gate (bounds step)
   await page.waitForURL(url => url.toString().includes('/agent/gate'), { timeout: 10_000 });
 
@@ -385,9 +394,11 @@ export async function createAuthorization(
   }
   await page.locator('button:has-text("Next")').click();
 
-  // Intent step
-  await page.waitForSelector('textarea', { timeout: 5_000 });
-  await page.fill('textarea', opts.intent);
+  // Intent step — target the intent textarea specifically (the assistant draft
+  // panel also renders a textarea, and `textarea` alone matches it first, so
+  // the intent state never updates and "Continue to Review" stays disabled).
+  await page.waitForSelector('.intent-textarea', { timeout: 5_000 });
+  await page.fill('.intent-textarea', opts.intent);
   await page.locator('button:has-text("Continue to Review")').click();
 
   // Wait for /agent/review
@@ -407,8 +418,9 @@ export async function createAuthorization(
   const authorizeBtns = page.locator('button', { hasText: /^Authorize/ });
   await authorizeBtns.last().click();
 
-  // Wait for success
-  await page.locator('text=Authorization Created').or(page.locator('text=Attestation Committed')).first().waitFor({ state: 'visible', timeout: 15_000 });
+  // Success: the review page creates the authority and redirects to the
+  // authorizations list (?highlight=<hash>) — no standalone "created" screen.
+  await page.waitForURL(url => url.toString().includes('/authorizations'), { timeout: 15_000 });
 }
 
 // ─── SP API helpers ──────────────────────────────────────────────────────────
