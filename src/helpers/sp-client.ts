@@ -196,6 +196,8 @@ export class SPClient {
       actionType?: string;
       amount?: number;
       executionContext?: Record<string, unknown>;
+      /** v0.4 M3 — replay protection. Same key → same receipt, no double-count. */
+      idempotencyKey?: string;
     },
   ): Promise<{ status: number; body: Record<string, unknown> }> {
     const res = await this.request('POST', '/api/as/receipt', body, apiKey);
