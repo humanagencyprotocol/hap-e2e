@@ -114,7 +114,7 @@ export class SPClient {
   ): Promise<{ profileId: string; config: { approvers: string[]; caps?: Record<string, number> } }> {
     const res = await this.request(
       'PUT',
-      `/api/groups/${groupId}/profile-config/${profileId}`,
+      `/api/groups/${groupId}/profile-config/${encodeURIComponent(profileId)}`,
       config,
       apiKey,
     );
