@@ -15,8 +15,10 @@ test.describe('Group Journey', () => {
     const inviteCode = await alice.locator('input[readonly]').inputValue();
     expect(inviteCode).toBeTruthy();
 
-    await alice.click('text=Go to Team');
-    await expect(alice.locator('h1')).toContainText('Test Operations');
+    await alice.click('button:has-text("Go to Team")');
+    await alice.waitForURL(/\/dashboard\/groups\/[^/?]+/, { timeout: 15_000 });
+    // Group name renders in a subheading paragraph (the h1 is the viewer's role).
+    await expect(alice.getByText('Test Operations').first()).toBeVisible({ timeout: 10_000 });
 
     const groupUrl = alice.url();
     const groupId = groupUrl.split('/dashboard/groups/')[1]?.split('?')[0];
@@ -29,7 +31,7 @@ test.describe('Group Journey', () => {
     await bob.fill('input#inviteCode', inviteCode);
     await bob.click('button:has-text("Join Team")');
     await bob.waitForURL(new RegExp(`/dashboard/groups/${groupId}`), { timeout: 15_000 });
-    await expect(bob.locator('h1')).toContainText('Test Operations');
+    await expect(bob.getByText('Test Operations').first()).toBeVisible({ timeout: 10_000 });
 
     // Step 3: Alice sees Bob in members
     await alice.goto(`${SP_URL}/dashboard/groups/${groupId}`);

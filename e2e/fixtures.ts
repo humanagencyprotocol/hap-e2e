@@ -387,7 +387,7 @@ export async function createAuthorization(
   // Choose "Custom" so we drive bounds/intent/commit ourselves (presets don't
   // cover every bounds+mode combination). Profiles without templates skip
   // straight to the gate wizard.
-  const customBtn = page.locator('button:has-text("Custom")');
+  const customBtn = page.locator('button:has-text("define your own")');
   if (await customBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await customBtn.click();
   }
