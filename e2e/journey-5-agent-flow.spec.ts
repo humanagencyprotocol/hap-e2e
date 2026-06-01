@@ -36,8 +36,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
       title: 'CRM: agent ops',
       commitMode: 'now',
     });
-
-    await page.locator('text=Authorization Created').waitFor({ state: 'visible', timeout: 15_000 });
+    // createAuthorization lands on /authorizations on success.
   });
 
   test('5.3 Create authorization with Review Each Action via API', async ({ request }) => {
@@ -59,7 +58,8 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     });
     expect(data.status).toBe('active');
     expect(data.deferred_commitment_domains).toContain('owner');
-    boundsHash = data.bounds_hash as string;
+    // Proposals/revoke/receipts key on the per-user storage key (frame_hash).
+    boundsHash = (data.frame_hash ?? data.bounds_hash) as string;
   });
 
   test('5.4 Create proposal (simulating agent tool call)', async ({ request }) => {
@@ -83,10 +83,11 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    await page.click('.sidebar-item:has-text("Pending Reviews")');
-    await expect(page.locator('h1:has-text("Pending Reviews")')).toBeVisible({ timeout: 10_000 });
+    await page.click('.sidebar-item:has-text("Pending Approvals")');
+    await page.waitForURL('**/proposals');
+    await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
-    // Should show a pending proposal
+    // Should show a pending proposal with an approve/commit action.
     await expect(page.locator('.card').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('button:has-text("Approve"), button:has-text("Commit")').first()).toBeVisible();
   });
@@ -99,7 +100,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     expect(revokeRes.ok()).toBe(true);
 
     // Receipt should be rejected
-    const receiptRes = await request.post(`${SP_URL}/api/sp/receipt`, {
+    const receiptRes = await request.post(`${SP_URL}/api/as/receipt`, {
       headers: { 'x-api-key': apiKey },
       data: {
         attestationHash: boundsHash,

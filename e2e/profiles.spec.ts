@@ -34,8 +34,8 @@ test.describe('Profiles API', () => {
     expect(profile).toHaveProperty('ttl');
   });
 
-  test('GET /api/sp/pubkey returns a public key', async ({ request }) => {
-    const res = await request.get(`${SP_URL}/api/sp/pubkey`);
+  test('GET /api/as/pubkey returns a public key', async ({ request }) => {
+    const res = await request.get(`${SP_URL}/api/as/pubkey`);
     expect(res.ok()).toBe(true);
 
     const { publicKey } = await res.json();
