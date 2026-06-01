@@ -5,7 +5,7 @@ test.describe('Activity & Attestation Pages', () => {
     const page = await authenticatedPage(browser, ALICE.apiKey);
 
     await page.goto(`${SP_URL}/dashboard/activity`);
-    await expect(page.locator('h1')).toContainText('Activity');
+    await expect(page.locator('h1')).toContainText('Receipts');
     await expect(page.locator('text=No execution receipts yet').or(page.locator('table'))).toBeVisible({ timeout: 10_000 });
 
     await page.context().close();

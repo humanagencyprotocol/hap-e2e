@@ -268,13 +268,24 @@ export async function signInToGateway(page: Page, apiKey: string): Promise<void>
   await page.locator('input[type="password"]').fill(apiKey);
   await page.locator('button:has-text("Sign In")').click();
 
-  // Single submit with a generous wait — the first login can be slow while the
-  // AS dev server compiles. Do NOT re-click on slowness: a second login()
-  // queues a second navigate('/') that fires late and clobbers the next
-  // navigation (e.g. reverting /integrations back to Dashboard). Then wait for
-  // the Dashboard to render so the post-login navigation has fully settled
-  // before any caller navigates away.
-  await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 45_000 });
+  // After submit, EITHER login succeeds (URL leaves /login) OR a "different
+  // account — wipe local data?" modal appears (switching accounts on the shared
+  // test gateway). The modal only appears after the login round-trip + 409, so
+  // race the two rather than using a fixed short timeout. Confirming the wipe is
+  // safe — the test gateway uses an isolated temp data dir (SUVEREN_DATA_DIR).
+  // (Single submit only — a re-click would queue a late navigate('/').)
+  const leftLogin = (timeout: number) =>
+    page.waitForURL(url => !url.toString().includes('/login'), { timeout });
+  const wipeBtn = page.locator('button:has-text("Wipe local data and sign in")');
+  await Promise.race([
+    leftLogin(45_000).catch(() => {}),
+    wipeBtn.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {}),
+  ]);
+  if (await wipeBtn.isVisible().catch(() => false)) {
+    await wipeBtn.click();
+  }
+  await leftLogin(45_000);
+  // Wait for the post-login navigation to settle on a real page.
   await expect(page.locator('.page-title')).toBeVisible({ timeout: 15_000 });
 }
 
@@ -430,9 +441,27 @@ export async function spApiAttest(
   apiKey: string,
   data: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
+  // Normalize v0.3 → v0.4: map defer_commitment → commitment_mode, drop the
+  // removed `path` field, and inject the caller's personal group_id (now
+  // required) when not supplied.
+  const body: Record<string, unknown> = { ...data };
+  if ('defer_commitment' in body) {
+    if (body.commitment_mode === undefined) {
+      body.commitment_mode = body.defer_commitment ? 'review' : 'automatic';
+    }
+    delete body.defer_commitment;
+  }
+  if (body.commitment_mode === undefined) body.commitment_mode = 'automatic';
+  delete body.path;
+  if (body.group_id === undefined) {
+    const gr = await request.get(`${SP_URL}/api/groups`, { headers: { 'x-api-key': apiKey } });
+    const groups = ((await gr.json()).groups ?? []) as Array<{ id: string; allowLazyEnable?: boolean; isPersonal?: boolean }>;
+    const personal = groups.find(g => g.allowLazyEnable || g.isPersonal) ?? groups[0];
+    body.group_id = personal?.id;
+  }
   const res = await request.post(`${SP_URL}/api/as/attest`, {
     headers: { 'x-api-key': apiKey },
-    data,
+    data: body,
   });
   if (!res.ok()) {
     const body = await res.json().catch(() => ({}));
