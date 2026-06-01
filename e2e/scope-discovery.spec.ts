@@ -20,15 +20,16 @@
  *   • BoundsEditor not passing `discoveryIntegrationId` to FieldRow.
  */
 
-import { test, expect, registerOnSP, signInToGateway, handleOnboarding, GW_URL } from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, GW_URL } from './fixtures';
 
 test.describe.serial('Scope field discovery', () => {
   let apiKey: string;
 
-  test.beforeAll(async ({ browser }) => {
-    const page = await browser.newPage();
-    apiKey = await registerOnSP(page, 'Diana');
-    await page.close();
+  test.beforeAll(async () => {
+    // Stable ALICE so the gateway sign-in doesn't trigger an account-switch
+    // wipe (which hangs while tearing down the prior spec's integrations).
+    await ensureUsersRegistered();
+    apiKey = ALICE.apiKey;
   });
 
   test('allowed_calendars renders as a live multi-select when manifest declares contextDiscovery', async ({ page }) => {
@@ -143,8 +144,11 @@ test.describe.serial('Scope field discovery', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    // Go straight to the new-auth flow
-    await page.goto(`${GW_URL}/authorizations?new=1`);
+    // Open the picker via SPA navigation. A full page.goto would drop the
+    // gateway's React-state auth and bounce to /login.
+    await page.click('.sidebar-item:has-text("Authorizations")');
+    await page.waitForURL('**/authorizations**');
+    await page.click('button:has-text("New authorization")');
     await page.waitForSelector('.profile-grid', { timeout: 10_000 });
 
     // Click Authorize on Calendar (mocked manifest + running state → Authorize button shows)
@@ -152,7 +156,7 @@ test.describe.serial('Scope field discovery', () => {
     await calendarCard.locator('button:has-text("Authorize")').click();
 
     // Template picker → pick Custom (goes directly to BoundsEditor without template bounds)
-    await page.locator('button:has-text("Custom")').click();
+    await page.locator('button:has-text("define your own")').click();
 
     // Wait for wizard
     await page.waitForURL(u => u.toString().includes('/agent/gate'), { timeout: 10_000 });
@@ -223,12 +227,14 @@ test.describe.serial('Scope field discovery', () => {
 
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
-    await page.goto(`${GW_URL}/authorizations?new=1`);
+    await page.click('.sidebar-item:has-text("Authorizations")');
+    await page.waitForURL('**/authorizations**');
+    await page.click('button:has-text("New authorization")');
     await page.waitForSelector('.profile-grid', { timeout: 10_000 });
 
     await page.locator('.card', { has: page.locator('text=Calendar') }).first()
       .locator('button:has-text("Authorize")').click();
-    await page.locator('button:has-text("Custom")').click();
+    await page.locator('button:has-text("define your own")').click();
     await page.waitForURL(u => u.toString().includes('/agent/gate'), { timeout: 10_000 });
 
     // The component must degrade to a text input (no checkboxes) + warning

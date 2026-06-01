@@ -7,7 +7,7 @@
  * 3. User reviews and commits/rejects in browser
  * 4. Revocation blocks further activity
  */
-import { test, expect, registerOnSP, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL } from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL } from './fixtures';
 
 test.describe.serial('Journey 5: Agent Flow', () => {
   let apiKey: string;
@@ -16,7 +16,10 @@ test.describe.serial('Journey 5: Agent Flow', () => {
 
   test('5.1 Register and activate integrations', async ({ page }) => {
     test.setTimeout(120_000);
-    apiKey = await registerOnSP(page, 'AgentUser');
+    // Stable ALICE (same account journey-1 uses) so the gateway sign-in never
+    // triggers an account-switch wipe — keeps all gateway specs off that path.
+    await ensureUsersRegistered();
+    apiKey = ALICE.apiKey;
     expect(apiKey).toBeTruthy();
 
     await signInToGateway(page, apiKey);
@@ -87,9 +90,11 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await page.waitForURL('**/proposals');
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
-    // Should show a pending proposal with an approve/commit action.
+    // Review-mode (deferred-commitment) proposals appear under the "All" tab,
+    // rendered as an ActionCard with an Approve action.
+    await page.click('.nav-tab:has-text("All")');
     await expect(page.locator('.card').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('button:has-text("Approve"), button:has-text("Commit")').first()).toBeVisible();
+    await expect(page.locator('button:has-text("Approve")').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('5.6 Revoke blocks further receipts', async ({ request }) => {
