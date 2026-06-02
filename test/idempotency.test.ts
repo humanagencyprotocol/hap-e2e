@@ -114,26 +114,25 @@ describe('M3 — automatic-mode idempotency', () => {
     expect(cum.daily.amount).toBe(60);
   });
 
-  it('still issues a fresh receipt each time when no idempotencyKey is sent', async () => {
-    const base = {
-      attestationHash: frameHash,
-      profileId: PROFILE_ID,
-      action: 'charge',
-      amount: 10,
-      executionContext: { amount: 10, currency: 'USD', action_type: 'charge' },
-    };
-    const a = await sp.postReceipt(apiKey, base);
-    const b = await sp.postReceipt(apiKey, base);
-    expect(a.status).toBe(201);
-    expect(b.status).toBe(201);
-    const ra = a.body.receipt as Record<string, unknown>;
-    const rb = b.body.receipt as Record<string, unknown>;
-    expect(ra.id).not.toBe(rb.id);
-    // Both counted: from 2 → 3 → 4.
-    const cumA = ra.cumulativeState as { daily: { count: number } };
-    const cumB = rb.cumulativeState as { daily: { count: number } };
-    expect(cumA.daily.count).toBe(3);
-    expect(cumB.daily.count).toBe(4);
+  it('REJECTS a synchronous receipt with no idempotencyKey (now required)', async () => {
+    // The key is required on the synchronous (automatic) path so exactly-once is
+    // guaranteed, not opt-in. Bypass the SPClient helper (which auto-defaults a
+    // key) with a raw fetch to genuinely omit it.
+    const res = await fetch(`${SP_URL}/api/as/receipt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify({
+        attestationHash: frameHash,
+        profileId: PROFILE_ID,
+        action: 'charge',
+        amount: 10,
+        executionContext: { amount: 10, currency: 'USD', action_type: 'charge' },
+        // no idempotencyKey
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: Array<{ code: string }> };
+    expect(body.errors?.[0]?.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
   });
 
   it('lost-response recovery: a replay creates NO second receipt record', async () => {
