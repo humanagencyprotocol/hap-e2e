@@ -165,6 +165,38 @@ describe('M3 — automatic-mode idempotency', () => {
       (first.body.receipt as { id: string }).id,
     );
   });
+
+  it('rejects a key reused for a DIFFERENT execution with IDEMPOTENCY_MISMATCH', async () => {
+    // A key identifies one execution. Reusing it with a different payload is a
+    // distinct action, not a retry — the AS must reject rather than return the
+    // original receipt (which would let the new action proceed uncounted).
+    const conflictKey = `idem-${Date.now()}-CONFLICT`;
+    const mk = (amount: number) => ({
+      attestationHash: frameHash,
+      profileId: PROFILE_ID,
+      action: 'charge',
+      amount,
+      executionContext: { amount, currency: 'USD', action_type: 'charge' },
+      idempotencyKey: conflictKey,
+    });
+
+    const first = await sp.postReceipt(apiKey, mk(7));
+    expect(first.status).toBe(201);
+
+    // Same key, different executionContext (amount 8 vs 7) → conflict.
+    const conflict = await sp.postReceipt(apiKey, mk(8));
+    expect(conflict.status).toBe(409);
+    const errors = conflict.body.errors as Array<{ code: string }> | undefined;
+    expect(errors?.[0]?.code).toBe('IDEMPOTENCY_MISMATCH');
+
+    // Same key, SAME payload still returns the original (only different payloads conflict).
+    const replay = await sp.postReceipt(apiKey, mk(7));
+    expect(replay.status).toBe(200);
+    expect(replay.body.idempotent).toBe(true);
+    expect((replay.body.receipt as { id: string }).id).toBe(
+      (first.body.receipt as { id: string }).id,
+    );
+  });
 });
 
 /**
