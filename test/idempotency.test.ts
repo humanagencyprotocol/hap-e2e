@@ -126,4 +126,34 @@ describe('M3 — automatic-mode idempotency', () => {
     expect(cumA.daily.count).toBe(3);
     expect(cumB.daily.count).toBe(4);
   });
+
+  it('lost-response recovery: a replay creates NO second receipt record', async () => {
+    // The deployed end-to-end guarantee: when the gateway retries after a lost
+    // response (same idempotencyKey), the AS must not just leave the counter
+    // unchanged — it must not persist a second receipt at all. We assert on the
+    // authoritative receipt index, not on the response body.
+    const lostKey = `idem-${Date.now()}-LOST`;
+    const body = {
+      attestationHash: frameHash,
+      profileId: PROFILE_ID,
+      action: 'charge',
+      amount: 5,
+      executionContext: { amount: 5, currency: 'USD', action_type: 'charge' },
+      idempotencyKey: lostKey,
+    };
+
+    const before = (await sp.getGroupReceipts(apiKey, groupId)).receipts.length;
+
+    const first = await sp.postReceipt(apiKey, body); // AS commits + persists
+    expect(first.status).toBe(201);
+    const retry = await sp.postReceipt(apiKey, body); // the "lost response" retry
+    expect(retry.status).toBe(200);
+    expect(retry.body.idempotent).toBe(true);
+
+    const after = (await sp.getGroupReceipts(apiKey, groupId)).receipts.length;
+    expect(after - before).toBe(1); // exactly one record for one logical execution
+    expect((retry.body.receipt as { id: string }).id).toBe(
+      (first.body.receipt as { id: string }).id,
+    );
+  });
 });
