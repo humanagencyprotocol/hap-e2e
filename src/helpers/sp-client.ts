@@ -1,3 +1,6 @@
+/** Monotonic counter so auto-defaulted idempotency keys are unique per call. */
+let receiptKeySeq = 0;
+
 /**
  * Thin HTTP client for the HAP Service Provider REST API.
  */
@@ -200,7 +203,12 @@ export class SPClient {
       idempotencyKey?: string;
     },
   ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const res = await this.request('POST', '/api/as/receipt', body, apiKey);
+    // Synchronous (automatic-mode) receipts REQUIRE an idempotencyKey. Default a
+    // unique one when the caller didn't set its own — mirrors the real gateway,
+    // which generates a key per tool invocation. An explicit `idempotencyKey` in
+    // `body` overrides this (replay/conflict tests rely on supplying their own).
+    const withKey = { idempotencyKey: `e2e-${Date.now()}-${++receiptKeySeq}`, ...body };
+    const res = await this.request('POST', '/api/as/receipt', withKey, apiKey);
     const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { status: res.status, body: responseBody };
   }
