@@ -203,11 +203,16 @@ export class SPClient {
       idempotencyKey?: string;
     },
   ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const { attestationHash, ...rest } = body;
+    // v0.5 wire contract: the receipt request carries the bare `boundsHash`, not
+    // the composite per-user key. Tests hold the composite frame_hash
+    // (`${boundsHash}:${userId}`); boundsHash is `sha256:<hex>` (one colon), so
+    // its first two colon-segments are the boundsHash (a bare hash maps to itself).
+    const boundsHash = attestationHash.split(':').slice(0, 2).join(':');
     // Synchronous (automatic-mode) receipts REQUIRE an idempotencyKey. Default a
-    // unique one when the caller didn't set its own — mirrors the real gateway,
-    // which generates a key per tool invocation. An explicit `idempotencyKey` in
-    // `body` overrides this (replay/conflict tests rely on supplying their own).
-    const withKey = { idempotencyKey: `e2e-${Date.now()}-${++receiptKeySeq}`, ...body };
+    // unique one when the caller didn't set its own — mirrors the real gateway.
+    // An explicit `idempotencyKey` in `body` overrides this.
+    const withKey = { idempotencyKey: `e2e-${Date.now()}-${++receiptKeySeq}`, boundsHash, ...rest };
     const res = await this.request('POST', '/api/as/receipt', withKey, apiKey);
     const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { status: res.status, body: responseBody };

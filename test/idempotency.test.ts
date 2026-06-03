@@ -122,7 +122,8 @@ describe('M3 — automatic-mode idempotency', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
       body: JSON.stringify({
-        attestationHash: frameHash,
+        // v0.5 wire: bare boundsHash (frameHash is `${boundsHash}:${userId}`).
+        boundsHash: frameHash.split(':').slice(0, 2).join(':'),
         profileId: PROFILE_ID,
         action: 'charge',
         amount: 10,
@@ -263,9 +264,9 @@ describe('M3 seam — real gateway client + real AS + lost response', () => {
       gw.setApiKey(gwApiKey);
 
       const { receipt } = await gw.postReceipt({
-        attestationHash: gwFrameHash,
+        // v0.5 wire: bare boundsHash (gwFrameHash is `${boundsHash}:${userId}`).
+        boundsHash: gwFrameHash.split(':').slice(0, 2).join(':'),
         profileId: PROFILE_ID,
-        path: 'charge',
         action: 'charge',
         actionType: 'charge',
         executionContext: { amount: 40, currency: 'USD', action_type: 'charge' },

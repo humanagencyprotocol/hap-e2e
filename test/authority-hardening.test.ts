@@ -123,11 +123,16 @@ describe('H2 — receipt rejects a caller who does not own the attestation', () 
     const att = await sp.submitAttestation(aliceKey, attestBody({}));
 
     // Bob is authenticated but is neither the creator nor a member of Alice's group.
+    // v0.5: the wire carries the bare boundsHash; the AS reconstructs the per-user
+    // storage key from boundsHash + the AUTHENTICATED user. So Bob can only ever
+    // address `${boundsHash}:${bob}` — never Alice's record — and his request
+    // can't even resolve. This is structurally stronger than the old H2 check,
+    // which had to reach Alice's record first in order to reject it.
     const r = await sp.postReceipt(bobKey, receiptBody(att.frame_hash));
 
-    expect(r.status).toBe(403);
+    expect(r.status).toBe(404);
     const err = (r.body.errors as Array<Record<string, unknown>>)[0];
-    expect(err.code).toBe('NOT_AUTHORIZED_FOR_ATTESTATION');
+    expect(err.code).toBe('ATTESTATION_NOT_FOUND');
   });
 
   it('still allows the rightful owner to post a receipt', async () => {
