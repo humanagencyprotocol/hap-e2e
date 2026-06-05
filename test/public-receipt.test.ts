@@ -23,6 +23,8 @@ const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
 
 const PUBLIC_FIELDS = [
   'id', 'profileId', 'actionType', 'action', 'timestamp', 'boundsHashShort', 'issuer', 'signatureValid',
+  // v0.5 Content Provenance — null on receipts whose profile declares no content_binding.
+  'contentHash', 'contentBinding',
 ].sort();
 const PRIVATE_FIELDS = ['userId', 'groupId', 'cumulativeState', 'limits', 'executionContext', 'path', 'signature'];
 
