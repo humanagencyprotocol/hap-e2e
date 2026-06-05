@@ -250,4 +250,22 @@ describe('Content binding — end to end', () => {
     const { body } = await getPublicReceipt(receiptId);
     expect(contentHashOf({ ...RECORD_ARGS, title: 'Q4 Strategy' })).not.toBe(body.contentHash);
   });
+
+  // Real-stack coverage for the receipts history paging fix: the windowed
+  // /api/receipts/mine returns recent receipts (not the old today-only default)
+  // and a `nextBefore` cursor that "Load older" walks to the floor.
+  it('the receipt is returned by the windowed /api/receipts/mine, with a cursor', async () => {
+    const page = await sp.getMyReceiptsPage(user.apiKey, { limit: 200 });
+    expect(page.receipts.some(r => r.id === receiptId)).toBe(true);
+    expect(typeof page.nextBefore).toBe('string'); // "Load older" cursor present
+  });
+
+  it('the "Load older" cursor walk terminates at the history floor', async () => {
+    let cursor: string | null = (await sp.getMyReceiptsPage(user.apiKey, { limit: 50 })).nextBefore;
+    let steps = 0;
+    while (cursor && steps++ < 40) {
+      cursor = (await sp.getMyReceiptsPage(user.apiKey, { before: cursor, limit: 50 })).nextBefore;
+    }
+    expect(cursor).toBeNull();
+  });
 });

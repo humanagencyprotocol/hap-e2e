@@ -234,4 +234,26 @@ export class SPClient {
     }
     return res.json();
   }
+
+  /**
+   * A page of the caller's own receipts. With no `before` the AS returns the
+   * most recent window; `nextBefore` is the cursor for the next (older) window
+   * (null at the history floor). Mirrors the gateway UI's "Load older".
+   */
+  async getMyReceiptsPage(
+    apiKey: string,
+    options?: { before?: string; limit?: number },
+  ): Promise<{ receipts: Array<Record<string, unknown>>; nextBefore: string | null }> {
+    const params = new URLSearchParams();
+    if (options?.before) params.set('before', options.before);
+    if (options?.limit) params.set('limit', String(options.limit));
+    const qs = params.toString();
+    const res = await this.request('GET', `/api/receipts/mine${qs ? '?' + qs : ''}`, undefined, apiKey);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(`getMyReceiptsPage failed (${res.status}): ${JSON.stringify(body)}`);
+    }
+    const data = await res.json() as { receipts?: Array<Record<string, unknown>>; nextBefore?: string | null };
+    return { receipts: data.receipts ?? [], nextBefore: data.nextBefore ?? null };
+  }
 }
