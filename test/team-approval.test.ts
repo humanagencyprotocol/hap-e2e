@@ -141,6 +141,39 @@ describe('Intent sharing', () => {
   });
 });
 
+// ── 2b. Intent-disclosure C2 binding (the AS rejects a tampered disclosure) ────
+
+describe('Intent disclosure — C2 binding', () => {
+  const attestWithIntent = (overrides: Record<string, unknown>) =>
+    api('POST', '/api/as/attest', agentKey, {
+      profile_id: PROFILE_ID,
+      group_id: groupId,
+      bounds: BOUNDS,
+      context_hash: computeContextHash({}, []),
+      domain: agentId,
+      did: agentDid,
+      commitment_mode: 'automatic',
+      gate_content_hashes: hashGateContent({ intent: 'Manage customer records on the team’s behalf.' }),
+      execution_context_hash: hashExecutionContext({ action_type: 'write' }),
+      ...INTENT,
+      ...overrides,
+    });
+
+  it('rejects an attestation whose intent_disclosure_hash does not match', async () => {
+    const res = await attestWithIntent({ intent_disclosure_hash: 'sha256:deadbeef' });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('intent_disclosure_hash');
+  });
+
+  it('rejects encrypted_keys carrying a recipient not in approvers_frozen', async () => {
+    const res = await attestWithIntent({
+      encrypted_keys: { ...INTENT.encrypted_keys, 'ghost-user': { ct: 'X==', enc: 'Y==' } },
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('ghost-user');
+  });
+});
+
 // ── 3. Team approval: escalate → approve → commit ─────────────────────────────
 
 describe('Team approval (above-cap escalation)', () => {
