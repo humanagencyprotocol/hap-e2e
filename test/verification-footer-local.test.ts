@@ -110,7 +110,7 @@ describe('Setup', () => {
 
   it('adds the LOCAL records integration gated under publish', async () => {
     const result = await gw.addIntegration({
-      id: 'records',
+      id: 'recordspublish',
       name: 'Records',
       command: 'node',
       args: [RECORDS_DIST],
@@ -128,7 +128,7 @@ describe('Setup', () => {
       },
     });
     expect(result.ok).toBe(true);
-    expect(result.tools.some((t) => t.startsWith('records__'))).toBe(true);
+    expect(result.tools.some((t) => t.startsWith('recordspublish__'))).toBe(true);
     await sleep(1_000);
   });
 
@@ -139,7 +139,7 @@ describe('Setup', () => {
     await client.connect(transport);
     mcpClient = client;
     const { tools } = await client.listTools();
-    expect(tools.filter((t) => t.name.startsWith('records__')).length).toBeGreaterThan(0);
+    expect(tools.filter((t) => t.name.startsWith('recordspublish__')).length).toBeGreaterThan(0);
   });
 });
 
@@ -149,7 +149,7 @@ describe('Footer — end to end', () => {
 
   it('a gated write under a Category-A profile gets the verification footer in its content', async () => {
     const result = await mcpClient.callTool({
-      name: 'records__create_record',
+      name: 'recordspublish__create_record',
       arguments: { type: 'note', title: 'Launch announcement', content: 'We shipped Level 2 content binding today.' },
     });
     if (result.isError) {
@@ -167,7 +167,7 @@ describe('Footer — end to end', () => {
   });
 
   it('the footer survives storage (read-back shows the same footer + link)', async () => {
-    const result = await mcpClient.callTool({ name: 'records__get_record', arguments: { id: recordId } });
+    const result = await mcpClient.callTool({ name: 'recordspublish__get_record', arguments: { id: recordId } });
     expect(result.isError).not.toBe(true);
     const record = JSON.parse((result.content as Array<{ text: string }>)[0].text);
     expect(record.content).toContain(FOOTER_MARKER);
