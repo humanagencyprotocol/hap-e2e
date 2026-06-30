@@ -50,6 +50,9 @@ export class ProcessManager {
         ...process.env,
         ALLOW_REGISTRATION: 'true',
         SUVEREN_TEST_DIRECT_REGISTER: 'true',
+        // Seed local-admin (key 'local-dev-key') is an operator → can verify
+        // identities (v0.6 Identity Assurance e2e).
+        ADMIN_USER_IDS: 'local-admin',
         PORT: String(port),
         // No Redis env vars → in-memory storage. The fail-closed guard in
         // redis.ts/keys.ts only trips in production; the dev escape hatch
