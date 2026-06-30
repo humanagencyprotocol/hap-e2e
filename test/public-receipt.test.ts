@@ -25,6 +25,8 @@ const PUBLIC_FIELDS = [
   'id', 'profileId', 'actionType', 'action', 'timestamp', 'boundsHashShort', 'issuer', 'signatureValid',
   // v0.5 Content Provenance — null on receipts whose profile declares no content_binding.
   'contentHash', 'contentBinding',
+  // v0.6 Identity Assurance — the disclosed verified identity; null when pseudonymous.
+  'identity',
 ].sort();
 const PRIVATE_FIELDS = ['userId', 'groupId', 'cumulativeState', 'limits', 'executionContext', 'path', 'signature'];
 
