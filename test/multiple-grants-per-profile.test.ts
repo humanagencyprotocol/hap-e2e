@@ -8,7 +8,7 @@
  * overwrote the first — one lost its intent ("Gate content not available")
  * and disappeared from the agent's list-authorizations.
  *
- * The fix keys the cache and gate store by frameHash (unique per
+ * The fix keys the cache and gate store by authorizationId (unique per
  * authorization). This test creates two email@0.4 grants with distinct
  * bounds, scope, and intent, pushes their gate content WITHOUT an execution
  * path (the real v0.4 flow that collided), and asserts both survive — each
@@ -106,7 +106,7 @@ async function submitGrant(grant: {
   // keyed this by profileId, so the second grant overwrote the first.
   await gw.pushGateContent(
     {
-      frameHash: result.frame_hash,
+      authorizationId: result.authorization_id,
       boundsHash: result.bounds_hash ?? boundsHash,
       contextHash,
       context: grant.context,
@@ -115,7 +115,7 @@ async function submitGrant(grant: {
     grant.gateContent,
   );
 
-  return result.frame_hash;
+  return result.authorization_id;
 }
 
 async function listAuthorizations(domain?: string): Promise<string> {

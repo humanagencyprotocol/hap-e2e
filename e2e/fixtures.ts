@@ -7,6 +7,7 @@
 
 import { test as base, expect, type Page, type Browser, type APIRequestContext } from '@playwright/test';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -445,6 +446,9 @@ export async function spApiAttest(
   // removed `path` field, and inject the caller's personal group_id (now
   // required) when not supplied.
   const body: Record<string, unknown> = { ...data };
+  if (body.authorization_id === undefined) {
+    body.authorization_id = `authz_${randomUUID()}`;
+  }
   if ('defer_commitment' in body) {
     if (body.commitment_mode === undefined) {
       body.commitment_mode = body.defer_commitment ? 'review' : 'automatic';

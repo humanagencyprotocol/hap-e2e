@@ -34,7 +34,7 @@ const sp = new SPClient(SP_URL);
 let apiKey = '';
 let did = '';
 let groupId = '';
-let frameHash = '';
+let authorizationId = '';
 
 beforeAll(async () => {
   await pm.startSP(SP_PORT);
@@ -55,7 +55,7 @@ beforeAll(async () => {
     gate_content_hashes: hashGateContent({ intent: 'Idempotency replay test.' }),
     execution_context_hash: hashExecutionContext({ action_type: 'charge', amount: 30, currency: 'USD' }),
   });
-  frameHash = att.frame_hash;
+  authorizationId = att.authorization_id;
 }, 60_000);
 
 afterAll(async () => {
@@ -65,7 +65,7 @@ afterAll(async () => {
 describe('M3 — automatic-mode idempotency', () => {
   const key = `idem-${Date.now()}-A`;
   const receiptBody = {
-    attestationHash: '',
+    authorizationId: '',
     profileId: PROFILE_ID,
     action: 'charge',
     amount: 30,
@@ -76,7 +76,7 @@ describe('M3 — automatic-mode idempotency', () => {
   let firstReceiptId = '';
 
   it('issues a receipt on first POST (201)', async () => {
-    receiptBody.attestationHash = frameHash;
+    receiptBody.authorizationId = authorizationId;
     const r = await sp.postReceipt(apiKey, receiptBody);
     expect(r.status).toBe(201);
     const receipt = r.body.receipt as Record<string, unknown>;
@@ -122,13 +122,12 @@ describe('M3 — automatic-mode idempotency', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
       body: JSON.stringify({
-        // v0.5 wire: bare boundsHash (frameHash is `${boundsHash}:${userId}`).
-        boundsHash: frameHash.split(':').slice(0, 2).join(':'),
+        authorizationId,
         profileId: PROFILE_ID,
         action: 'charge',
         amount: 10,
         executionContext: { amount: 10, currency: 'USD', action_type: 'charge' },
-        // no idempotencyKey
+        // no idempotencyKey — AS must reject with IDEMPOTENCY_KEY_REQUIRED
       }),
     });
     expect(res.status).toBe(400);
@@ -143,7 +142,7 @@ describe('M3 — automatic-mode idempotency', () => {
     // authoritative receipt index, not on the response body.
     const lostKey = `idem-${Date.now()}-LOST`;
     const body = {
-      attestationHash: frameHash,
+      authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
       amount: 5,
@@ -172,7 +171,7 @@ describe('M3 — automatic-mode idempotency', () => {
     // original receipt (which would let the new action proceed uncounted).
     const conflictKey = `idem-${Date.now()}-CONFLICT`;
     const mk = (amount: number) => ({
-      attestationHash: frameHash,
+      authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
       amount,
@@ -220,7 +219,7 @@ describe('M3 — automatic-mode idempotency', () => {
  */
 describe('M3 seam — real gateway client + real AS + lost response', () => {
   let gwApiKey = '';
-  let gwFrameHash = '';
+  let gwAuthorizationId = '';
 
   beforeAll(async () => {
     const user = await sp.register('Idem Seam', `idem-seam-${Date.now()}@test.local`);
@@ -237,7 +236,7 @@ describe('M3 seam — real gateway client + real AS + lost response', () => {
       gate_content_hashes: hashGateContent({ intent: 'Seam test.' }),
       execution_context_hash: hashExecutionContext({ action_type: 'charge', amount: 40, currency: 'USD' }),
     });
-    gwFrameHash = att.frame_hash;
+    gwAuthorizationId = att.authorization_id;
   }, 60_000);
 
   it('recovers a lost response end-to-end: one execution, counted once', async () => {
@@ -264,8 +263,7 @@ describe('M3 seam — real gateway client + real AS + lost response', () => {
       gw.setApiKey(gwApiKey);
 
       const { receipt } = await gw.postReceipt({
-        // v0.5 wire: bare boundsHash (gwFrameHash is `${boundsHash}:${userId}`).
-        boundsHash: gwFrameHash.split(':').slice(0, 2).join(':'),
+        authorizationId: gwAuthorizationId,
         profileId: PROFILE_ID,
         action: 'charge',
         actionType: 'charge',

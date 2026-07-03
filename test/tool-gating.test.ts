@@ -120,9 +120,9 @@ describe('Tool Gating', () => {
       commitment_mode: 'automatic',
     });
 
-    // Push gate content (frameHash = per-user storage key from the attest response)
+    // Push gate content keyed by the per-ceremony authorizationId from the attest response
     await gw.pushGateContent(
-      { frameHash: att.frame_hash, boundsHash, contextHash, context: {} },
+      { authorizationId: att.authorization_id, boundsHash, contextHash, context: {} },
       path,
       { intent: 'test' },
     );

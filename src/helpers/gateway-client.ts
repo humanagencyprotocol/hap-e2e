@@ -36,23 +36,24 @@ export class GatewayClient {
   async pushGateContent(
     hashOrOpts:
       | string
-      | { frameHash?: string; boundsHash: string; contextHash: string; context?: Record<string, unknown> }
-      | { frameHash?: string; boundsHash: string; contextHash: string; context?: Record<string, unknown>; path: string; gateContent: { intent?: string } },
+      | { authorizationId: string; boundsHash?: string; contextHash?: string; context?: Record<string, unknown> }
+      | { authorizationId: string; boundsHash?: string; contextHash?: string; context?: Record<string, unknown>; path: string; gateContent: { intent?: string } },
     path?: string,
     gateContent?: { intent?: string },
   ): Promise<void> {
     let body: Record<string, unknown>;
 
     if (typeof hashOrOpts === 'string') {
-      body = { frameHash: hashOrOpts, path, gateContent };
+      // String form: the per-ceremony authorization id.
+      body = { authorizationId: hashOrOpts, path, gateContent };
     } else if ('path' in hashOrOpts && 'gateContent' in hashOrOpts) {
-      // All-in-one object form: { frameHash?, boundsHash, contextHash, context, path, gateContent }
-      const { path: p, gateContent: gc, ...rest } = hashOrOpts as { frameHash?: string; boundsHash: string; contextHash: string; context?: Record<string, unknown>; path: string; gateContent: Record<string, string> };
+      // All-in-one object form: { authorizationId, boundsHash?, contextHash?, context?, path, gateContent }
+      const { path: p, gateContent: gc, ...rest } = hashOrOpts as { authorizationId: string; boundsHash?: string; contextHash?: string; context?: Record<string, unknown>; path: string; gateContent: Record<string, string> };
       body = { ...rest, path: p, gateContent: gc };
     } else {
-      // v0.4: send frameHash (per-user storage key) for the AS lookup; boundsHash
-      // is the content fingerprint used for gate-store matching.
-      body = { frameHash: hashOrOpts.frameHash, boundsHash: hashOrOpts.boundsHash, contextHash: hashOrOpts.contextHash, context: hashOrOpts.context, path, gateContent };
+      // The gateway stores gate content keyed by the per-ceremony
+      // authorizationId — the only identity; fingerprints never key anything.
+      body = { authorizationId: hashOrOpts.authorizationId, boundsHash: hashOrOpts.boundsHash, contextHash: hashOrOpts.contextHash, context: hashOrOpts.context, path, gateContent };
     }
 
     const res = await this.request('POST', '/internal/gate-content', body);

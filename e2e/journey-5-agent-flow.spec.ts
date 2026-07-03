@@ -12,7 +12,7 @@ import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnbo
 test.describe.serial('Journey 5: Agent Flow', () => {
   let apiKey: string;
   let userDid: string;
-  let boundsHash: string;
+  let authorizationId: string;
 
   test('5.1 Register and activate integrations', async ({ page }) => {
     test.setTimeout(120_000);
@@ -61,15 +61,15 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     });
     expect(data.status).toBe('active');
     expect(data.deferred_commitment_domains).toContain('owner');
-    // Proposals/revoke/receipts key on the per-user storage key (frame_hash).
-    boundsHash = (data.frame_hash ?? data.bounds_hash) as string;
+    // Proposals/revoke/receipts key on the per-ceremony authorization id.
+    authorizationId = data.authorization_id as string;
   });
 
   test('5.4 Create proposal (simulating agent tool call)', async ({ request }) => {
     const res = await request.post(`${SP_URL}/api/proposals`, {
       headers: { 'x-api-key': apiKey },
       data: {
-        frame_hash: boundsHash,
+        authorization_id: authorizationId,
         profile_id: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
         pending_domains: ['owner'],
         tool: 'crm__create_contact',
@@ -98,7 +98,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
   });
 
   test('5.6 Revoke blocks further receipts', async ({ request }) => {
-    const revokeRes = await request.post(`${SP_URL}/api/attestations/${encodeURIComponent(boundsHash)}/revoke`, {
+    const revokeRes = await request.post(`${SP_URL}/api/authorizations/${encodeURIComponent(authorizationId)}/revoke`, {
       headers: { 'x-api-key': apiKey },
       data: { reason: 'E2E test revocation' },
     });
@@ -108,10 +108,11 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     const receiptRes = await request.post(`${SP_URL}/api/as/receipt`, {
       headers: { 'x-api-key': apiKey },
       data: {
-        attestationHash: boundsHash,
+        authorizationId,
         profileId: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
         action: 'create_contact',
         executionContext: { contact_type: 'customer' },
+        idempotencyKey: `journey5-revoked-${Date.now()}`,
       },
     });
     expect(receiptRes.status()).toBe(403);

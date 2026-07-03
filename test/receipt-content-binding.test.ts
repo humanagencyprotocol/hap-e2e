@@ -100,7 +100,7 @@ let user: { id: string; name: string; email: string; did: string; apiKey: string
 let personalGroupId: string;
 let boundsHash: string;
 let contextHash: string;
-let frameHash: string;
+let authorizationId: string;
 let mcpClient: Client;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -157,14 +157,14 @@ describe('Setup', () => {
       gate_content_hashes: gateContentHashes,
       execution_context_hash: executionContextHash,
     });
-    frameHash = result.frame_hash;
-    expect(frameHash).toBeTruthy();
+    authorizationId = result.authorization_id;
+    expect(authorizationId).toBeTruthy();
     expect(result.status).toMatch(/active|pending/);
   });
 
   it('configures the gateway and pushes gate content', async () => {
     await gw.configure({ sessionCookie: 'cb-e2e-test', apiKey: user.apiKey });
-    await gw.pushGateContent({ frameHash, boundsHash, contextHash, context: CONTEXT }, EXEC_PATH, GATE_CONTENT);
+    await gw.pushGateContent({ authorizationId, boundsHash, contextHash, context: CONTEXT }, EXEC_PATH, GATE_CONTENT);
   });
 
   it('adds the LOCAL records integration', async () => {
