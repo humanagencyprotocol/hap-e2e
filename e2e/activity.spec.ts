@@ -6,7 +6,9 @@ test.describe('Activity & Attestation Pages', () => {
 
     await page.goto(`${SP_URL}/dashboard/activity`);
     await expect(page.locator('h1')).toContainText('Receipts');
-    await expect(page.locator('text=No execution receipts yet').or(page.locator('table'))).toBeVisible({ timeout: 10_000 });
+    // Windowed receipts walk: empty state reads "No execution receipts in the
+    // last 30 days." (was "…yet" before paging shipped).
+    await expect(page.locator('text=No execution receipts').or(page.locator('table'))).toBeVisible({ timeout: 10_000 });
 
     await page.context().close();
   });
