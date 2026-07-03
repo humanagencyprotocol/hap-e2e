@@ -10,7 +10,7 @@ import { test, expect, ensureUsersRegistered, ALICE, spApiAttest, spApiReceipt, 
 
 test.describe.serial('Journey 6: Expiry & Extension', () => {
   let apiKey: string;
-  let boundsHash: string;
+  let authorizationId: string;
 
   test('6.1 Register user', async () => {
     // Reuse the stable ALICE account: signing into the gateway as a brand-new
@@ -37,9 +37,9 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
       execution_context_hash: 'sha256:' + 'b'.repeat(64),
       ttl: 60,
     });
-    // Receipts/lookups key on the per-user storage key (frame_hash).
-    boundsHash = (data.frame_hash ?? data.bounds_hash) as string;
-    expect(boundsHash).toBeTruthy();
+    // Receipts/lookups key on the per-ceremony authorization id.
+    authorizationId = data.authorization_id as string;
+    expect(authorizationId).toBeTruthy();
   });
 
   test('6.3 Authorization is active before expiry', async ({ request }) => {
@@ -53,8 +53,8 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
     });
     expect(res.ok()).toBe(true);
     const { attestations } = await res.json();
-    const our = attestations.find((a: { boundsHash?: string; frameHash?: string }) =>
-      a.frameHash === boundsHash || a.boundsHash === boundsHash);
+    const our = attestations.find((a: { authorization_id?: string }) =>
+      a.authorization_id === authorizationId);
     expect(our).toBeDefined();
     expect((our as { status?: string }).status).not.toBe('expired');
   });
@@ -70,7 +70,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
 
   test('6.5 Receipt rejected after expiry', async ({ request }) => {
     const receipt = await spApiReceipt(request, apiKey, {
-      attestationHash: boundsHash,
+      authorizationId,
       profileId: 'github.com/humanagencyprotocol/hap-profiles/records@0.4',
       action: 'create_record',
       executionContext: {},
