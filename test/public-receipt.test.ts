@@ -62,7 +62,7 @@ beforeAll(async () => {
   });
 
   const r = await sp.postReceipt(user.apiKey, {
-    attestationHash: att.frame_hash,
+    authorizationId: att.authorization_id,
     profileId: PROFILE_ID,
     action: 'charge',
     amount: 20,

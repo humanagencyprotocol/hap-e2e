@@ -67,8 +67,8 @@ function attestBody(extra: Record<string, unknown>) {
   };
 }
 
-const receiptBody = (attestationHash: string) => ({
-  attestationHash,
+const receiptBody = (authorizationId: string) => ({
+  authorizationId,
   profileId: PROFILE_ID,
   action: 'charge',
   amount: 10,
@@ -98,7 +98,7 @@ describe('H1 — receipt rejects bounds that do not match the signed bounds_hash
   it('positive control: a correctly-signed attestation produces a valid receipt', async () => {
     // bounds_hash omitted → AS computes the correct one. Receipt should succeed.
     const att = await sp.submitAttestation(aliceKey, attestBody({}));
-    const r = await sp.postReceipt(aliceKey, receiptBody(att.frame_hash));
+    const r = await sp.postReceipt(aliceKey, receiptBody(att.authorization_id));
     expect(r.status).toBe(201);
     expect(r.body.receipt).toBeTruthy();
   });
@@ -107,7 +107,7 @@ describe('H1 — receipt rejects bounds that do not match the signed bounds_hash
     // Sign with a bogus bounds_hash while storing the real BOUNDS — the AS must
     // recompute the hash from the stored bounds on receipt and reject.
     const att = await sp.submitAttestation(aliceKey, attestBody({ bounds_hash: BOGUS_BOUNDS_HASH }));
-    const r = await sp.postReceipt(aliceKey, receiptBody(att.frame_hash));
+    const r = await sp.postReceipt(aliceKey, receiptBody(att.authorization_id));
 
     expect(r.status).toBe(403);
     const err = (r.body.errors as Array<Record<string, unknown>>)[0];
@@ -123,21 +123,19 @@ describe('H2 — receipt rejects a caller who does not own the attestation', () 
     const att = await sp.submitAttestation(aliceKey, attestBody({}));
 
     // Bob is authenticated but is neither the creator nor a member of Alice's group.
-    // v0.5: the wire carries the bare boundsHash; the AS reconstructs the per-user
-    // storage key from boundsHash + the AUTHENTICATED user. So Bob can only ever
-    // address `${boundsHash}:${bob}` — never Alice's record — and his request
-    // can't even resolve. This is structurally stronger than the old H2 check,
-    // which had to reach Alice's record first in order to reject it.
-    const r = await sp.postReceipt(bobKey, receiptBody(att.frame_hash));
+    // In the per-ceremony identity model the AS finds the record by authorizationId
+    // and then explicitly rejects Bob at the H2 ownership check (creator or active
+    // group member). 403 NOT_AUTHORIZED_FOR_ATTESTATION is the correct response.
+    const r = await sp.postReceipt(bobKey, receiptBody(att.authorization_id));
 
-    expect(r.status).toBe(404);
+    expect(r.status).toBe(403);
     const err = (r.body.errors as Array<Record<string, unknown>>)[0];
-    expect(err.code).toBe('ATTESTATION_NOT_FOUND');
+    expect(err.code).toBe('NOT_AUTHORIZED_FOR_ATTESTATION');
   });
 
   it('still allows the rightful owner to post a receipt', async () => {
     const att = await sp.submitAttestation(aliceKey, attestBody({}));
-    const r = await sp.postReceipt(aliceKey, receiptBody(att.frame_hash));
+    const r = await sp.postReceipt(aliceKey, receiptBody(att.authorization_id));
     expect(r.status).toBe(201);
   });
 });

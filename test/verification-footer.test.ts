@@ -41,7 +41,9 @@ const EXEC_PATH = 'email-send';
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const FOOTER_MARKER = '— Sent by an AI agent via Suveren';
+// Email profile → verb "Sent"; ASCII "--" separator (mojibake-immune);
+// "Receipt:" label — the receipt is the precondition proof, not a "Verify" CTA.
+const FOOTER_MARKER = '-- Sent by an AI agent via Suveren. Receipt:';
 const RECEIPT_LINK = /https?:\/\/[^\s"]+\/r\/([0-9a-fA-F-]{36})/;
 
 const TEST_RECIPIENT = 'andreas@sublin.app';
@@ -75,9 +77,8 @@ async function submitEmailAttestation(): Promise<string> {
     gate_content_hashes: hashGateContent(GATE_CONTENT),
     execution_context_hash: hashExecutionContext({ recipient_count: 1, allowed_recipients: TEST_RECIPIENT, allowed_domains: TEST_DOMAIN }),
   });
-  const hash = result.bounds_hash ?? result.frame_hash;
-  await gw.pushGateContent({ boundsHash: hash, contextHash, context: CONTEXT }, EXEC_PATH, GATE_CONTENT);
-  return hash;
+  await gw.pushGateContent({ authorizationId: result.authorization_id, boundsHash: result.bounds_hash, contextHash, context: CONTEXT }, EXEC_PATH, GATE_CONTENT);
+  return result.authorization_id;
 }
 
 /** Find the just-sent message body by subject, retrying for Gmail indexing. */

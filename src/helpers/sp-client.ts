@@ -1,5 +1,17 @@
+import { randomUUID } from 'node:crypto';
+
 /** Monotonic counter so auto-defaulted idempotency keys are unique per call. */
 let receiptKeySeq = 0;
+
+/**
+ * Mint a per-ceremony authorization identity, exactly as the gateway UI does
+ * at ceremony start. UUIDv4 collision odds are negligible, and the AS creates
+ * the record NX — a genuine duplicate would surface as AUTHZ_MISMATCH, never
+ * a silent merge.
+ */
+export function mintAuthorizationId(): string {
+  return `authz_${randomUUID()}`;
+}
 
 /**
  * Thin HTTP client for the HAP Service Provider REST API.
@@ -130,9 +142,21 @@ export class SPClient {
 
   // ── Attestation ─────────────────────────────────────────
 
+  /**
+   * POST /api/as/attest — per-ceremony identity wire (v0.6).
+   *
+   * The caller (the ceremony) mints the `authorization_id` (`authz_<uuid>`);
+   * when omitted the helper mints one, mirroring the gateway UI. The AS
+   * creates the identity NX — replaying the same id with the same content is
+   * an idempotent retry; different content is a 409 AUTHZ_MISMATCH.
+   */
   async submitAttestation(
     apiKey: string,
     body: {
+      /** Per-ceremony identity (authz_<uuid>). Auto-minted when omitted. */
+      authorization_id?: string;
+      /** Renew (extend expiry of) an existing authorization — content must match. */
+      renew?: boolean;
       profile_id: string;
       /** v0.4 requires group_id on every attestation (use personal group for individual flows). */
       group_id: string;
@@ -148,17 +172,17 @@ export class SPClient {
       execution_context_hash: string;
     },
   ): Promise<{
+    authorization_id: string;
     attestation_id: string;
-    /** v0.3 hash key */
-    frame_hash: string;
-    /** v0.4 hash key */
     bounds_hash?: string;
     blob: string;
     status: string;
     attested_domains: string[];
     required_domains: string[];
+    version: number;
   }> {
-    const res = await this.request('POST', '/api/as/attest', body, apiKey);
+    const withId = { authorization_id: mintAuthorizationId(), ...body };
+    const res = await this.request('POST', '/api/as/attest', withId, apiKey);
     if (!res.ok) {
       const respBody = await res.json().catch(() => ({}));
       throw new Error(`submitAttestation failed (${res.status}): ${JSON.stringify(respBody)}`);
@@ -166,34 +190,84 @@ export class SPClient {
     return res.json();
   }
 
-  async revokeAttestation(
+  /**
+   * Like submitAttestation but never throws — returns { status, body } so
+   * tests can assert on rejection paths (409 AUTHZ_MISMATCH / AUTHZ_REVOKED,
+   * 403 foreign group) without try/catch gymnastics.
+   */
+  async submitAttestationRaw(
     apiKey: string,
-    frameHash: string,
+    body: Record<string, unknown>,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await this.request('POST', '/api/as/attest', body, apiKey);
+    const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return { status: res.status, body: responseBody };
+  }
+
+  /** POST /api/authorizations/:id/revoke — permanent; there is no un-revoke. */
+  async revokeAuthorization(
+    apiKey: string,
+    authorizationId: string,
     reason?: string,
   ): Promise<{ revocation: unknown }> {
     const res = await this.request(
       'POST',
-      `/api/attestations/${encodeURIComponent(frameHash)}/revoke`,
+      `/api/authorizations/${encodeURIComponent(authorizationId)}/revoke`,
       { reason },
       apiKey,
     );
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(`revokeAttestation failed (${res.status}): ${JSON.stringify(body)}`);
+      throw new Error(`revokeAuthorization failed (${res.status}): ${JSON.stringify(body)}`);
     }
     return res.json();
+  }
+
+  /** GET /api/authorizations/:id/status */
+  async getAuthorizationStatus(
+    apiKey: string,
+    authorizationId: string,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await this.request(
+      'GET',
+      `/api/authorizations/${encodeURIComponent(authorizationId)}/status`,
+      undefined,
+      apiKey,
+    );
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return { status: res.status, body };
+  }
+
+  /** GET /api/authorizations/:id — the summary the gateway's tool-proxy reads. */
+  async getAuthorizationSummary(
+    apiKey: string,
+    authorizationId: string,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await this.request(
+      'GET',
+      `/api/authorizations/${encodeURIComponent(authorizationId)}`,
+      undefined,
+      apiKey,
+    );
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return { status: res.status, body };
   }
 
   // ── Receipts ────────────────────────────────────────────
 
   /**
-   * POST /api/as/receipt — submit an execution receipt for limit enforcement.
+   * POST /api/as/receipt — request the signed receipt pre-flight.
    * Returns status and response body; does NOT throw on 403.
+   *
+   * Wire (v0.6): the request names the governing grant by `authorizationId`;
+   * `boundsHash` is an optional integrity cross-check (409 on disagreement).
    */
   async postReceipt(
     apiKey: string,
     body: {
-      attestationHash: string;
+      authorizationId: string;
+      /** Optional cross-check — the AS 409s if it disagrees with the record. */
+      boundsHash?: string;
       profileId: string;
       action: string;
       actionType?: string;
@@ -203,16 +277,10 @@ export class SPClient {
       idempotencyKey?: string;
     },
   ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const { attestationHash, ...rest } = body;
-    // v0.5 wire contract: the receipt request carries the bare `boundsHash`, not
-    // the composite per-user key. Tests hold the composite frame_hash
-    // (`${boundsHash}:${userId}`); boundsHash is `sha256:<hex>` (one colon), so
-    // its first two colon-segments are the boundsHash (a bare hash maps to itself).
-    const boundsHash = attestationHash.split(':').slice(0, 2).join(':');
     // Synchronous (automatic-mode) receipts REQUIRE an idempotencyKey. Default a
     // unique one when the caller didn't set its own — mirrors the real gateway.
     // An explicit `idempotencyKey` in `body` overrides this.
-    const withKey = { idempotencyKey: `e2e-${Date.now()}-${++receiptKeySeq}`, boundsHash, ...rest };
+    const withKey = { idempotencyKey: `e2e-${Date.now()}-${++receiptKeySeq}`, ...body };
     const res = await this.request('POST', '/api/as/receipt', withKey, apiKey);
     const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { status: res.status, body: responseBody };

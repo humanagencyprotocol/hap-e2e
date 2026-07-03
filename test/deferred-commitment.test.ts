@@ -64,7 +64,7 @@ beforeAll(async () => {
   });
 
   await gw.pushGateContent(
-    { frameHash: att.frame_hash, boundsHash, contextHash, context: {} },
+    { authorizationId: att.authorization_id, boundsHash, contextHash, context: {} },
     path,
     { intent: 'test' },
   );
@@ -157,7 +157,7 @@ describe('Deferred Commitment', () => {
     });
 
     await gw.pushGateContent(
-      { frameHash: att2.frame_hash, boundsHash: bh, contextHash: ch, context: {} },
+      { authorizationId: att2.authorization_id, boundsHash: bh, contextHash: ch, context: {} },
       path,
       { intent: 'test' },
     );

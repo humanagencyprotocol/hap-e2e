@@ -80,7 +80,7 @@ const GATE_CONTENT = {
 let userApiKey = '';
 let userDid = '';
 let personalGroupId = '';
-let attestationHash = '';
+let authorizationId = '';
 let mcpClient: Client | null = null;
 
 // ── Clients ─────────────────────────────────────────────────────────────────
@@ -119,16 +119,15 @@ async function submitEmailAttestation(bounds: Record<string, unknown>): Promise<
     execution_context_hash: executionContextHash,
   });
 
-  const hash = result.bounds_hash ?? result.frame_hash;
-
-  // Push gate content to gateway so it knows about this authorization
+  // Push gate content to gateway so it knows about this authorization.
+  // The gateway stores gate content keyed by the per-ceremony authorizationId.
   await gw.pushGateContent(
-    { boundsHash: hash, contextHash, context: CONTEXT },
+    { authorizationId: result.authorization_id, boundsHash: result.bounds_hash, contextHash, context: CONTEXT },
     EXEC_PATH,
     GATE_CONTENT,
   );
 
-  return hash;
+  return result.authorization_id;
 }
 
 async function sendTestEmail(): Promise<{ isError: boolean; text: string }> {
@@ -219,9 +218,9 @@ afterAll(async () => {
 
 describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Setup', () => {
   it('creates authorization for email-send', async () => {
-    attestationHash = await submitEmailAttestation(BOUNDS);
-    expect(attestationHash).toBeTruthy();
-    console.error(`[E2E-Email] Authorization hash: ${attestationHash}`);
+    authorizationId = await submitEmailAttestation(BOUNDS);
+    expect(authorizationId).toBeTruthy();
+    console.error(`[E2E-Email] Authorization id: ${authorizationId}`);
   });
 
   it('connects MCP client via SSE', async () => {
@@ -258,7 +257,7 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Send (authorized)', () => {
   it('receipt was recorded in SP', async () => {
     // Verify via direct SP API — the receipt should exist
     const result = await sp.postReceipt(userApiKey, {
-      attestationHash,
+      authorizationId,
       profileId: PROFILE_ID,
       action: 'send',
       executionContext: {
@@ -303,13 +302,13 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Out-of-scope recipient', () => 
 
 describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Revoke', () => {
   it('revokes the authorization', async () => {
-    const result = await sp.revokeAttestation(
+    const result = await sp.revokeAuthorization(
       userApiKey,
-      attestationHash,
+      authorizationId,
       'E2E test: revoking email access',
     );
     expect(result.revocation).toBeTruthy();
-    console.error(`[E2E-Email] Revoked authorization: ${attestationHash}`);
+    console.error(`[E2E-Email] Revoked authorization: ${authorizationId}`);
   });
 
   it('send email → rejected after revocation', async () => {
@@ -332,11 +331,12 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Re-authorize', () => {
       send_daily_max: 5,
     };
 
-    const newHash = await submitEmailAttestation(tighterBounds);
-    expect(newHash).toBeTruthy();
-    expect(newHash).not.toBe(attestationHash);
-    attestationHash = newHash;
-    console.error(`[E2E-Email] New authorization hash: ${attestationHash}`);
+    const newId = await submitEmailAttestation(tighterBounds);
+    expect(newId).toBeTruthy();
+    // Each submitAttestation mints a fresh authorization_id — the new grant is independent.
+    expect(newId).not.toBe(authorizationId);
+    authorizationId = newId;
+    console.error(`[E2E-Email] New authorization id: ${authorizationId}`);
 
     // Give gateway time to pick up new gate content
     await sleep(1_000);

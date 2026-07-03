@@ -46,7 +46,11 @@ const CONTEXT = { allowed_platforms: 'linkedin', content_type: 'text', audience:
 
 const GATE_CONTENT = { intent: 'E2E: verification-footer (creds-free) — bounded public publishing.' };
 
-const FOOTER_MARKER = '— Sent by an AI agent via Suveren';
+// Publish profile → verb "Published"; ASCII "--" separator (mojibake-immune);
+// "Receipt:" label — the receipt is the precondition proof, not a "Verify" CTA.
+const FOOTER_MARKER = '-- Published by an AI agent via Suveren. Receipt:';
+// Constant second line promoting the protocol — present on every footer.
+const HAP_LINE = '-- Suveren is an implementation of the Human Agency Protocol (HAP), an open protocol to delegate execution to AI agents under human authority. https://www.humanagencyprotocol.org/';
 const RECEIPT_LINK = /\/r\/([0-9a-fA-F-]{36})/;
 
 const pm = new ProcessManager();
@@ -57,7 +61,7 @@ let user: { id: string; name: string; email: string; did: string; apiKey: string
 let personalGroupId: string;
 let boundsHash: string;
 let contextHash: string;
-let frameHash: string;
+let authorizationId: string;
 let mcpClient: Client;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -99,13 +103,13 @@ describe('Setup', () => {
       gate_content_hashes: gateContentHashes,
       execution_context_hash: executionContextHash,
     });
-    frameHash = result.frame_hash;
-    expect(frameHash).toBeTruthy();
+    authorizationId = result.authorization_id;
+    expect(authorizationId).toBeTruthy();
   });
 
   it('configures the gateway and pushes gate content', async () => {
     await gw.configure({ sessionCookie: 'footer-local-test', apiKey: user.apiKey });
-    await gw.pushGateContent({ frameHash, boundsHash, contextHash, context: CONTEXT }, EXEC_PATH, GATE_CONTENT);
+    await gw.pushGateContent({ authorizationId, boundsHash, contextHash, context: CONTEXT }, EXEC_PATH, GATE_CONTENT);
   });
 
   it('adds the LOCAL records integration gated under publish', async () => {
@@ -160,6 +164,7 @@ describe('Footer — end to end', () => {
     const record = JSON.parse((result.content as Array<{ text: string }>)[0].text);
     recordId = record.id;
     expect(record.content).toContain(FOOTER_MARKER);
+    expect(record.content).toContain(HAP_LINE);
 
     const match = RECEIPT_LINK.exec(record.content as string);
     expect(match).not.toBeNull();

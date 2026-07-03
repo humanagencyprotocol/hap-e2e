@@ -65,7 +65,7 @@ beforeAll(async () => {
   });
 
   await gw.pushGateContent(
-    { frameHash: att.frame_hash, boundsHash, contextHash, context: {} },
+    { authorizationId: att.authorization_id, boundsHash, contextHash, context: {} },
     path,
     { intent: 'test' },
   );

@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ProcessManager } from '../src/helpers/process-manager.js';
-import { SPClient } from '../src/helpers/sp-client.js';
+import { SPClient, mintAuthorizationId } from '../src/helpers/sp-client.js';
 import { hashGateContent, hashExecutionContext, computeContextHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 15300;
@@ -35,7 +35,7 @@ let agentId = '';
 let agentDid = '';
 let outsiderKey = '';
 let groupId = '';
-let frameHash = '';
+let authorizationId = '';
 
 // Above the cap (write_daily_max cap is 1) so the authority is flagged above_cap.
 const BOUNDS = { profile: PROFILE_ID, write_daily_max: 2, delete_daily_max: 1 };
@@ -58,7 +58,7 @@ async function api(method: string, path: string, apiKey: string, body?: unknown)
 
 const writeReceipt = () =>
   sp.postReceipt(agentKey, {
-    attestationHash: frameHash,
+    authorizationId,
     profileId: PROFILE_ID,
     action: 'crm__create_contact',
     actionType: 'write',
@@ -105,6 +105,7 @@ afterAll(async () => {
 describe('Above-cap authorization with shared intent', () => {
   it('accepts an above-cap team authorization and flags it above_cap', async () => {
     const res = await api('POST', '/api/as/attest', agentKey, {
+      authorization_id: mintAuthorizationId(),
       profile_id: PROFILE_ID,
       group_id: groupId,
       bounds: BOUNDS,
@@ -113,15 +114,15 @@ describe('Above-cap authorization with shared intent', () => {
       domain: agentId, // v0.4 team: resolved domain is the member's userId
       did: agentDid,
       commitment_mode: 'automatic',
-      gate_content_hashes: hashGateContent({ intent: 'Manage customer records on the team’s behalf.' }),
+      gate_content_hashes: hashGateContent({ intent: "Manage customer records on the team's behalf." }),
       execution_context_hash: hashExecutionContext({ action_type: 'write' }),
       ...INTENT,
     });
 
     expect(res.status).toBe(201);
     expect(res.body.above_cap).toBe(true);
-    frameHash = res.body.frame_hash as string;
-    expect(frameHash).toBeTruthy();
+    authorizationId = res.body.authorization_id as string;
+    expect(authorizationId).toBeTruthy();
   });
 });
 
@@ -129,14 +130,14 @@ describe('Above-cap authorization with shared intent', () => {
 
 describe('Intent sharing', () => {
   it('lets an approver fetch the encrypted intent', async () => {
-    const res = await api('GET', `/api/attestations/${encodeURIComponent(frameHash)}/intent`, adminKey);
+    const res = await api('GET', `/api/authorizations/${encodeURIComponent(authorizationId)}/intent`, adminKey);
     expect(res.status).toBe(200);
     // The approver receives the ciphertext + their own wrapped key.
     expect(JSON.stringify(res.body)).toContain('CT_FOR_ADMIN');
   });
 
   it('denies a non-approver outsider', async () => {
-    const res = await api('GET', `/api/attestations/${encodeURIComponent(frameHash)}/intent`, outsiderKey);
+    const res = await api('GET', `/api/authorizations/${encodeURIComponent(authorizationId)}/intent`, outsiderKey);
     expect(res.status).toBe(403);
   });
 });
@@ -146,6 +147,7 @@ describe('Intent sharing', () => {
 describe('Intent disclosure — C2 binding', () => {
   const attestWithIntent = (overrides: Record<string, unknown>) =>
     api('POST', '/api/as/attest', agentKey, {
+      authorization_id: mintAuthorizationId(),
       profile_id: PROFILE_ID,
       group_id: groupId,
       bounds: BOUNDS,
@@ -153,7 +155,7 @@ describe('Intent disclosure — C2 binding', () => {
       domain: agentId,
       did: agentDid,
       commitment_mode: 'automatic',
-      gate_content_hashes: hashGateContent({ intent: 'Manage customer records on the team’s behalf.' }),
+      gate_content_hashes: hashGateContent({ intent: "Manage customer records on the team's behalf." }),
       execution_context_hash: hashExecutionContext({ action_type: 'write' }),
       ...INTENT,
       ...overrides,
@@ -194,7 +196,7 @@ describe('Team approval (above-cap escalation)', () => {
   it('routes a proposal to the approver, who approves it → committed', async () => {
     // The gateway would create this on the 409; we create it directly.
     const created = await api('POST', '/api/proposals', agentKey, {
-      frame_hash: frameHash,
+      authorization_id: authorizationId,
       profile_id: PROFILE_ID,
       tool: 'crm__create_contact',
       tool_args: { name: 'Escalated Contact' },
@@ -213,7 +215,7 @@ describe('Team approval (above-cap escalation)', () => {
 
   it('does not let a non-approver approve', async () => {
     const created = await api('POST', '/api/proposals', agentKey, {
-      frame_hash: frameHash,
+      authorization_id: authorizationId,
       profile_id: PROFILE_ID,
       tool: 'crm__create_contact',
       tool_args: { name: 'Another Contact' },

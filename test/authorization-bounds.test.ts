@@ -59,7 +59,7 @@ const GATE_CONTENT = { intent: 'Authorization bounds enforcement test. Validate 
 let agentApiKey = '';
 let agentDid = '';
 let groupId = '';
-let attestationHash = '';
+let authorizationId = '';
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -111,10 +111,11 @@ describe('Authorization Bounds — Attestation', () => {
       execution_context_hash: executionContextHash,
     });
 
-    // The receipt + revoke routes key on the per-user storage key (frame_hash =
-    // `boundsHash:userId`), NOT the bare content fingerprint (bounds_hash).
-    attestationHash = result.frame_hash;
-    expect(attestationHash).toBeTruthy();
+    // The receipt route keys on the per-ceremony authorizationId, not on a
+    // content fingerprint. The AS mints the id (or honours the caller-supplied
+    // one) and returns it in authorization_id.
+    authorizationId = result.authorization_id;
+    expect(authorizationId).toBeTruthy();
     expect(result.status).toMatch(/active|pending/);
   });
 });
@@ -124,7 +125,7 @@ describe('Authorization Bounds — Attestation', () => {
 describe('Authorization Bounds — Receipt Enforcement', () => {
   it('$20 receipt succeeds (under per-tx max of $25)', async () => {
     const result = await sp.postReceipt(agentApiKey, {
-      attestationHash,
+      authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
       amount: 20,
@@ -137,7 +138,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
 
   it('$30 receipt fails — exceeds per-tx amount_max of $25', async () => {
     const result = await sp.postReceipt(agentApiKey, {
-      attestationHash,
+      authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
       amount: 30,
@@ -154,7 +155,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
 
   it('second $20 receipt succeeds (cumulative: $40, under daily max $50)', async () => {
     const result = await sp.postReceipt(agentApiKey, {
-      attestationHash,
+      authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
       amount: 20,
@@ -175,7 +176,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
 
   it('third $20 receipt fails — cumulative $60 exceeds daily amount_max of $50', async () => {
     const result = await sp.postReceipt(agentApiKey, {
-      attestationHash,
+      authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
       amount: 20,
@@ -193,7 +194,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     // Daily amount is $40 (from two $20 successes). A $5 transaction stays under
     // the $50 daily ceiling but may hit the daily count limit (3) — both valid.
     const result = await sp.postReceipt(agentApiKey, {
-      attestationHash,
+      authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
       amount: 5,

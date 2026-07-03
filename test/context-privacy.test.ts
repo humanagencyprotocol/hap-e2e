@@ -11,7 +11,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { join } from 'node:path';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
-import { SPClient } from '../src/helpers/sp-client.js';
+import { SPClient, mintAuthorizationId } from '../src/helpers/sp-client.js';
 import { hashGateContent, computeBoundsHash, computeContextHash, hashExecutionContext } from '../src/helpers/crypto.js';
 
 // ── Constants ─────────────────────────────────────────────
@@ -140,6 +140,7 @@ describe('Context Privacy', () => {
           'X-API-Key': agentApiKey,
         },
         body: JSON.stringify({
+          authorization_id: mintAuthorizationId(),
           profile_id: PROFILE_ID,
           group_id: groupId,
           bounds: BOUNDS,
@@ -178,9 +179,10 @@ describe('Context Privacy', () => {
 
   describe('Receipt request — context values must not be sent to SP', () => {
     it('receipt request body uses context hash not context content', () => {
-      // Construct a receipt request as the gateway would
+      // Construct a receipt request as the gateway would — the per-ceremony
+      // authorizationId identifies the governing grant; no context content is sent.
       const receiptRequest = {
-        attestationHash: boundsHash,
+        authorizationId: 'authz_00000000-0000-0000-0000-000000000000',
         profileId: PROFILE_ID,
         action: 'charge',
         amount: 50,

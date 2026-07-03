@@ -50,7 +50,7 @@ let user: { id: string; name: string; email: string; did: string; apiKey: string
 let personalGroupId: string;
 let boundsHash: string;
 let contextHash: string;
-let frameHash: string;
+let authorizationId: string;
 let mcpClient: Client;
 
 function sleep(ms: number): Promise<void> {
@@ -118,11 +118,11 @@ describe('Authorization', () => {
       execution_context_hash: executionContextHash,
     });
 
-    frameHash = result.frame_hash;
-    expect(frameHash).toBeTruthy();
+    authorizationId = result.authorization_id;
+    expect(authorizationId).toBeTruthy();
     expect(result.status).toMatch(/active|pending/);
     expect(result.blob).toBeTruthy();
-    console.error(`[CRM E2E] Attestation created: ${result.frame_hash}`);
+    console.error(`[CRM E2E] Attestation created: ${result.authorization_id}`);
   });
 });
 
@@ -140,7 +140,7 @@ describe('Gateway Configuration', () => {
 
   it('pushes gate content', async () => {
     await gw.pushGateContent(
-      { frameHash, boundsHash, contextHash, context: CONTEXT },
+      { authorizationId, boundsHash, contextHash, context: CONTEXT },
       EXEC_PATH,
       GATE_CONTENT,
     );
@@ -467,9 +467,9 @@ describe('Bounds Enforcement — Daily Write Limit', () => {
 
 describe('Revocation', () => {
   it('user revokes the authorization', async () => {
-    const result = await sp.revokeAttestation(
+    const result = await sp.revokeAuthorization(
       user.apiKey,
-      frameHash,
+      authorizationId,
       'CRM E2E test revocation',
     );
     expect(result.revocation).toBeTruthy();

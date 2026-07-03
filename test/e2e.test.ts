@@ -48,6 +48,9 @@ const pm = new ProcessManager();
 const sp = new SPClient(SP_URL);
 const gw = new GatewayClient(GW_URL);
 
+/** Per-ceremony authorization id for the Attestation block's grant. */
+let authorizationId = '';
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -151,9 +154,9 @@ describe('Attestation', () => {
       execution_context_hash: executionContextHash,
     });
 
-    // frame_hash is the per-user storage key; bounds_hash is the content hash.
-    ctx.frameHash = result.frame_hash;
-    expect(ctx.frameHash).toBeTruthy();
+    // authorization_id is the per-ceremony identity; bounds_hash is the content fingerprint.
+    authorizationId = result.authorization_id;
+    expect(authorizationId).toBeTruthy();
     expect(result.status).toMatch(/active|pending/);
     expect(result.blob).toBeTruthy();
     expect(result.bounds_hash).toBe(boundsHash);
@@ -176,7 +179,7 @@ describe('Gateway Configuration', () => {
     const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
     const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
     await gw.pushGateContent(
-      { frameHash: ctx.frameHash, boundsHash, contextHash, context: CONTEXT },
+      { authorizationId, boundsHash, contextHash, context: CONTEXT },
       EXEC_PATH,
       ctx.gateContent,
     );
@@ -358,9 +361,9 @@ describe.skipIf(!STRIPE_TEST_KEY)('MCP Tool Calls — Stripe', () => {
 
 describe.skipIf(!STRIPE_TEST_KEY)('Revocation', () => {
   it('Alice revokes the attestation', async () => {
-    const result = await sp.revokeAttestation(
+    const result = await sp.revokeAuthorization(
       ctx.adminUser!.apiKey,
-      ctx.frameHash!,
+      authorizationId,
       'E2E test revocation',
     );
     expect(result.revocation).toBeTruthy();
