@@ -103,8 +103,10 @@ describe('Tool Gating', () => {
 
   it('tool enabled after creating authorization', async () => {
     // customers@0.5: the CRM read gate binds to `read_access`, which exists
-    // only from 0.5 onward. Under a 0.4 grant every CRM read fails closed, so
-    // find_contacts below could never succeed.
+    // only from 0.5 onward (crm.json gates reads on it, F9). Under a 0.4
+    // grant every CRM read fails closed, so find_contacts below could never
+    // succeed. keyOrder must match the profile's boundsSchema.keyOrder so the
+    // Authority Server hashes identically.
     const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.5';
     const path = profile;
     const bounds = { profile, read_access: 'unlimited', write_daily_max: 5, delete_daily_max: 2 };

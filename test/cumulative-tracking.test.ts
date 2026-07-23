@@ -95,18 +95,23 @@ beforeAll(async () => {
         update_deal: { executionMapping: {}, staticExecution: { action_type: 'write' } },
         create_task: { executionMapping: {}, staticExecution: { action_type: 'write' } },
         complete_task: { executionMapping: {}, staticExecution: { action_type: 'write' } },
-        // Governed by the read_access static gate, mirroring crm.json.
-        find_contacts: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
-        get_timeline: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
-        get_pipeline: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
-        list_tasks: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
-        export_crm: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+        // F9: synthetic test manifest — these reads aren't what this test
+        // exercises (it tests cumulative WRITE bounds), so declare an explicit
+        // governance exemption rather than the real read_access gate.
+        find_contacts: { category: 'read', readGovernance: 'none' },
+        get_timeline: { category: 'read', readGovernance: 'none' },
+        get_pipeline: { category: 'read', readGovernance: 'none' },
+        list_tasks: { category: 'read', readGovernance: 'none' },
+        export_crm: { category: 'read', readGovernance: 'none' },
       },
     },
   });
 
-  // Wait for CRM MCP server to start
-  await new Promise(r => setTimeout(r, 8_000));
+  // Poll for real readiness rather than guessing a duration. A cold
+  // `npm install` of crm-mcp was measured at ~12s — it only fits inside a fixed
+  // sleep when npm's cache is warm, so this passes locally and flakes on CI,
+  // which is the worst version of the bug.
+  await gw.waitForIntegration('crm');
 
   const transport = new SSEClientTransport(new URL(`http://localhost:${GW_PORT}/sse`));
   mcpClient = new Client({ name: 'test-agent', version: '1.0.0' }, { capabilities: {} });
