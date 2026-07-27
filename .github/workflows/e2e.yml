@@ -1,0 +1,125 @@
+name: Protocol conformance E2E
+
+# Runs the real-stack suite: a real Authority Server (in-memory storage), a real
+# gateway built from source, and real MCP servers over stdio. No mocks.
+#
+# Why this exists: the suite is the only place enforcement is proven end to end,
+# and nothing ran it automatically. Ten tests sat red against merged read
+# enforcement until someone ran it by hand — including a user-facing migration
+# cliff (CRM reads fail closed under customers@0.4) that no unit test could see.
+#
+# The scheduled run is not redundant with the PR run: this suite spans five
+# repositories, and its two most recent breakages were pure cross-repo drift —
+# a footer string changed in the gateway, and a profile moved 0.4 → 0.5. Nothing
+# in THIS repo changed either time, so only a periodic run against everyone's
+# main catches that class.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # 06:00 UTC daily — drift detection against every repo's main.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      gateway_ref:
+        description: 'suveren-gateway ref to test against (branch, tag or SHA). Defaults to main.'
+        required: false
+        default: 'main'
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # The harness resolves siblings from the repo's PARENT directory
+      # (process-manager.ts: ROOT = hap-e2e/../), so every repo is checked out
+      # alongside hap-e2e rather than inside it.
+      - name: Check out hap-e2e
+        uses: actions/checkout@v6
+        with:
+          path: hap-e2e
+
+      - name: Check out suveren-gateway
+        uses: actions/checkout@v6
+        with:
+          repository: suverenai/suveren-gateway
+          path: suveren-gateway
+          # For a gateway PR this is overridden via workflow_dispatch inputs;
+          # on a schedule it takes main, which is the point of the nightly.
+          ref: ${{ github.event.inputs.gateway_ref || 'main' }}
+
+      # PRIVATE, and in a different org — needs a token with read access.
+      # Without HAP_CI_TOKEN this step fails and the job stops here rather than
+      # silently running a partial suite.
+      - name: Check out suveren-as
+        uses: actions/checkout@v6
+        with:
+          repository: suverenai/suveren-as
+          path: suveren-as
+          token: ${{ secrets.HAP_CI_TOKEN }}
+
+      - name: Check out hap-profiles
+        uses: actions/checkout@v6
+        with:
+          repository: humanagencyprotocol/hap-profiles
+          path: hap-profiles
+
+      - name: Check out hap-records-mcp
+        uses: actions/checkout@v6
+        with:
+          repository: humanagencyprotocol/hap-records-mcp
+          path: hap-records-mcp
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Install — gateway
+        working-directory: suveren-gateway
+        run: pnpm install --frozen-lockfile
+
+      - name: Install — Authority Server
+        working-directory: suveren-as
+        run: npm ci
+
+      - name: Install — records MCP
+        working-directory: hap-records-mcp
+        run: npm ci
+
+      - name: Install — e2e
+        working-directory: hap-e2e
+        run: npm ci
+
+      # The suite spawns crm-mcp via npm on first use. Warming the cache here
+      # keeps a cold ~12s install off the critical path; the harness polls for
+      # readiness regardless, so this is a speed-up, not a correctness crutch.
+      - name: Warm the integration npm cache
+        run: npm install -g @humanagencyp/crm-mcp @humanagencyp/records-mcp || true
+
+      - name: Run E2E
+        working-directory: hap-e2e
+        # No Gmail/Google credentials: four suites self-skip. Everything that
+        # gates reads, writes, bounds and receipts runs credential-free, which
+        # is what makes this viable as a required check.
+        run: npx vitest run
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            hap-e2e/test-results/**
+          if-no-files-found: ignore
+          retention-days: 7
