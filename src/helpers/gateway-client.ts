@@ -114,4 +114,36 @@ export class GatewayClient {
     const res = await fetch(`${this.baseUrl}/health`);
     return res.json();
   }
+
+  /** Current status of every registered integration. */
+  async integrations(): Promise<Array<{ id: string; running?: boolean; error?: string }>> {
+    const res = await this.request('GET', '/internal/integrations');
+    if (!res.ok) return [];
+    const body = (await res.json()) as { integrations?: Array<{ id: string; running?: boolean; error?: string }> };
+    return body.integrations ?? [];
+  }
+
+  /**
+   * Block until an integration is actually running.
+   *
+   * Replaces the fixed `sleep(10_000)` these suites used to rely on. That sleep
+   * only ever worked by accident: the gateway installed integrations with a
+   * BLOCKING execSync, so the install always finished before a test could run.
+   * Installing asynchronously (required to keep the event loop responsive, and
+   * to spawn npm correctly on Windows) means a cold `npm install` — measured at
+   * ~12s for crm-mcp — now overruns any fixed wait. Poll for the real state
+   * instead of guessing a duration.
+   */
+  async waitForIntegration(id: string, timeoutMs = 120_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let last = 'never reported';
+    while (Date.now() < deadline) {
+      const entry = (await this.integrations().catch(() => [])).find((i) => i.id === id);
+      if (entry?.running) return;
+      if (entry?.error) last = `error: ${entry.error}`;
+      else if (entry) last = 'registered, not yet running';
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new Error(`Integration "${id}" did not start within ${timeoutMs}ms (${last})`);
+  }
 }

@@ -43,10 +43,12 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: `api-key=${apiKey}`, apiKey });
 
   // Create authorization with write_daily_max = 3, delete_daily_max = 1
-  const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
+  const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.5';
   const path = profile;
-  const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4', write_daily_max: 3, delete_daily_max: 1 };
-  const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
+  // read_access is required for the CRM read gate; it exists only from
+  // customers@0.5 onward.
+  const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/customers@0.5', read_access: 'unlimited', write_daily_max: 3, delete_daily_max: 1 };
+  const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
   const gateHashes = hashGateContent({ intent: 'test' });
   const ecHash = hashExecutionContext({ profile, domain: 'owner' });
@@ -93,11 +95,12 @@ beforeAll(async () => {
         update_deal: { executionMapping: {}, staticExecution: { action_type: 'write' } },
         create_task: { executionMapping: {}, staticExecution: { action_type: 'write' } },
         complete_task: { executionMapping: {}, staticExecution: { action_type: 'write' } },
-        find_contacts: { category: 'read' },
-        get_timeline: { category: 'read' },
-        get_pipeline: { category: 'read' },
-        list_tasks: { category: 'read' },
-        export_crm: { category: 'read' },
+        // Governed by the read_access static gate, mirroring crm.json.
+        find_contacts: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+        get_timeline: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+        get_pipeline: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+        list_tasks: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+        export_crm: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
       },
     },
   });

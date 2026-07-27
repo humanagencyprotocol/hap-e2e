@@ -50,7 +50,9 @@ const GATE_CONTENT = { intent: 'E2E: verification-footer (creds-free) — bounde
 // "Receipt:" label — the receipt is the precondition proof, not a "Verify" CTA.
 const FOOTER_MARKER = '-- Published by an AI agent via Suveren. Receipt:';
 // Constant second line promoting the protocol — present on every footer.
-const HAP_LINE = '-- Suveren is an implementation of the Human Agency Protocol (HAP), an open protocol to delegate execution to AI agents under human authority. https://www.humanagencyprotocol.org/';
+// Footer v1.1 wording (suveren-gateway e56555b shortened it). Source of truth:
+// apps/mcp-server/src/lib/receipt-footer.ts — keep this in step with it.
+const HAP_LINE = '-- Suveren implements HAP, the open Human Agency Protocol: https://www.humanagencyprotocol.org/';
 const RECEIPT_LINK = /\/r\/([0-9a-fA-F-]{36})/;
 
 const pm = new ProcessManager();
@@ -125,9 +127,27 @@ describe('Setup', () => {
         default: { executionMapping: {}, staticExecution: { allowed_platforms: 'linkedin', content_type: 'text', audience: 'public', action_type: 'post' } },
         overrides: {
           create_record: { executionMapping: {}, staticExecution: { allowed_platforms: 'linkedin', content_type: 'text', audience: 'public', action_type: 'post' } },
-          get_record: { category: 'read' },
-          list_records: { category: 'read' },
-          search_records: { category: 'read' },
+          // Read tools must declare governance (F9) or they are denied. The
+          // publish profile has no read model — the records store is only a
+          // sink here, read back to prove the footer survived storage — so an
+          // explicit, reasoned exemption is the honest declaration rather than
+          // inventing a bound this profile does not define.
+          get_record: {
+            category: 'read',
+            readGovernance: 'none',
+            readGovernanceReason:
+              'Test harness reads back its own just-written record to verify the footer persisted. The publish profile defines no read bounds; nothing user-owned is exposed.',
+          },
+          list_records: {
+            category: 'read',
+            readGovernance: 'none',
+            readGovernanceReason: 'As get_record — harness read-back only, under a profile with no read model.',
+          },
+          search_records: {
+            category: 'read',
+            readGovernance: 'none',
+            readGovernanceReason: 'As get_record — harness read-back only, under a profile with no read model.',
+          },
         },
       },
     });
