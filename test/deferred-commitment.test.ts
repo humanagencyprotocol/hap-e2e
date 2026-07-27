@@ -69,6 +69,11 @@ beforeAll(async () => {
     { intent: 'test' },
   );
 
+  // The crm tools must exist before the MCP client connects and snapshots the
+  // tool list. A fixed sleep used to suffice only because installs blocked the
+  // event loop; now that they are async (needed on Windows, and to keep the
+  // server responsive), a cold npm install of crm-mcp runs ~12s.
+  await gw.waitForIntegration('crm');
   await new Promise(r => setTimeout(r, 2_000));
 
   const transport = new SSEClientTransport(new URL(`http://localhost:${GW_PORT}/sse`));

@@ -183,10 +183,16 @@ describe('Setup', () => {
           update_record: { executionMapping: {}, staticExecution: { action_type: 'write' } },
           delete_record: { executionMapping: {}, staticExecution: { action_type: 'delete' } },
           archive_record: { executionMapping: {}, staticExecution: { action_type: 'archive' } },
-          get_record: { category: 'read' },
-          list_records: { category: 'read' },
-          search_records: { category: 'read' },
-          export_records: { category: 'read' },
+          // Read tools MUST declare governance (F9): a static gate, a read
+          // adapter, or an explicit exemption. A bare `category: "read"` is
+          // ungoverned and is denied at runtime — which is the correct
+          // behaviour, and is what this inline gating used to trip over.
+          // Mirrors content/integrations/records.json so the test exercises
+          // the shipped gate rather than a shape no connector ships.
+          get_record: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+          list_records: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+          search_records: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+          export_records: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
         },
       },
     });

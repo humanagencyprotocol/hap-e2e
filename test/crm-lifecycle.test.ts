@@ -15,18 +15,22 @@ const GW_PORT = 17030;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
+// customers@0.5 — the CRM read gate binds to `read_access`, a bound that
+// only exists from 0.5 onward. A 0.4 grant cannot satisfy it, so every CRM
+// read fails closed under 0.4.
+const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.5';
 const PROFILE_SHORT = 'customers';
 const EXEC_PATH = PROFILE_ID;
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'write_daily_max', 'delete_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'write_daily_max', 'delete_daily_max'];
 const CONTEXT_KEY_ORDER = ['contact_type'];
 
 const BOUNDS = {
   profile: PROFILE_ID,
+  read_access: 'unlimited',
   write_daily_max: 10,
   delete_daily_max: 5,
 };
@@ -169,11 +173,14 @@ describe('Gateway Configuration', () => {
           update_deal: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
           create_task: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
           complete_task: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
-          find_contacts: { category: 'read' },
-          get_timeline: { category: 'read' },
-          get_pipeline: { category: 'read' },
-          list_tasks: { category: 'read' },
-          export_crm: { category: 'read' },
+          // Mirrors content/integrations/crm.json: reads are governed by a
+          // static gate on read_access. A bare `category: "read"` declares no
+          // governance and is denied at runtime (F9).
+          find_contacts: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+          get_timeline: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+          get_pipeline: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+          list_tasks: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+          export_crm: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
         },
       },
     });
