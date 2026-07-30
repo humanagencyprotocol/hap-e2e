@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { fetchResilient } from './http.js';
 
 /** Monotonic counter so auto-defaulted idempotency keys are unique per call. */
 let receiptKeySeq = 0;
@@ -35,7 +36,7 @@ export class SPClient {
     if (key) {
       headers['X-API-Key'] = key;
     }
-    return fetch(`${this.baseUrl}${path}`, {
+    return fetchResilient(`${this.baseUrl}${path}`, {
       method,
       headers,
       body: body != null ? JSON.stringify(body) : undefined,
