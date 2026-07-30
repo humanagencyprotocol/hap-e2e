@@ -173,14 +173,14 @@ describe('Gateway Configuration', () => {
           update_deal: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
           create_task: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
           complete_task: { executionMapping: {}, staticExecution: { contact_type: 'customer', action_type: 'write' } },
-          // Mirrors content/integrations/crm.json: reads are governed by a
-          // static gate on read_access. A bare `category: "read"` declares no
-          // governance and is denied at runtime (F9).
-          find_contacts: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
-          get_timeline: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
-          get_pipeline: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
-          list_tasks: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
-          export_crm: { category: 'read', boundField: 'read_access', requiredValue: 'unlimited' },
+          // F9: synthetic test manifest — this test exercises the CRUD
+          // lifecycle + write bounds, not read governance, so declare an
+          // explicit exemption rather than the real read_access gate.
+          find_contacts: { category: 'read', readGovernance: 'none' },
+          get_timeline: { category: 'read', readGovernance: 'none' },
+          get_pipeline: { category: 'read', readGovernance: 'none' },
+          list_tasks: { category: 'read', readGovernance: 'none' },
+          export_crm: { category: 'read', readGovernance: 'none' },
         },
       },
     });
