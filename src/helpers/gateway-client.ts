@@ -2,6 +2,7 @@
  * Thin HTTP client for the HAP Gateway internal endpoints.
  * All requests go to loopback — gateway enforces loopback-only access.
  */
+import { fetchResilient } from './http.js';
 export class GatewayClient {
   constructor(private baseUrl: string) {}
 
@@ -10,7 +11,7 @@ export class GatewayClient {
     path: string,
     body?: unknown,
   ): Promise<Response> {
-    return fetch(`${this.baseUrl}${path}`, {
+    return fetchResilient(`${this.baseUrl}${path}`, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body != null ? JSON.stringify(body) : undefined,
@@ -111,16 +112,27 @@ export class GatewayClient {
   // ── Health ──────────────────────────────────────────────
 
   async health(): Promise<{ status: string }> {
-    const res = await fetch(`${this.baseUrl}/health`);
+    const res = await fetchResilient(`${this.baseUrl}/health`);
     return res.json();
   }
 
   /** Current status of every registered integration. */
-  async integrations(): Promise<Array<{ id: string; running?: boolean; error?: string }>> {
+  async integrations(): Promise<Array<{ id: string; running?: boolean; error?: string; readAgeDays?: number | null }>> {
     const res = await this.request('GET', '/internal/integrations');
     if (!res.ok) return [];
-    const body = (await res.json()) as { integrations?: Array<{ id: string; running?: boolean; error?: string }> };
+    const body = (await res.json()) as {
+      integrations?: Array<{ id: string; running?: boolean; error?: string; readAgeDays?: number | null }>;
+    };
     return body.integrations ?? [];
+  }
+
+  /**
+   * Set the LOCAL read-age window for an integration (days), or null to clear
+   * it and fall back to the signed grant bound. Returns the raw response so
+   * tests can assert on rejected input too.
+   */
+  async setReadPolicy(id: string, readAgeDays: number | null | unknown): Promise<Response> {
+    return this.request('PATCH', `/internal/integration/${encodeURIComponent(id)}/read-policy`, { readAgeDays });
   }
 
   /**

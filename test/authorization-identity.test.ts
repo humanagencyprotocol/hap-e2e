@@ -108,6 +108,17 @@ function receiptBody(authorizationId: string, overrides: Record<string, unknown>
 // ═════════════════════════════════════════════════════════════════════════════
 
 beforeAll(async () => {
+  // Build BEFORE the Authority Server exists, exactly as every other suite does.
+  //
+  // `buildGateway()` is a synchronous `execSync('pnpm build')`, so it blocks the
+  // event loop for as long as the build takes — ~15s cold on CI, ~0s locally
+  // where turbo caches it. Blocking the loop *after* the AS has served traffic
+  // is what broke this suite: Next's dev server closes idle keep-alive sockets
+  // after 5s, undici cannot process the close while the loop is blocked, and the
+  // next POST is written to a socket the peer already closed. Building here
+  // means there is no pooled socket to go stale.
+  pm.buildGateway();
+
   await pm.startSP(SP_PORT);
 
   const user = await sp.register('Identity E2E', `authz-identity-${Date.now()}@test.local`);
@@ -389,7 +400,9 @@ describe('Gateway parity — identical-bounds twins keep separate intents end-to
   }
 
   beforeAll(async () => {
-    pm.buildGateway();
+    // The gateway is built in the file-level beforeAll, before the AS starts.
+    // Do not build here: a blocking build between AS requests kills the pooled
+    // keep-alive socket and the next POST fails with "other side closed".
 
     // A fresh user so this block's grants are the ONLY ones the gateway sees.
     const user = await sp.register('Identity GW E2E', `authz-gw-${Date.now()}@test.local`);
