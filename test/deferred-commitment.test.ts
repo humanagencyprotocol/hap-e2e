@@ -110,7 +110,7 @@ describe('Deferred Commitment', () => {
       arguments: { proposal_id: proposalId },
     });
     const text = (result.content as Array<{ text: string }>)[0].text;
-    expect(text).toContain('pending');
+    expect(text).toMatch(/pending/i); // wording moved to 'PENDING' in gateway 08d9360 (2026-08-03)
   });
 
   it('commit the proposal via SP API', async () => {
