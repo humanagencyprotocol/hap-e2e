@@ -192,7 +192,11 @@ describe('Setup', () => {
     expect(result.ok).toBe(true);
     expect(result.tools.some((t) => t.startsWith('records__'))).toBe(true);
     await sleep(1_000);
-  });
+    // 60s: this start is serialized behind the gateway's boot auto-restore of
+    // the manifest `records` integration (per-id start queue), which may be
+    // mid-npm-install when we register. The queue is what makes OUR gating
+    // deterministically win — waiting behind it is the fix working.
+  }, 60_000);
 
   it('connects an MCP client', async () => {
     await sleep(3_000);
