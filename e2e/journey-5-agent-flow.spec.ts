@@ -111,7 +111,10 @@ test.describe.serial('Journey 5: Agent Flow', () => {
         authorizationId,
         profileId: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
         action: 'create_contact',
-        executionContext: { contact_type: 'customer' },
+        // Required: without it the AS answers 400 INVALID_ACTION_TYPE before
+        // it ever reaches the revocation check this test is about.
+        actionType: 'write',
+        executionContext: { contact_type: 'customer', action_type: 'write' },
         idempotencyKey: `journey5-revoked-${Date.now()}`,
       },
     });

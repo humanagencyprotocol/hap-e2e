@@ -109,10 +109,28 @@ jobs:
 
       - name: Run E2E
         working-directory: hap-e2e
-        # No Gmail/Google credentials: four suites self-skip. Everything that
-        # gates reads, writes, bounds and receipts runs credential-free, which
-        # is what makes this viable as a required check.
+        # No Gmail/Google/Stripe credentials in CI — a deliberate decision, not
+        # an oversight (2026-08-26). Four suites self-skip here and are run by
+        # hand against real providers; see README "Credential-gated suites" for
+        # what they cover and when they must be run. Everything that gates
+        # reads, writes, bounds and receipts runs credential-free, which is
+        # what makes this viable as a required check.
         run: npx vitest run
+
+      # The browser journeys cover ground the vitest suite cannot reach:
+      # authorization through the real wizard, revocation from the UI, the
+      # group journey, and — only here — a genuine TTL expiry against a
+      # short-lived grant. They existed for months and no workflow ran them.
+      - name: Install Playwright browser
+        working-directory: hap-e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser journeys
+        working-directory: hap-e2e
+        # Spawns its own AS + gateway via global-setup, so it must not run
+        # while the vitest suite holds those ports — hence a separate step
+        # rather than a parallel job.
+        run: npx playwright test
 
       - name: Upload logs
         if: always()
@@ -121,5 +139,6 @@ jobs:
           name: e2e-logs
           path: |
             hap-e2e/test-results/**
+            hap-e2e/playwright-report/**
           if-no-files-found: ignore
           retention-days: 7

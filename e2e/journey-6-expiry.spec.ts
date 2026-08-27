@@ -73,7 +73,10 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
       authorizationId,
       profileId: 'github.com/humanagencyprotocol/hap-profiles/records@0.4',
       action: 'create_record',
-      executionContext: {},
+      // Required: without it the AS answers 400 INVALID_ACTION_TYPE before it
+      // ever reaches the expiry check this test is about.
+      actionType: 'write',
+      executionContext: { action_type: 'write' },
     });
     // SP must reject receipts for expired attestations
     expect(receipt.status).toBe(403);
