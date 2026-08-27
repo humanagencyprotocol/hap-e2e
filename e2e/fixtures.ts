@@ -118,10 +118,21 @@ export async function startServers(): Promise<void> {
 
   console.error('[E2E] Building gateway...');
   execSync('pnpm build', { cwd: GW_DIR, stdio: 'pipe', timeout: 180_000 });
+  console.error('[E2E] Building Authority Server...');
+  execSync('npm run build', {
+    cwd: SP_DIR,
+    stdio: 'pipe',
+    timeout: 300_000,
+    env: { ...process.env, SUVEREN_ALLOW_EPHEMERAL: '1' },
+  });
   console.error('[E2E] Build complete.');
 
-  // Start the Authority Server (formerly "SP")
-  const sp = spawn('npx', ['next', 'dev', '-p', String(SP_PORT)], {
+  // Start the Authority Server (formerly "SP") in production mode, matching
+  // the vitest harness. Worth doing even though this suite starts servers only
+  // once: `next dev` and `next start` are not the same server, and the
+  // difference is not academic — a route prerendered at build time served a
+  // stale signing key, which only production mode revealed.
+  const sp = spawn('npx', ['next', 'start', '-p', String(SP_PORT)], {
     cwd: SP_DIR,
     env: {
       ...process.env,

@@ -28,6 +28,12 @@ export class ProcessManager {
    * Run once before starting the gateway.
    */
   buildGateway(): void {
+    // Built once per run by the vitest globalSetup. Nineteen suites call this;
+    // rebuilding identical output nineteen times bought no isolation and was
+    // the single biggest cost in CI. Kept as a call site so suites read the
+    // same, and so a suite run outside the harness still builds.
+    if (process.env.HAP_E2E_PREBUILT === '1') return;
+
     console.error('[E2E] Building Suveren gateway...');
     execSync('pnpm build', {
       cwd: join(ROOT, 'suveren-gateway'),
@@ -38,13 +44,19 @@ export class ProcessManager {
   }
 
   /**
-   * Start the Authority Server (Next.js dev server).
+   * Start the Authority Server.
    * Method name kept as `startSP` for caller compatibility; the service is the
    * Suveren Authority Server (formerly "SP").
+   *
+   * Runs the production server against the build made once in globalSetup.
+   * `next dev` was compiling every route on first request, in every one of the
+   * 27 suites — ~9s to boot plus a stall on each new endpoint, against ~1s to
+   * boot here. Behaviour is unchanged: the same routes, the same in-memory
+   * store, a fresh process (and so a fresh store) per suite.
    */
   async startSP(port: number): Promise<ChildProcess> {
     console.error(`[E2E] Starting Authority Server on port ${port}...`);
-    const proc = spawn('npx', ['next', 'dev', '-p', String(port)], {
+    const proc = spawn('npx', ['next', 'start', '-p', String(port)], {
       cwd: join(ROOT, 'suveren-as'),
       env: {
         ...process.env,

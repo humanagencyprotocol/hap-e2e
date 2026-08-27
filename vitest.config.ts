@@ -22,6 +22,9 @@ function loadDotenv(): Record<string, string> {
 
 export default defineConfig({
   test: {
+    // Builds the gateway and the Authority Server once for the whole run,
+    // instead of once per suite. See src/helpers/global-setup.ts.
+    globalSetup: './src/helpers/global-setup.ts',
     testTimeout: 60_000,
     hookTimeout: 120_000,
     sequence: { concurrent: false },
