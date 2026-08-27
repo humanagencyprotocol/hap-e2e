@@ -97,6 +97,16 @@ jobs:
         working-directory: hap-records-mcp
         run: npm ci
 
+      # `dist/` is gitignored, so a fresh checkout does not have it — but
+      # read-authorization, receipt-content-binding and verification-footer-local
+      # all spawn `node hap-records-mcp/dist/index.js`. Without this the gateway
+      # cannot start the integration and those suites fail on a missing module,
+      # which is what they had been doing in every nightly run since 2026-08-17.
+      # It passes locally because a developer's checkout has been built.
+      - name: Build — records MCP
+        working-directory: hap-records-mcp
+        run: npm run build
+
       - name: Install — e2e
         working-directory: hap-e2e
         run: npm ci
