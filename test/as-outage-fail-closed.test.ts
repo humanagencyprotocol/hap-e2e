@@ -135,7 +135,10 @@ describe('No receipt, no execution — the AS goes away mid-session', () => {
   it('BLOCKS the identical write once the AS is unreachable', async () => {
     // Same gateway, same warm connection, same live authorization, same tool,
     // same arguments — only the Authority Server is gone.
-    await pm.stopProcess('as');
+    // Confirms the port stops answering, not merely that a process was
+    // signalled — otherwise a surviving server makes every assertion below
+    // vacuous, which is precisely how this passed locally and failed on CI.
+    await pm.stopProcess('as', { confirmDownUrl: `http://localhost:${SP_PORT}/api/as/pubkey` });
 
     const result = await createContact('During Outage');
 

@@ -58,6 +58,10 @@ export class ProcessManager {
     console.error(`[E2E] Starting Authority Server on port ${port}...`);
     const proc = spawn('npx', ['next', 'start', '-p', String(port)], {
       cwd: join(ROOT, 'suveren-as'),
+      // Own process group, so stopProcess/killAll can signal the whole tree.
+      // `npx` spawns the real server as a child; signalling only the wrapper
+      // leaves that child serving (and orphaned at job teardown).
+      detached: true,
       env: {
         ...process.env,
         ALLOW_REGISTRATION: 'true',
@@ -155,22 +159,60 @@ export class ProcessManager {
    * continued while the port was still bound would be asserting against a
    * server that had not gone yet.
    */
-  async stopProcess(name: string): Promise<void> {
+  async stopProcess(name: string, opts: { confirmDownUrl?: string } = {}): Promise<void> {
     const entry = this.processes.find(p => p.name === name);
     if (!entry) throw new Error(`No managed process named "${name}"`);
     const { proc } = entry;
+    console.error(`[E2E] Stopping ${name} (pid ${proc.pid})...`);
+
+    // Kill the process GROUP, not just the process we spawned. The Authority
+    // Server runs as `npx next start`: npx is a wrapper that spawns the real
+    // server as a child, and a SIGTERM delivered to the wrapper does not
+    // reach it. The wrapper exits, the server keeps serving, and a test that
+    // believed the service was down would quietly assert nothing — which is
+    // exactly what happened on CI while passing locally.
+    const signalGroup = (sig: NodeJS.Signals) => {
+      try {
+        if (proc.pid) process.kill(-proc.pid, sig);
+      } catch {
+        try { proc.kill(sig); } catch { /* already gone */ }
+      }
+    };
+
     if (proc.exitCode == null) {
-      proc.kill('SIGTERM');
+      signalGroup('SIGTERM');
       await Promise.race([
         new Promise<void>(resolve => proc.on('exit', () => resolve())),
         sleep(5_000),
       ]);
-      if (proc.exitCode == null) proc.kill('SIGKILL');
+      if (proc.exitCode == null) signalGroup('SIGKILL');
       await Promise.race([
         new Promise<void>(resolve => proc.on('exit', () => resolve())),
         sleep(2_000),
       ]);
     }
+
+    // The authoritative check: the process table is a proxy, the port is the
+    // thing under test. Poll until the service actually stops answering.
+    if (opts.confirmDownUrl) {
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        try {
+          await fetch(opts.confirmDownUrl, { signal: AbortSignal.timeout(1_000) });
+        } catch {
+          break; // refused/timed out — genuinely down
+        }
+        if (Date.now() > deadline) {
+          throw new Error(
+            `${name} still answering ${opts.confirmDownUrl} after kill — a test that continued ` +
+            'here would assert against a service that never went away.',
+          );
+        }
+        await sleep(250);
+      }
+    }
+
+    console.error(`[E2E] ${name} is down.`);
     this.processes = this.processes.filter(p => p !== entry);
   }
 
@@ -181,14 +223,24 @@ export class ProcessManager {
     for (const { name, proc } of this.processes) {
       if (proc.exitCode != null) continue;
       console.error(`[E2E] Stopping ${name} (pid ${proc.pid})...`);
-      proc.kill('SIGTERM');
+      // Signal the group where we have one (see stopProcess): killing only the
+      // `npx` wrapper left the real server running, which is what produced the
+      // "Terminate orphan process" lines at job teardown.
+      const sig = (s: NodeJS.Signals) => {
+        try {
+          if (proc.pid) process.kill(-proc.pid, s);
+        } catch {
+          try { proc.kill(s); } catch { /* already gone */ }
+        }
+      };
+      sig('SIGTERM');
       await Promise.race([
         new Promise<void>((resolve) => proc.on('exit', () => resolve())),
         sleep(3_000),
       ]);
       if (proc.exitCode == null) {
         console.error(`[E2E] Force-killing ${name}...`);
-        proc.kill('SIGKILL');
+        sig('SIGKILL');
       }
     }
     this.processes = [];

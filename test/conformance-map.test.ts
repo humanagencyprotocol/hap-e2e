@@ -32,9 +32,20 @@ function resolveTest(rel: string): string | null {
   return null;
 }
 
-/** "content/0.6/review.md → Register 2 → …" — the part before the first arrow. */
-function ledgerFile(ref: string): string {
-  return join(REPO_ROOT, ref.split('→')[0].trim());
+/**
+ * "content/0.6/review.md → Register 2 → …" — resolve the part before the first
+ * arrow. The spec repo is the parent directory in a local checkout and a
+ * sibling (`hap-protocol/`) in CI, so both layouts are tried.
+ */
+const LEDGER_ROOTS = [REPO_ROOT, join(REPO_ROOT, 'hap-protocol')];
+
+function ledgerFile(ref: string): string | null {
+  const rel = ref.split('→')[0].trim();
+  for (const root of LEDGER_ROOTS) {
+    const p = join(root, rel);
+    if (existsSync(p)) return p;
+  }
+  return null;
 }
 
 describe('conformance map — the enforcement core of protocol.md v0.6', () => {
@@ -84,12 +95,15 @@ describe('conformance map — the enforcement core of protocol.md v0.6', () => {
     '%s — its ledger reference is real',
     (_id, m) => {
       const file = ledgerFile(m.ledgered!);
-      expect(existsSync(file), `${m.id} references a ledger file that does not exist: ${file}`).toBe(true);
+      expect(
+        file,
+        `${m.id} references a ledger file that exists in none of: ${LEDGER_ROOTS.join(', ')}`,
+      ).not.toBeNull();
 
       // The reference must actually be recorded, not merely pointed at. Take
       // the last arrow-separated part as the phrase that should appear.
       const phrase = m.ledgered!.split('→').pop()!.trim().replace(/^"|"$/g, '');
-      const body = readFileSync(file, 'utf8');
+      const body = readFileSync(file!, 'utf8');
       expect(
         body.toLowerCase().includes(phrase.toLowerCase()),
         `${m.id} claims to be recorded as "${phrase}" in ${file}, but that text is not there. ` +

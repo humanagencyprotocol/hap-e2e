@@ -77,6 +77,15 @@ jobs:
           repository: humanagencyprotocol/hap-records-mcp
           path: hap-records-mcp
 
+      # The spec itself. The conformance map references review.md to prove a
+      # recorded gap is actually recorded; without this checkout that check
+      # cannot run where it matters most.
+      - name: Check out hap-protocol (spec + ledger)
+        uses: actions/checkout@v6
+        with:
+          repository: humanagencyprotocol/hap-protocol
+          path: hap-protocol
+
       - uses: pnpm/action-setup@v6
         with:
           version: 9
