@@ -128,6 +128,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
+      actionType: 'charge',
       amount: 20,
       executionContext: { amount: 20, currency: 'USD', action_type: 'charge' },
     });
@@ -141,6 +142,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
+      actionType: 'charge',
       amount: 30,
       executionContext: { amount: 30, currency: 'USD', action_type: 'charge' },
     });
@@ -158,6 +160,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
+      actionType: 'charge',
       amount: 20,
       executionContext: { amount: 20, currency: 'USD', action_type: 'charge' },
     });
@@ -179,6 +182,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
+      actionType: 'charge',
       amount: 20,
       executionContext: { amount: 20, currency: 'USD', action_type: 'charge' },
     });
@@ -197,6 +201,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
+      actionType: 'charge',
       amount: 5,
       executionContext: { amount: 5, currency: 'USD', action_type: 'charge' },
     });
@@ -215,5 +220,21 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
       const err = (result.body.errors as Array<Record<string, unknown>>)[0];
       expect(err.code).toBe('LIMIT_EXCEEDED');
     }
+  });
+
+  it('receipt WITHOUT actionType is rejected — 400 INVALID_ACTION_TYPE (A1: name-derived fallback deleted)', async () => {
+    // actionType is the cumulative-bucket key. The AS used to derive a missing
+    // one from the tool name (forbidden by protocol.md → Receipt Request rules);
+    // it now fails closed. A rejected request consumes no bounds.
+    const result = await sp.postReceipt(agentApiKey, {
+      authorizationId,
+      profileId: PROFILE_ID,
+      action: 'charge',
+      amount: 5,
+      executionContext: { amount: 5, currency: 'USD', action_type: 'charge' },
+    });
+    expect(result.status).toBe(400);
+    const err = (result.body.errors as Array<Record<string, unknown>>)[0];
+    expect(err.code).toBe('INVALID_ACTION_TYPE');
   });
 });

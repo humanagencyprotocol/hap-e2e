@@ -65,6 +65,7 @@ beforeAll(async () => {
     authorizationId: att.authorization_id,
     profileId: PROFILE_ID,
     action: 'charge',
+    actionType: 'charge',
     amount: 20,
     executionContext: { amount: 20, currency: 'USD', action_type: 'charge' },
   });

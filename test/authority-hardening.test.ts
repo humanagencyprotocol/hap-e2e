@@ -71,6 +71,7 @@ const receiptBody = (authorizationId: string) => ({
   authorizationId,
   profileId: PROFILE_ID,
   action: 'charge',
+  actionType: 'charge',
   amount: 10,
   executionContext: { amount: 10, currency: 'USD', action_type: 'charge' },
 });

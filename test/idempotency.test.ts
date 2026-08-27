@@ -68,6 +68,7 @@ describe('M3 — automatic-mode idempotency', () => {
     authorizationId: '',
     profileId: PROFILE_ID,
     action: 'charge',
+    actionType: 'charge',
     amount: 30,
     executionContext: { amount: 30, currency: 'USD', action_type: 'charge' },
     idempotencyKey: key,
@@ -125,6 +126,7 @@ describe('M3 — automatic-mode idempotency', () => {
         authorizationId,
         profileId: PROFILE_ID,
         action: 'charge',
+        actionType: 'charge', // required since A1 — omitting it would 400 INVALID_ACTION_TYPE before the check under test
         amount: 10,
         executionContext: { amount: 10, currency: 'USD', action_type: 'charge' },
         // no idempotencyKey — AS must reject with IDEMPOTENCY_KEY_REQUIRED
@@ -145,6 +147,7 @@ describe('M3 — automatic-mode idempotency', () => {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
+      actionType: 'charge',
       amount: 5,
       executionContext: { amount: 5, currency: 'USD', action_type: 'charge' },
       idempotencyKey: lostKey,
@@ -174,6 +177,7 @@ describe('M3 — automatic-mode idempotency', () => {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
+      actionType: 'charge',
       amount,
       executionContext: { amount, currency: 'USD', action_type: 'charge' },
       idempotencyKey: conflictKey,

@@ -260,6 +260,7 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Send (authorized)', () => {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'send',
+      actionType: 'send',
       executionContext: {
         recipient_count: 1,
         allowed_recipients: TEST_RECIPIENT,

@@ -100,6 +100,7 @@ function receiptBody(authorizationId: string, overrides: Record<string, unknown>
     boundsHash,
     profileId: PROFILE_ID,
     action: 'send_message',
+    actionType: 'send',
     executionContext: { recipient_count: 1, ...SHARED_CONTEXT },
     ...overrides,
   };
