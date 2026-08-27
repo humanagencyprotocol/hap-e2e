@@ -83,7 +83,18 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          # >=22 is REQUIRED, not preferred: the MCP connectors (crm-mcp,
+          # records-mcp) and their better-sqlite3 dependency declare
+          # `engines.node >= 22`. npm only *warns* about an unsupported engine
+          # and installs anyway, so on Node 20 the install looked clean and the
+          # native SQLite binding then failed to load at runtime — the
+          # connector exited on startup and every call returned
+          # "MCP error -32000: Connection closed" / "Tool not found".
+          #
+          # That is what the 23 remaining failures were. It never reproduced
+          # locally because developer machines run a newer Node, which is
+          # exactly how a version floor goes unnoticed.
+          node-version: 22
 
       - name: Install — gateway
         working-directory: suveren-gateway
