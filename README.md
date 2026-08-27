@@ -41,6 +41,29 @@ than red-by-default. The cost is that they only run when someone runs them.
 | `calendar-read` | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALENDAR_REFRESH_TOKEN` | Resource scope on reads, pre-fetch container filtering |
 | `e2e` (Stripe half) | `STRIPE_TEST_KEY` | Charge bounds against a real payment API |
 
+### Connectors with no suite of their own — recorded, not overlooked
+
+`hap-linkedin-mcp` has no tests here and none in its own repo. That is a
+decision, not a gap nobody noticed:
+
+- The **gating path** it uses is covered. `identity-assurance` and
+  `verification-footer-local` exercise the `publish` profile end to end —
+  bounds, receipts, content binding, the verification footer — using a local
+  stand-in connector, so what the Gatekeeper does for a publish-profile write
+  is tested without LinkedIn in the loop.
+- What is **not** covered is the connector itself: its argument mapping and
+  the shape LinkedIn actually returns. Testing that needs real LinkedIn
+  credentials and would post to a real account, which puts it in the same
+  category as the credential-gated suites above.
+
+The distinction that matters: a connector bug here cannot bypass the
+Gatekeeper — it is downstream of the receipt. It can only make a call fail or
+send something malformed. That is why this is acceptable while an untested
+*enforcement* path would not be.
+
+`hap-crm-mcp` and `hap-googlecalendar-mcp` likewise have no in-repo tests, but
+both are driven directly by suites here (`crm-lifecycle`, `calendar-read`).
+
 **When they must be run by hand:**
 
 - before an Authority Server or gateway **release**;
