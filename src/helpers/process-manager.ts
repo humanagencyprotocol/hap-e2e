@@ -147,6 +147,34 @@ export class ProcessManager {
   }
 
   /**
+   * Stop one managed process by name and wait for it to actually exit.
+   *
+   * Exists for the fail-closed test: "no receipt, no execution" can only be
+   * proven by taking the Authority Server away from a running gateway and
+   * watching the next call refuse. Waiting for the exit matters — a test that
+   * continued while the port was still bound would be asserting against a
+   * server that had not gone yet.
+   */
+  async stopProcess(name: string): Promise<void> {
+    const entry = this.processes.find(p => p.name === name);
+    if (!entry) throw new Error(`No managed process named "${name}"`);
+    const { proc } = entry;
+    if (proc.exitCode == null) {
+      proc.kill('SIGTERM');
+      await Promise.race([
+        new Promise<void>(resolve => proc.on('exit', () => resolve())),
+        sleep(5_000),
+      ]);
+      if (proc.exitCode == null) proc.kill('SIGKILL');
+      await Promise.race([
+        new Promise<void>(resolve => proc.on('exit', () => resolve())),
+        sleep(2_000),
+      ]);
+    }
+    this.processes = this.processes.filter(p => p !== entry);
+  }
+
+  /**
    * Kill all managed processes and clean up temp dir.
    */
   async killAll(): Promise<void> {
