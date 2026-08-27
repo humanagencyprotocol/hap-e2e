@@ -38,15 +38,10 @@ const PROFILES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '
  * that must be visible, not a way to make the test quiet.
  */
 const EXEMPT: Record<string, string> = {
-  // charge's only count bound (`transaction_count_daily_max`) currently
-  // applies to EVERY action type via the fallback's `startsWith('transaction')`
-  // special case — including the `action_type: "read"` that mollie's manifest
-  // default puts on every tool outside its 13 write overrides (those tools are
-  // gated as writes because the default declares no `category: "read"`).
-  // Declaring appliesTo: ["charge","subscribe"] would therefore silently STOP
-  // those calls consuming the daily transaction count — loosening a live
-  // limit. charge is bumped once the mollie manifest marks its reads as reads.
-  charge: 'blocked on the mollie manifest: default gates reads as writes with action_type "read"',
+  // Empty. charge was the last entry, cleared 2026-08-27 once its registry
+  // could be declared without loosening a live limit. Adding an entry here is
+  // recording a debt, not silencing a failure — every exemption is pinned
+  // below, so it fails the moment it stops being true.
 };
 
 /** Sorts "0.10" after "0.9" — plain string sort does not. */
