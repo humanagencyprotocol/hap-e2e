@@ -46,6 +46,54 @@ corresponding *work* is tracked, and links back to it.
   fits only that hypothesis. The vector set above serves a third party sooner
   and at a fraction of the cost.
 
+## Ownership — this suite belongs to Suveren, not to HAP
+
+Not started; recorded so the decision is picked up deliberately rather than
+rediscovered. **Step 3 needs a GitHub org transfer and is the owner's call.**
+
+The finding: this repo is the reference implementation's conformance suite
+wearing a protocol name. The sharpest evidence is not the hardcoded paths —
+it is that **nobody outside Suveren can run it**. CI checks out
+`suverenai/suveren-as`, a private repo, with a token. A repo in the protocol
+org that no community member can execute is mislabelled by definition.
+
+Supporting: `process-manager.ts` runs `npx next start` in `suveren-as/` and
+`node apps/mcp-server/dist/http.mjs`; the gateway side drives the private
+`/internal/*` control plane; and 25 of 31 suites depend on "personal group",
+a Suveren modelling choice with no basis in the specification.
+
+Do these in order — the first is a prerequisite, not a nicety:
+
+- [ ] **Give `hap-profiles` its own CI first.** It has no tests and no
+  workflow of its own; its only automated check is `profile-conformance.test.ts`
+  in this repo. Moving this suite as-is would leave HAP's published profiles
+  validated solely by a Suveren-owned repo — a governance smell for an open
+  protocol, and a silent one. Roughly twenty lines of workflow removes the
+  dependency entirely.
+- [ ] **Correct the claim in the README.** It opens "The only place HAP
+  enforcement is proven end to end" — true of the implementation, overclaiming
+  for a repo in the protocol org. It should say *the reference
+  implementation's* conformance suite.
+- [ ] **Then transfer to `suverenai/`,** named for what it is
+  (`suveren-conformance` or similar). Cross-org checkout already works in both
+  directions, so CI is unaffected. Owner action: it changes URLs people may
+  hold.
+- [ ] **Leave a pointer in the HAP org,** so "where is HAP tested?" has an
+  answer rather than a gap.
+
+**What must NOT simply move with it.** `conformance/core-musts.ts` is two
+things fused: what the protocol requires (protocol-level) and which of our
+tests prove it (implementation-level). The first half is precisely what a
+third-party implementer needs, and it belongs in the HAP org alongside the
+vector set above.
+
+**The counter-argument, recorded because it is fair:** moving this out leaves
+the protocol org visibly thinner — specification, profiles, core library,
+connectors, and no end-to-end proof — which some readers will take as
+"unimplemented". That is an argument for shipping the conformance vectors, not
+for keeping a suite where it does not belong. Vectors in the HAP org and the
+harness in Suveren's is the honest version of what the org currently implies.
+
 ## Coverage
 
 - [ ] **Classify Mollie's read tools.** Its MCP server is remote and publishes
