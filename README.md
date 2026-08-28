@@ -4,28 +4,161 @@ The only place HAP enforcement is proven end to end: a real Authority Server,
 a real gateway built from source, and real MCP servers over stdio. No mocks,
 no stubbed transports.
 
-The suite spans five repositories, which is why it lives in its own. It
-resolves siblings from the parent directory — `hap-e2e/../suveren-as`,
-`../suveren-gateway`, `../hap-profiles`, `../hap-records-mcp` — so check them
-out alongside this one, not inside it.
+This file is the reference for testing across the whole project — what exists,
+where it lives, how to run it, and what is deliberately not covered.
+
+The suite spans six repositories, which is why it lives in its own. It resolves
+siblings from the parent directory, so check them out alongside this one, not
+inside it:
+
+```
+<workspace>/
+  hap-e2e/            ← you are here
+  suveren-as/         ← Authority Server   (private)
+  suveren-gateway/    ← Gateway
+  hap-profiles/       ← published profiles
+  hap-records-mcp/    ← connector used by several suites (must be BUILT)
+  hap-protocol/       ← spec + ledger (CI only; the conformance map reads it)
+```
 
 ## Running it
 
 ```bash
 npm ci
-npx vitest run            # protocol conformance (27 suites)
-npx playwright test       # browser journeys (8 specs)
+npx vitest run            # protocol conformance
+npx playwright test       # browser journeys
 ```
 
 Both spawn their own AS and gateway on dedicated ports and tear them down
-afterwards. Do not run them concurrently — they compete for those ports.
+afterwards. **Do not run them concurrently** — they compete for those ports.
+
+`hap-records-mcp` must be built (`npm ci && npm run build`) — its `dist/` is
+gitignored, and three suites spawn it directly. A fresh checkout does not have
+it; a developer machine usually does, which is why its absence only ever broke
+CI.
+
+**Node ≥ 22 is required.** The MCP connectors and their `better-sqlite3`
+dependency declare it. npm only *warns* on an engine mismatch and installs
+anyway, so on Node 20 everything looks fine until the native binding fails at
+runtime and every connector call returns "Tool not found".
+
+Builds happen **once per run** in a vitest `globalSetup` (the gateway, and a
+production build of the AS). Suites still start their own AS process, so
+per-suite isolation is unchanged — only compilation is shared. Set
+`HAP_E2E_SKIP_BUILD=1` to reuse existing output while iterating on one suite;
+never in CI, where a stale build would test code that is not under review.
+
+The AS runs as `next start`, not `next dev`. That is deliberate: the two are
+not the same server, and the difference is not academic — a route prerendered
+at build time was serving a stale signing key, which only production mode
+revealed.
+
+## Where the tests are
+
+Counts are what the runners report (parameterised cases expand at runtime, so
+grepping the files under-counts).
+
+| Repo | Location | Cases | Runs in CI |
+|---|---|---|---|
+| **hap-e2e** | `test/` (vitest, real stack) | 207 + 32 skipped | ✅ `e2e.yml` |
+| | `e2e/` (Playwright, browser journeys) | 31 | ✅ same workflow |
+| | `conformance/` (the MUST map — data, not tests) | — | ✅ checked by `test/conformance-map.test.ts` |
+| **suveren-as** | `src/__tests__/` | 284 | ✅ `ci.yml` |
+| **suveren-gateway** | `apps/mcp-server/test/` | 486 | ✅ `test.yml` |
+| | `apps/control-plane/src/__tests__/` | 155 | ✅ same |
+| | `apps/ui/src/**` | 120 | ✅ same |
+| **hap-core** | `test/` | 197 | ✅ `ci.yml` |
+| **hap-records-mcp** | `src/` | 4 | ✅ `ci.yml` |
+| **hap-deploy-mcp** | `src/` | 9 | ✅ `ci.yml` |
+| **hap-profiles** | — | 0 | validated from here (below) |
+| **hap-crm-mcp**, **hap-linkedin-mcp**, **hap-googlecalendar-mcp** | — | 0 | see *Connectors without a suite* |
+
+`hap-profiles` has no test tooling of its own. Two suites here hold it to its
+contract instead, because the checks are cross-repo by nature:
+`profile-conformance.test.ts` (every profile's latest version declares
+`actionTypes` and `appliesTo`) and `hap-core-parity.test.ts` (the AS and the
+gateway agree on the `hap-core` version).
+
+### Which layer to put a test in
+
+Default to **hap-e2e, against real servers**. Use an in-repo unit test only
+where the wire boundary cannot reach the state under test, and say so in the
+file. Current legitimate examples:
+
+- time-warped cumulative windows (`suveren-as/cumulative-windows.test.ts`) —
+  needs control of the clock;
+- multi-owner coverage (`suveren-as/receipt-owner-coverage.test.ts`) — no live
+  endpoint can mint a two-owner authorization;
+- canonicalization vectors (`hap-core`) — byte-level, no server involved.
+
+## What is covered
+
+Enforcement, end to end: per-transaction and cumulative bounds; rolling
+daily/weekly and calendar-month windows; TTL expiry and revocation;
+exactly-once receipts (replay, lost response, mismatch); review-mode proposals
+including *approve X, execute Y* refusal; above-cap team escalation and
+approval; team roles and cap configuration; encrypted intent sharing; identity
+assurance; content binding and verification footers; per-ceremony authorization
+identity; and read authorization (age windows, resource scopes, capability
+gates, query-injection containment).
+
+The central invariant has its own suite: `as-outage-fail-closed.test.ts` stops
+the Authority Server mid-session and proves the next write is refused — with a
+positive control first, so "blocked" cannot be confused with "broken".
+
+`conformance/core-musts.ts` maps 31 normative MUSTs from *Receipt Issuance*,
+*Gatekeeper & Executor* and *Read Authorization* to the tests that hold them.
+Every entry resolves to real test files **or** to where its gap is recorded —
+never neither. The checker fails if a referenced file disappears or a ledger
+claim is not actually written where it says.
+
+## Known gaps
+
+Recorded so that "untested" is never silently read as "not required". The
+authoritative list is `content/0.6/review.md` (register 2) in `hap-protocol`.
+
+| Gap | Status |
+|---|---|
+| **Multi-owner approval** | The receipt-time *check* is implemented and tested, but multi-owner ceremonies are **not reachable**: personal groups resolve to one owner, team groups to the attester, and the only endpoint that could require two returns 410. There is no feature to test end to end. Team governance is expressed through above-cap approvers instead. |
+| **Displayed-must-be-bound** | No enforcement. An approval surface shows `bcc` while the binding omits it; defensible only because review-mode proposal matching pins the whole argument set. |
+| **Per-correspondent read overrides** | Specified, not built. |
+| **Owner mandate signatures** | Specification-led; nothing implemented (phased P1–P5 in the ledger). |
+| **Mollie reads** | Its MCP server is remote and publishes no tool list, so anything unclassified is gated as a **write** — safe, but reads consume a write budget and produce receipts. Classifying them needs credentials to capture the live tool list. |
+| **`read_daily_max`** | Declared on the email profile, never enforced — reads carry no receipt, so nothing counts them. Marked `enforced: false`, and `appliesTo: []`. |
+| **Credential-gated suites** | Four suites and the Stripe half of `e2e.test.ts` self-skip in CI (below). |
+
+## Test processes worth knowing
+
+- **A new test must be able to fail.** Every enforcement test added here was
+  verified by breaking the thing it checks and watching it go red. A test that
+  has never failed has not been shown to test anything.
+- **Confirm the state, not the signal.** `stopProcess` polls until the port
+  stops answering, because signalling a process is not the same as the service
+  being gone: `npx` spawns a child, and killing the wrapper left the server
+  running — a test that passed locally while asserting nothing in CI.
+- **Prefer the real trigger path.** A mocked trigger hides a dead feature;
+  several bugs here were only visible with a real provider, a real build, or a
+  cold CI machine.
+- **Timeouts are wall-clock.** Suites set generous limits on purpose: a test
+  that goes red because the machine was busy teaches people to hit re-run, and
+  that habit is how a broken nightly survives for days.
+- **A skip must be loud.** Anything that self-skips says so and is listed
+  below, with when it must be run by hand.
 
 ## What runs in CI
 
-`.github/workflows/e2e.yml` runs both, on every push to `main`, on every PR,
-and nightly at 06:00 UTC. The nightly run is not redundant: this suite spans
-five repos and its two most recent breakages were pure cross-repo drift, where
-nothing in *this* repo changed.
+`.github/workflows/e2e.yml` runs both suites on every push to `main`, on every
+PR, and nightly at 06:00 UTC. It checks out all six repos, installs each,
+builds `hap-records-mcp`, then runs vitest followed by Playwright (sequentially
+— they compete for the same ports).
+
+The nightly is not redundant with the PR run: this suite spans six repos, and
+several breakages were pure cross-repo drift where nothing in *this* repo
+changed — a footer string altered in the gateway, a profile moving 0.4 → 0.5, a
+connector raising its Node floor.
+
+Other repos run their own unit suites on push (`ci.yml` / `test.yml`); none of
+them can see cross-repo drift, which is what this one is for.
 
 ## Credential-gated suites
 
@@ -81,10 +214,3 @@ defect; say so plainly rather than implying full coverage.
 GMAIL_CLIENT_ID=… GMAIL_CLIENT_SECRET=… GMAIL_REFRESH_TOKEN=… \
   npx vitest run test/email-lifecycle.test.ts
 ```
-
-## Layering
-
-Tests belong here by default, against real servers. In-repo unit tests are for
-what the wire boundary cannot reach — time-warped cumulative windows, or a
-store state no live endpoint can produce (`suveren-as`'s multi-owner coverage
-test is the current example, and says so in its header).
