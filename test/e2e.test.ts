@@ -119,6 +119,24 @@ describe('SP Setup', () => {
     expect(result.member).toBeTruthy();
   });
 
+  it('Alice enables the charge profile for the group, naming Bob an approver', async () => {
+    // Required, not decoration: in a team group the AS refuses an attest from a
+    // member who is not a configured approver for that profile — 403
+    // PROFILE_NOT_ENABLED_FOR_GROUP when no config exists at all, 403
+    // OWNER_NOT_APPROVER when the caller is not in `approvers`. Bob runs the
+    // ceremony in the next block, so the admin has to name him first.
+    //
+    // No `caps`, so nothing here is above-cap and Bob's grant is an ordinary
+    // one — the cap/escalation path is team-approval.test.ts's job.
+    const result = await sp.setProfileConfig(
+      ctx.adminUser!.apiKey,
+      ctx.groupId!,
+      PROFILE_ID,
+      { approvers: [ctx.agentUser!.id] },
+    );
+    expect(result.config.approvers).toContain(ctx.agentUser!.id);
+  });
+
   // v0.4: path-domains and group "limits" endpoints were removed. Team-group
   // attestations resolve the member's domain to their userId; group ceilings
   // now live in profile-config (caps + approvers), exercised separately.
