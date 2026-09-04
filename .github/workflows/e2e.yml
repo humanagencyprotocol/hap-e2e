@@ -13,6 +13,11 @@ name: Protocol conformance E2E
 # a footer string changed in the gateway, and a profile moved 0.4 → 0.5. Nothing
 # in THIS repo changed either time, so only a periodic run against everyone's
 # main catches that class.
+#
+# Two jobs, because the Authority Server is proprietary:
+#   offline — vectors, profiles, the MUST map. No secrets, runs for forks too.
+#   e2e     — the real stack. Needs the private suveren-as checkout, so it is
+#             skipped for pull requests from forks rather than failing.
 
 on:
   push:
@@ -33,9 +38,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Everything a contributor can run without the proprietary Authority Server:
+  # the published conformance vectors, the profile contract, and the MUST map.
+  # No secrets, no private checkout — so this job runs on a fork's pull request,
+  # which the full suite below cannot. Without it an outside contributor's first
+  # PR failed at a checkout step they had no way to satisfy, and the failure
+  # looked like their fault.
+  offline:
+    name: Offline conformance (no Authority Server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out hap-e2e
+        uses: actions/checkout@v6
+        with:
+          path: hap-e2e
+
+      - name: Check out hap-profiles
+        uses: actions/checkout@v6
+        with:
+          repository: humanagencyprotocol/hap-profiles
+          path: hap-profiles
+
+      # profile-conformance and conformance-map both read the spec; the vector
+      # suite reads content/<version>/vectors/*.json from here.
+      - name: Check out hap-protocol (spec + vectors)
+        uses: actions/checkout@v6
+        with:
+          repository: humanagencyprotocol/hap-protocol
+          path: hap-protocol
+
+      # conformance-map resolves the gateway test files it cites, so a mapping
+      # that points at a deleted file fails here rather than in the full job.
+      - name: Check out suveren-gateway
+        uses: actions/checkout@v6
+        with:
+          repository: suverenai/suveren-gateway
+          path: suveren-gateway
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install — e2e
+        working-directory: hap-e2e
+        run: npm ci
+
+      - name: Run offline conformance
+        working-directory: hap-e2e
+        run: npm run test:offline
+
   e2e:
+    name: Full suite (needs the Suveren Authority Server)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The Authority Server is proprietary and lives in another org, so this job
+    # needs a token that a fork's pull request will never receive. Gating on the
+    # token means a fork PR skips this job with a clear name instead of failing
+    # at the checkout step; `offline` above is the check that still runs for it.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
       # The harness resolves siblings from the repo's PARENT directory
