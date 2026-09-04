@@ -64,6 +64,8 @@ Open:
 - *Mandate Payload* — no `issuer`; no signing-key rotation; no `profile_hash`; no `supported_versions` negotiation.
 - *Commitment Modes* — `review_above_cap` is not accepted as a signed mode; above-cap routing uses unsigned group configuration, and the Gateway has no signed approver list to enforce against.
 - *Validation Steps* — `scope_hash` is verified only when scope is non-empty; the review path re-issues a ticket without re-running local verification.
+- *Privacy Invariant* / *Enforcement Authority* — scope values reach the Authority Server in plaintext: the mail connector's manifest maps a message's recipients into execution-context keys that the scope schema declares, and the whole execution context is sent and stored in the signed ticket. No bound reads them and the AS cannot act on them, so the disclosure is pure cost. Direction recorded in the specification's ledger (*Scope values must not travel in the execution context*).
+- *Owner Signatures* — the `did:key` implementation accepts Ed25519 only, while platform authenticators commonly sign with P-256; the curve for signing DIDs is an open decision that blocks the owner-signature phase.
 - *Read Authorization* — per-correspondent overrides not built; post-fetch age enforcement omitted for list/search tools; NFKC normalization absent; the mail container control is a denylist, not the preferred allowlist.
 - *Content Binding* — displayed-must-be-bound: a blind-copy recipient is displayed and not bound; mitigated in review mode by full-argument proposal matching only.
 - *Gatekeeper custody* — the issuer key is optional per archive entry; the archive is best-effort rather than blocking; no owner deletion after the retention floor.
