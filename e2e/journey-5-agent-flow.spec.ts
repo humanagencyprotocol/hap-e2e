@@ -7,7 +7,9 @@
  * 3. User reviews and commits/rejects in browser
  * 4. Revocation blocks further activity
  */
-import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL } from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups} from './fixtures';
+
+const CUSTOMERS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/customers@0.7';
 
 test.describe.serial('Journey 5: Agent Flow', () => {
   let apiKey: string;
@@ -29,6 +31,9 @@ test.describe.serial('Journey 5: Agent Flow', () => {
   });
 
   test('5.2 Create authorization with Automatic via gateway', async ({ page }) => {
+    // See journey-1: a shared account plus a sequential suite means the active
+    // group is a team by now, and a team needs the profile enabled first.
+    await ensureProfileEnabledForActiveGroups(apiKey, CUSTOMERS_PROFILE, ALICE.id);
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 

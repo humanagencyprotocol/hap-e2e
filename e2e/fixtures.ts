@@ -370,6 +370,49 @@ export async function registerOnSP(page: Page, name: string): Promise<string> {
  * Navigate through the gate wizard and create an authorization.
  * Page must be logged into the gateway with integrations running.
  */
+/**
+ * Make sure the group the gateway will grant in can actually grant this profile.
+ *
+ * Since the 2026-09-04 hardening the Authority Server refuses a team ceremony
+ * unless the caller is a configured approver for that profile, and refuses
+ * outright when the team has no approver configuration at all
+ * (PROFILE_NOT_ENABLED_FOR_GROUP). Personal workspaces are exempt — the sole
+ * member is the authority.
+ *
+ * The browser suite runs sequentially against one Authority Server and shares
+ * the ALICE account, so `group-journey.spec.ts` creates a team and makes it
+ * Alice's active group before `journey-1` ever runs. The wizard then grants in
+ * that team, and the gate refuses. That is the gate working; the fixture simply
+ * had not caught up with it. This does what a team admin does before anyone
+ * grants anything.
+ */
+export async function ensureProfileEnabledForActiveGroups(
+  apiKey: string,
+  profileId: string,
+  userId: string,
+): Promise<void> {
+  const headers = { 'x-api-key': apiKey, 'Content-Type': 'application/json' };
+  const gr = await fetch(`${SP_URL}/api/groups`, { headers });
+  if (!gr.ok) return;
+  const { groups = [] } = (await gr.json()) as {
+    groups?: Array<{ id: string; isPersonal?: boolean; allowLazyEnable?: boolean }>;
+  };
+
+  for (const g of groups) {
+    if (g.isPersonal || g.allowLazyEnable) continue; // exempt by design
+    const res = await fetch(
+      `${SP_URL}/api/groups/${g.id}/profile-config/${encodeURIComponent(profileId)}`,
+      { method: 'PUT', headers, body: JSON.stringify({ approvers: [userId] }) },
+    );
+    // A non-admin caller cannot configure the group; that is not this helper's
+    // problem to solve, and the ceremony will fail loudly if it mattered.
+    if (!res.ok && res.status !== 403) {
+      // eslint-disable-next-line no-console
+      console.warn(`[fixtures] could not enable ${profileId} for group ${g.id}: ${res.status}`);
+    }
+  }
+}
+
 export async function createAuthorization(
   page: Page,
   opts: {

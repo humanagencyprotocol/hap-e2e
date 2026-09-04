@@ -7,7 +7,10 @@
  * Each test gets a fresh page, so we must login + do all checks in one test,
  * navigating via sidebar clicks (SPA navigation) not page.goto (full reload).
  */
-import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL } from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups} from './fixtures';
+
+const RECORDS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/records@0.5';
+const CUSTOMERS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/customers@0.7';
 
 test.describe.serial('Journey 1: Personal User', () => {
   let apiKey: string;
@@ -72,6 +75,10 @@ test.describe.serial('Journey 1: Personal User', () => {
   });
 
   test('1.4 Gateway: create authorization with Automatic commit', async ({ page }) => {
+    // The browser suite shares the ALICE account and runs sequentially, so by
+    // the time this runs `group-journey` has made a team her active group. A
+    // team must have the profile enabled before anyone can grant in it.
+    await ensureProfileEnabledForActiveGroups(apiKey, RECORDS_PROFILE, ALICE.id);
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
@@ -89,6 +96,8 @@ test.describe.serial('Journey 1: Personal User', () => {
   });
 
   test('1.5 Gateway: create authorization with Review Each Action commit', async ({ page }) => {
+    // Same reason as 1.4 — this one grants under the CRM (customers) profile.
+    await ensureProfileEnabledForActiveGroups(apiKey, CUSTOMERS_PROFILE, ALICE.id);
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
