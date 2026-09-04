@@ -189,14 +189,26 @@ export const CORE_MUSTS: CoreMust[] = [
     section: 'Gatekeeper & Executor',
     requirement:
       'Every gated tool MUST be described in a manifest; there is no permissive default and no ungated read access',
-    tests: ['test/read-authorization.test.ts', 'test/tool-gating.test.ts'],
+    tests: [
+      'test/read-authorization.test.ts',
+      'test/tool-gating.test.ts',
+      // The permissive default itself: a tool with no manifest entry used to be
+      // gated by `toolGating.default`. It is now refused.
+      '../suveren-gateway/apps/mcp-server/test/manifest-membership.test.ts',
+    ],
   },
   {
     id: 'GK-local-log-display-only',
     section: 'Gatekeeper & Executor',
     requirement:
       'A local execution log MUST NOT be used as a second cumulative enforcement layer; the AS is authoritative',
-    tests: ['../suveren-gateway/apps/mcp-server/test/consumption-unenforced.test.ts'],
+    tests: [
+      // The MUST NOT itself: a log seeded past both cumulative ceilings does
+      // not block, and the receipt request still reaches the AS.
+      '../suveren-gateway/apps/mcp-server/test/local-log-display-only.test.ts',
+      // What the log is FOR — the consumption display.
+      '../suveren-gateway/apps/mcp-server/test/consumption-unenforced.test.ts',
+    ],
   },
   {
     id: 'GK-content-binding-refuse',

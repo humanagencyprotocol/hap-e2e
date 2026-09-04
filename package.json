@@ -1,9 +1,10 @@
 {
   "name": "hap-e2e",
-  "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "test:offline": "vitest run test/canonical-vectors.test.ts test/profile-conformance.test.ts test/conformance-map.test.ts",
     "test:watch": "vitest",
     "test:browser": "npx playwright test",
     "test:browser:headed": "npx playwright test --headed"

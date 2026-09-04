@@ -1,11 +1,66 @@
-# hap-e2e — protocol conformance suite
+# hap-e2e — HAP conformance suite
 
 The only place HAP enforcement is proven end to end: a real Authority Server,
 a real gateway built from source, and real MCP servers over stdio. No mocks,
 no stubbed transports.
 
-This file is the reference for testing across the whole project — what exists,
-where it lives, how to run it, and what is deliberately not covered.
+MIT licensed. This file is the reference for testing across the whole project —
+what exists, where it lives, how to run it, and what is deliberately not
+covered.
+
+## Three layers, and what each one needs
+
+The suite has a public half and a Suveren half. Read this table before cloning:
+most of it needs a checkout you may not have.
+
+| Layer | What it proves | What you need |
+|---|---|---|
+| **1. Offline conformance** | Canonicalisation bytes and hashes match the published vectors; every profile declares `actionTypes` and `appliesTo`; every mapped MUST resolves to a real test or a recorded gap | This repo and the public spec. `npm ci && npm run test:offline` — 66 tests, no server, no credentials |
+| **2. Live suite against Suveren** | The invariant itself: pre-flight tickets, fail-closed on an unreachable Authority Server, bounds, revocation, review flows, read governance, content binding | Everything in layer 1 **plus a checkout of `suveren-as`, which is proprietary and not public.** Without it, `npm test` fails in the build step |
+| **3. Live suite against your own Authority Server** | That *your* implementation satisfies the same MUSTs | Not possible yet — see *Bring your own Authority Server* |
+
+**The Authority Server is proprietary.** Suveren's Gateway, the profiles, the
+core library, the connectors, the specification and this suite are open; the
+Suveren Authority Server is not. That is a deliberate split, stated in the
+protocol's own positioning, and it has a consequence you should know before you
+start: the layer-2 tests spawn Suveren's Authority Server from source, so
+without that checkout they cannot run. What you *can* run is layer 1, and what
+you can *read* is `CONFORMANCE.md` — Suveren's report of where its
+implementation stands against the specification, requirement by requirement.
+
+## Bring your own Authority Server
+
+Not supported today, and the reason is a gap in the specification rather than a
+gap here.
+
+HAP fixes **payloads, canonicalisation, error codes and refusals**. It
+deliberately defines **no endpoints, no request authentication, no proposal or
+approval transport, and no response envelope** beyond the `{approved, errors}`
+shape. Two conformant implementations therefore verify each other's mandates
+and tickets and still cannot talk to each other. This suite speaks Suveren's
+HTTP API through one file — `src/helpers/sp-client.ts` — so pointing it at a
+different Authority Server means reimplementing that file for that server.
+
+What would make it portable, in order:
+
+1. **A wire binding.** The protocol ledger tracks a non-normative companion
+   (`hap-http-binding@0.1`): paths, methods, an auth header, the envelope, and
+   `.well-known` key discovery. Until that exists, "portable live suite" has
+   nothing to be portable *to*.
+2. **An adapter seam here.** Split `sp-client.ts` into protocol operations
+   every Authority Server must offer (issue a mandate, issue a ticket, revoke,
+   verify, publish a key) and product operations only some will have (register
+   a user, create a group, configure approvers). Point the suite at a running
+   server with an environment variable instead of spawning one; tests that need
+   product operations skip loudly when an adapter lacks them, exactly as the
+   credential-gated suites already do.
+
+In the meantime, an independent implementation can check itself against
+**layer 1** — the vectors are implementation-neutral by construction — and use
+`conformance/core-musts.ts` as the checklist of what a live suite would have to
+prove.
+
+## Repository layout
 
 The suite spans six repositories, which is why it lives in its own. It resolves
 siblings from the parent directory, so check them out alongside this one, not
@@ -13,15 +68,27 @@ inside it:
 
 ```
 <workspace>/
-  hap-e2e/            ← you are here
-  suveren-as/         ← Authority Server   (private)
-  suveren-gateway/    ← Gateway
-  hap-profiles/       ← published profiles
-  hap-records-mcp/    ← connector used by several suites (must be BUILT)
-  hap-protocol/       ← spec + ledger (CI only; the conformance map reads it)
+  hap-e2e/            ← you are here                                  (public)
+  hap-protocol/       ← specification, vectors, ledger                (public)
+  hap-profiles/       ← published profiles                            (public)
+  suveren-gateway/    ← Gatekeeper + Executor                         (public)
+  hap-records-mcp/    ← connector used by several suites (must be BUILT) (public)
+  suveren-as/         ← Authority Server — PROPRIETARY, not published
 ```
 
+Layers 1 and the parts of the browser suite that do not reach the Authority
+Server need the public five. Everything else needs `suveren-as`.
+
 ## Running it
+
+Layer 1, from a fresh clone of this repo alone:
+
+```bash
+npm ci
+npm run test:offline      # 66 tests: vectors, profiles, the MUST map
+```
+
+Layer 2, with all six repositories checked out as siblings:
 
 ```bash
 npm ci
@@ -29,8 +96,9 @@ npx vitest run            # protocol conformance
 npx playwright test       # browser journeys
 ```
 
-Both spawn their own AS and gateway on dedicated ports and tear them down
-afterwards. **Do not run them concurrently** — they compete for those ports.
+Both spawn their own Authority Server and gateway on dedicated ports and tear
+them down afterwards. **Do not run them concurrently** — they compete for those
+ports.
 
 `hap-records-mcp` must be built (`npm ci && npm run build`) — its `dist/` is
 gitignored, and three suites spawn it directly. A fresh checkout does not have
@@ -52,6 +120,19 @@ The AS runs as `next start`, not `next dev`. That is deliberate: the two are
 not the same server, and the difference is not academic — a route prerendered
 at build time was serving a stale signing key, which only production mode
 revealed.
+
+## A note on vocabulary
+
+The specification moved to one vocabulary at v0.7: **mandate** (was
+attestation), **mandate ticket** or **ticket** (was execution receipt),
+**scope** (was context), **Mandate Owner** (was Decision Owner). The invariant
+is *no mandate, no ticket; no ticket, no execution.*
+
+Test names, helper files and assertions here still use the older words, because
+they test the running implementation and its wire has not been renamed yet. The
+rename is tracked in the protocol's changelog and in `CONFORMANCE.md`; this
+README uses the current words for concepts and the old ones when naming a file
+or a field that really is still called that.
 
 ## Where the tests are
 
@@ -106,8 +187,9 @@ The central invariant has its own suite: `as-outage-fail-closed.test.ts` stops
 the Authority Server mid-session and proves the next write is refused — with a
 positive control first, so "blocked" cannot be confused with "broken".
 
-`conformance/core-musts.ts` maps 31 normative MUSTs from *Receipt Issuance*,
+`conformance/core-musts.ts` maps 31 normative MUSTs from *Ticket Issuance*,
 *Gatekeeper & Executor* and *Read Authorization* to the tests that hold them.
+It doubles as the checklist an independent implementation would work through.
 Every entry resolves to real test files **or** to where its gap is recorded —
 never neither. The checker fails if a referenced file disappears or a ledger
 claim is not actually written where it says.
@@ -115,7 +197,11 @@ claim is not actually written where it says.
 ## Known gaps
 
 Recorded so that "untested" is never silently read as "not required". The
-authoritative list is `content/0.6/review.md` (register 2) in `hap-protocol`.
+authoritative list is **`CONFORMANCE.md`** in this repository — Suveren's
+implementation report. (It used to be a register inside the specification's
+`review.md`; implementation status left the specification on 2026-09-03,
+because a spec must be checkable by readers who cannot see the implementation,
+and one component of this one is proprietary.)
 
 | Gap | Status |
 |---|---|

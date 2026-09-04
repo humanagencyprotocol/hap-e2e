@@ -1,10 +1,14 @@
 # Suveren — HAP implementation report
 
-**Implementation:** Suveren — Suveren Gateway (Gatekeeper + Executor; open source) and Suveren Authority Server (Authority Server; proprietary, hosted at suveren.ai), built on `@humanagencyp/hap-core` (open source).
-**Specification:** Human Agency Protocol, `content/<version>/` in the protocol repository.
+**Implementation:** Suveren — Suveren Gateway (Gatekeeper + Executor; open source) and Suveren Authority Server (Authority Server; **proprietary**, hosted at suveren.ai), built on `@humanagencyp/hap-core` (open source).
+**Specification:** Human Agency Protocol, `content/<version>/` at [humanagencyprotocol/hap-protocol](https://github.com/humanagencyprotocol/hap-protocol).
 **Report date:** 2026-09-03. **Maintainer:** Suveren. **Update rule:** this file changes in the same change as any implementation change that affects a normative requirement.
 
-This is the implementation's own statement of where it stands against the specification, in the specification's terms (`governance.md` → *Reference Conformance* → *Implementation reports*). It replaces the status registers that lived in the specification's `review.md` until 2026-09-03. It names requirements, not code. What a reader can check: the Gateway and the core library are open, and the suite in this repository runs against a real Authority Server, so every claim about them is verifiable; claims about the Authority Server's internals are the operator's word and are marked as such.
+This is *one implementation's* statement of where it stands against the specification, in the specification's terms (`governance.md` → *Reference Conformance* → *Implementation reports*). It replaces the status registers that lived in the specification's `review.md` until 2026-09-03: a specification must be checkable by readers who cannot see the implementation, and the Authority Server here is proprietary, so status written into the spec was an unverifiable claim.
+
+**Writing your own.** Any implementation may publish a report in this shape, and nothing about it is Suveren-specific: state the protocol version you claim on the wire, which optional surfaces you implement, which conformance vectors you reproduce, and every normative requirement you do not yet meet — named as the specification names it, not as your code names it. Do not describe internals a reader cannot inspect; where a claim rests on code nobody outside can see, say so, as the last section here does.
+
+**What a reader of this report can check.** The Gateway, the core library, the profiles and this suite are open, so every claim about them is verifiable by running `npm test` with the public repositories checked out. Claims about the Authority Server's internals are the operator's word, and are collected in the final section rather than scattered through the others.
 
 ## Version claimed on the wire
 
