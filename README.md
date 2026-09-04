@@ -15,7 +15,7 @@ most of it needs a checkout you may not have.
 
 | Layer | What it proves | What you need |
 |---|---|---|
-| **1. Offline conformance** | Canonicalisation bytes and hashes match the published vectors; every profile declares `actionTypes` and `appliesTo`; every mapped MUST resolves to a real test or a recorded gap | This repo and the public spec. `npm ci && npm run test:offline` — 66 tests, no server, no credentials |
+| **1. Offline conformance** | Canonicalisation bytes and hashes match the published vectors; every profile declares `actionTypes` and `appliesTo`; every mapped MUST resolves to a real test or a recorded gap | This repo and the public spec. `npm ci && npm run test:offline` — 66 tests, no server, no build, no credentials (it runs under its own `vitest.offline.config.ts`, which omits the build step the live suites need) |
 | **2. Live suite against Suveren** | The invariant itself: pre-flight tickets, fail-closed on an unreachable Authority Server, bounds, revocation, review flows, read governance, content binding | Everything in layer 1 **plus a checkout of `suveren-as`, which is proprietary and not public.** Without it, `npm test` fails in the build step |
 | **3. Live suite against your own Authority Server** | That *your* implementation satisfies the same MUSTs | Not possible yet — see *Bring your own Authority Server* |
 

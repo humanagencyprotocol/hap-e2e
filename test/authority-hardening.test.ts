@@ -104,15 +104,20 @@ describe('H1 — receipt rejects bounds that do not match the signed bounds_hash
     expect(r.body.receipt).toBeTruthy();
   });
 
-  it('rejects a receipt when the signed bounds_hash does not match the stored bounds', async () => {
-    // Sign with a bogus bounds_hash while storing the real BOUNDS — the AS must
-    // recompute the hash from the stored bounds on receipt and reject.
-    const att = await sp.submitAttestation(aliceKey, attestBody({ bounds_hash: BOGUS_BOUNDS_HASH }));
-    const r = await sp.postReceipt(aliceKey, receiptBody(att.authorization_id));
-
-    expect(r.status).toBe(403);
-    const err = (r.body.errors as Array<Record<string, unknown>>)[0];
-    expect(err.code).toBe('BOUNDS_HASH_MISMATCH');
+  it('refuses to sign a bounds_hash that disagrees with the bounds — the mismatch is now unreachable', async () => {
+    // This test used to create the mismatched state and prove the RECEIPT route
+    // caught it. It cannot create that state any more: since the 2026-09-04
+    // hardening the AS recomputes the hash at ATTEST time and refuses to sign a
+    // caller-supplied one that disagrees, so a mandate whose stored bounds do
+    // not reproduce its signed hash can no longer be minted through the API.
+    //
+    // That is a strictly stronger guarantee than the one this test began with,
+    // and the right thing to assert. The receipt-time check remains in place as
+    // defence in depth — it catches a record altered in storage after signing,
+    // which is the only way the mismatch can still arise.
+    await expect(
+      sp.submitAttestation(aliceKey, attestBody({ bounds_hash: BOGUS_BOUNDS_HASH })),
+    ).rejects.toThrow(/409|BOUNDS_HASH_MISMATCH/);
   });
 });
 
