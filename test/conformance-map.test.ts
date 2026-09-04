@@ -78,15 +78,44 @@ describe('conformance map — the enforcement core of protocol.md v0.6', () => {
     }
   });
 
+  /**
+   * A mapping that points nowhere must fail — that is this checker's whole job.
+   * But "nowhere" has two meanings, and only one of them is a defect.
+   *
+   * A referenced file can be missing because the test was renamed or deleted,
+   * which unmaps a requirement silently and must be caught. Or the repository
+   * holding it may simply not be checked out: the Authority Server is
+   * proprietary, and the offline CI job deliberately clones only the public
+   * repositories so that a fork's pull request can run it without secrets.
+   *
+   * So: if the repository root a reference lives under is absent entirely, the
+   * reference is *unverifiable here* and says so loudly. If the root is present
+   * and the file is not, that is the defect, and it fails. The full suite has
+   * every checkout and therefore enforces the whole map; the offline job
+   * enforces what it can see and reports the rest.
+   */
+  const rootOf = (rel: string): string => (rel.startsWith('..') ? rel.split('/').slice(0, 2).join('/') : '.');
+  const rootPresent = (rel: string): boolean => existsSync(join(E2E_ROOT, rootOf(rel)));
+
   it.each(CORE_MUSTS.filter(m => m.tests?.length).map(m => [m.id, m] as [string, CoreMust]))(
     '%s — its test files exist',
     (_id, m) => {
+      const unverifiable: string[] = [];
       for (const rel of m.tests!) {
+        if (!rootPresent(rel)) { unverifiable.push(rel); continue; }
         expect(
           resolveTest(rel),
           `${m.id} references ${rel}, which does not exist under any of: ${TEST_ROOTS.join(', ')}. ` +
             'Either the test was renamed (update the map) or deleted (the requirement is now unmapped).',
         ).not.toBeNull();
+      }
+      if (unverifiable.length) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `\n!! ${m.id}: cannot verify ${unverifiable.join(', ')} — ` +
+            `${rootOf(unverifiable[0])} is not checked out in this run. ` +
+            'The full suite verifies it; this run does not.\n',
+        );
       }
     },
   );
