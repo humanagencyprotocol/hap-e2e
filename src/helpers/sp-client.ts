@@ -15,18 +15,7 @@ export function mintAuthorizationId(): string {
 }
 
 /**
- * Thin HTTP client for the Suveren Authority Server's REST API.
- *
- * This is the seam that makes the live suite Suveren-specific. HAP fixes
- * payloads, canonicalisation and refusals but deliberately defines no
- * endpoints, so every route below is Suveren's choice rather than the
- * protocol's. Pointing this suite at a different Authority Server means
- * reimplementing this file for that server — see "Bring your own Authority
- * Server" in the README for the adapter split that would make it portable.
- *
- * ("Service Provider" was the role's name until v0.5; it is retired. The class
- * name and the `sp*` identifiers here still carry it because renaming them
- * touches every suite, and the wire they speak has not been renamed either.)
+ * Thin HTTP client for the HAP Service Provider REST API.
  */
 export class SPClient {
   constructor(

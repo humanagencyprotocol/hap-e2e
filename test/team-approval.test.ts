@@ -85,18 +85,9 @@ beforeAll(async () => {
   groupId = grp.group.id;
   await sp.joinGroup(agentKey, grp.inviteCode);
 
-  // Admin configures the profile: cap write_daily_max at 1, with the admin AND
-  // the agent as approvers.
-  //
-  // The agent is in the list because in a team group the AS now refuses an
-  // attest from anyone who is not a configured approver for that profile (403
-  // OWNER_NOT_APPROVER) — membership alone is not authority to grant. The agent
-  // runs the ceremony below, so it must be named here or the whole scenario
-  // stops at its first request. Being allowed to GRANT is a separate question
-  // from the cap: the cap still limits what may be granted without escalation,
-  // which is what the rest of this file exercises.
+  // Admin configures the profile: cap write_daily_max at 1, with admin as approver.
   await sp.setProfileConfig(adminKey, groupId, PROFILE_ID, {
-    approvers: [adminId, agentId],
+    approvers: [adminId],
     caps: { write_daily_max: 1 },
   });
 
@@ -199,10 +190,7 @@ describe('Team approval (above-cap escalation)', () => {
     expect(escalated.status).toBe(409);
     expect(escalated.body.error).toBe('approval_required');
     expect(escalated.body.field).toBe('write_daily_max');
-    // The escalation routes to EXACTLY the configured approver set — both
-    // entries, in configured order. (It was [adminId] before the agent had to
-    // be a configured approver in order to grant at all.)
-    expect(escalated.body.approvers).toEqual([adminId, agentId]);
+    expect(escalated.body.approvers).toEqual([adminId]);
   });
 
   it('routes a proposal to the approver, who approves it → committed', async () => {
