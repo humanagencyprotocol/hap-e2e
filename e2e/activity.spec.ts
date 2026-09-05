@@ -5,6 +5,8 @@ test.describe('Activity & Attestation Pages', () => {
     const page = await authenticatedPage(browser, ALICE.apiKey);
 
     await page.goto(`${SP_URL}/dashboard/activity`);
+    // The AS dashboard is not part of the 2026-09-05 nav-label bridge (gateway
+    // only) — it still says "Receipts" until the product rename ships.
     await expect(page.locator('h1')).toContainText('Receipts');
     // Windowed receipts walk: empty state reads "No execution receipts in the
     // last 30 days." (was "…yet" before paging shipped).
