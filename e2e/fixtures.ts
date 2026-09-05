@@ -429,7 +429,7 @@ export async function createAuthorization(
 
   // Open the authorize picker from the Authorizations page (the dedicated
   // "Authorize" nav item was removed in v0.4).
-  await page.click('.sidebar-item:has-text("Authorizations")');
+  await page.click('.sidebar-item:has-text("Mandates")');
   await page.waitForURL('**/authorizations**');
   await page.click('button:has-text("New authorization")');
   await page.waitForSelector('.profile-grid', { timeout: 10_000 });

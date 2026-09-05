@@ -39,7 +39,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     await expect(page.locator('.sidebar-item:has-text("Integrations")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("AI Assistant")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Pending Approvals")')).toBeVisible();
-    await expect(page.locator('.sidebar-item:has-text("Authorizations")')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("Mandates")')).toBeVisible();
 
     // Navigate to Integrations via sidebar — assert the route + page title
     // (card content depends on integrations loading, which is flaky).
@@ -59,7 +59,7 @@ test.describe.serial('Journey 1: Personal User', () => {
 
     // Open the authorize picker from the Authorizations page (the dedicated
     // "Authorize" nav item was removed in v0.4).
-    await page.click('.sidebar-item:has-text("Authorizations")');
+    await page.click('.sidebar-item:has-text("Mandates")');
     await page.waitForURL('**/authorizations**');
     await page.click('button:has-text("New authorization")');
     await page.locator('.profile-grid, .card').first().waitFor({ state: 'visible', timeout: 10_000 });
@@ -118,9 +118,9 @@ test.describe.serial('Journey 1: Personal User', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    await page.click('.sidebar-item:has-text("Authorizations")');
+    await page.click('.sidebar-item:has-text("Mandates")');
     await page.waitForURL('**/authorizations**');
-    await expect(page.locator('.page-title')).toHaveText('Authorizations', { timeout: 10_000 });
+    await expect(page.locator('.page-title')).toHaveText('Mandates', { timeout: 10_000 });
 
     // Revoke is behind the row's "Details" expander — open it, then revoke.
     const details = page.locator('button:has-text("Details")').first();

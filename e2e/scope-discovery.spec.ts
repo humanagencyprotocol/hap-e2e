@@ -146,7 +146,7 @@ test.describe.serial('Scope field discovery', () => {
 
     // Open the picker via SPA navigation. A full page.goto would drop the
     // gateway's React-state auth and bounce to /login.
-    await page.click('.sidebar-item:has-text("Authorizations")');
+    await page.click('.sidebar-item:has-text("Mandates")');
     await page.waitForURL('**/authorizations**');
     await page.click('button:has-text("New authorization")');
     await page.waitForSelector('.profile-grid', { timeout: 10_000 });
@@ -227,7 +227,7 @@ test.describe.serial('Scope field discovery', () => {
 
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
-    await page.click('.sidebar-item:has-text("Authorizations")');
+    await page.click('.sidebar-item:has-text("Mandates")');
     await page.waitForURL('**/authorizations**');
     await page.click('button:has-text("New authorization")');
     await page.waitForSelector('.profile-grid', { timeout: 10_000 });
