@@ -147,19 +147,18 @@ test.describe.serial('Scope field discovery', () => {
     // Open the picker via SPA navigation. A full page.goto would drop the
     // gateway's React-state auth and bounce to /login.
     await page.click('.sidebar-item:has-text("Mandates")');
-    await page.waitForURL('**/authorizations**');
-    await page.click('button:has-text("New authorization")');
+    await page.waitForURL('**/mandates**');
+    await page.click('button:has-text("New mandate")');
     await page.waitForSelector('.profile-grid', { timeout: 10_000 });
 
     // Click Authorize on Calendar (mocked manifest + running state → Authorize button shows)
     const calendarCard = page.locator('.card', { has: page.locator('text=Calendar') }).first();
-    await calendarCard.locator('button:has-text("Authorize")').click();
+    await calendarCard.locator('button:has-text("Give a mandate")').click();
 
-    // Template picker → pick Custom (goes directly to BoundsEditor without template bounds)
-    await page.locator('button:has-text("define your own")').click();
+    // No template picker since 2026-09-22: "Give a mandate" opens the wizard.
 
     // Wait for wizard
-    await page.waitForURL(u => u.toString().includes('/agent/gate'), { timeout: 10_000 });
+    await page.waitForURL(u => u.toString().includes('/mandates/new/intent'), { timeout: 10_000 });
 
     // The discovery endpoint must have been hit for the multi-select to populate
     await expect.poll(() => discoveryHit, { timeout: 10_000 }).toBe(true);
@@ -228,14 +227,13 @@ test.describe.serial('Scope field discovery', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
     await page.click('.sidebar-item:has-text("Mandates")');
-    await page.waitForURL('**/authorizations**');
-    await page.click('button:has-text("New authorization")');
+    await page.waitForURL('**/mandates**');
+    await page.click('button:has-text("New mandate")');
     await page.waitForSelector('.profile-grid', { timeout: 10_000 });
 
     await page.locator('.card', { has: page.locator('text=Calendar') }).first()
-      .locator('button:has-text("Authorize")').click();
-    await page.locator('button:has-text("define your own")').click();
-    await page.waitForURL(u => u.toString().includes('/agent/gate'), { timeout: 10_000 });
+      .locator('button:has-text("Give a mandate")').click();
+    await page.waitForURL(u => u.toString().includes('/mandates/new/intent'), { timeout: 10_000 });
 
     // The component must degrade to a text input (no checkboxes) + warning
     // banner, so the user can still enter calendar IDs manually.

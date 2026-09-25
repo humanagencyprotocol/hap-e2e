@@ -5,12 +5,10 @@ test.describe('Activity & Attestation Pages', () => {
     const page = await authenticatedPage(browser, ALICE.apiKey);
 
     await page.goto(`${SP_URL}/dashboard/activity`);
-    // The AS dashboard is not part of the 2026-09-05 nav-label bridge (gateway
-    // only) — it still says "Receipts" until the product rename ships.
-    await expect(page.locator('h1')).toContainText('Receipts');
-    // Windowed receipts walk: empty state reads "No execution receipts in the
-    // last 30 days." (was "…yet" before paging shipped).
-    await expect(page.locator('text=No execution receipts').or(page.locator('table'))).toBeVisible({ timeout: 10_000 });
+    // v0.7 words on the AS dashboard: receipts are "tickets".
+    await expect(page.locator('h1')).toContainText('Tickets');
+    // Windowed walk: empty state reads "No mandate tickets in the last 30 days."
+    await expect(page.locator('text=No mandate tickets').or(page.locator('table'))).toBeVisible({ timeout: 10_000 });
 
     await page.context().close();
   });
@@ -22,7 +20,7 @@ test.describe('Activity & Attestation Pages', () => {
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 10_000 });
 
     await expect(
-      page.locator('th:has-text("Executions")').or(page.locator('text=No attestations'))
+      page.locator('table').or(page.locator('text=No mandates found'))
     ).toBeVisible({ timeout: 10_000 });
 
     await page.context().close();

@@ -44,7 +44,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
       title: 'CRM: agent ops',
       commitMode: 'now',
     });
-    // createAuthorization lands on /authorizations on success.
+    // createAuthorization lands on /mandates on success.
   });
 
   test('5.3 Create authorization with Review Each Action via API', async ({ request }) => {
@@ -92,7 +92,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await handleOnboarding(page);
 
     await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/proposals');
+    await page.waitForURL('**/approvals');
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
     // Review-mode (deferred-commitment) proposals appear under the "All" tab,

@@ -427,28 +427,21 @@ export async function createAuthorization(
   await page.waitForLoadState('networkidle');
   await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
 
-  // Open the authorize picker from the Authorizations page (the dedicated
+  // Open the mandate picker from the Mandates page (the dedicated
   // "Authorize" nav item was removed in v0.4).
   await page.click('.sidebar-item:has-text("Mandates")');
-  await page.waitForURL('**/authorizations**');
-  await page.click('button:has-text("New authorization")');
+  await page.waitForURL('**/mandates**');
+  await page.click('button:has-text("New mandate")');
   await page.waitForSelector('.profile-grid', { timeout: 10_000 });
 
-  // Click the Authorize button on the matching profile card
+  // Click "Give a mandate" on the matching profile card
   const profileCard = page.locator('.card', { has: page.locator(`text=${opts.profileName}`) }).first();
-  await profileCard.locator('button:has-text("Authorize")').click();
+  await profileCard.locator('button:has-text("Give a mandate")').click();
 
-  // Integrations with preset templates show a "Quick start" picker first.
-  // Choose "Custom" so we drive bounds/intent/commit ourselves (presets don't
-  // cover every bounds+mode combination). Profiles without templates skip
-  // straight to the gate wizard.
-  const customBtn = page.locator('button:has-text("define your own")');
-  if (await customBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await customBtn.click();
-  }
+  // No template picker since 2026-09-22: the wizard opens directly.
 
-  // Wait for /agent/gate (bounds step)
-  await page.waitForURL(url => url.toString().includes('/agent/gate'), { timeout: 10_000 });
+  // Wait for /mandates/new/intent (bounds step)
+  await page.waitForURL(url => url.toString().includes('/mandates/new/intent'), { timeout: 10_000 });
 
   // Bounds step: click stepper + buttons to set values
   for (const [, value] of Object.entries(opts.bounds)) {
@@ -467,8 +460,8 @@ export async function createAuthorization(
   await page.fill('.intent-textarea', opts.intent);
   await page.locator('button:has-text("Continue to Review")').click();
 
-  // Wait for /agent/review
-  await page.waitForURL(url => url.toString().includes('/agent/review'), { timeout: 10_000 });
+  // Wait for /mandates/new/sign
+  await page.waitForURL(url => url.toString().includes('/mandates/new/sign'), { timeout: 10_000 });
 
   // Review: choose commitment mode
   if (opts.commitMode === 'per-action') {
@@ -480,13 +473,13 @@ export async function createAuthorization(
   // Fill title
   await page.locator('input[placeholder*="e.g."]').fill(opts.title);
 
-  // Click Authorize button
-  const authorizeBtns = page.locator('button', { hasText: /^Authorize/ });
+  // Click the sign button ("Sign mandate" / "Sign mandate (asks first)")
+  const authorizeBtns = page.locator('button', { hasText: /^Sign mandate/ });
   await authorizeBtns.last().click();
 
-  // Success: the review page creates the authority and redirects to the
-  // authorizations list (?highlight=<hash>) — no standalone "created" screen.
-  await page.waitForURL(url => url.toString().includes('/authorizations'), { timeout: 15_000 });
+  // Success: the review page creates the mandate and redirects to the
+  // Mandates list (?highlight=<hash>) — no standalone "created" screen.
+  await page.waitForURL(url => url.toString().includes('/mandates'), { timeout: 15_000 });
 }
 
 // ─── SP API helpers ──────────────────────────────────────────────────────────

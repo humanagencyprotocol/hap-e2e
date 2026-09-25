@@ -54,14 +54,14 @@ test.describe.serial('Journey 1: Personal User', () => {
 
     // Navigate to Pending Approvals (proposals — empty)
     await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/proposals');
+    await page.waitForURL('**/approvals');
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
     // Open the authorize picker from the Authorizations page (the dedicated
     // "Authorize" nav item was removed in v0.4).
     await page.click('.sidebar-item:has-text("Mandates")');
-    await page.waitForURL('**/authorizations**');
-    await page.click('button:has-text("New authorization")');
+    await page.waitForURL('**/mandates**');
+    await page.click('button:has-text("New mandate")');
     await page.locator('.profile-grid, .card').first().waitFor({ state: 'visible', timeout: 10_000 });
   });
 
@@ -119,7 +119,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     await handleOnboarding(page);
 
     await page.click('.sidebar-item:has-text("Mandates")');
-    await page.waitForURL('**/authorizations**');
+    await page.waitForURL('**/mandates**');
     await expect(page.locator('.page-title')).toHaveText('Mandates', { timeout: 10_000 });
 
     // Revoke is behind the row's "Details" expander — open it, then revoke.
