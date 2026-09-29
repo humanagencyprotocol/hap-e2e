@@ -145,7 +145,7 @@ grepping the files under-counts).
 
 | Repo | Location | Cases | Runs in CI |
 |---|---|---|---|
-| **hap-e2e** | `test/` (vitest, real stack) | 207 + 32 skipped | ✅ `e2e.yml` |
+| **hap-e2e** | `test/` (vitest, real stack) | 233 + 32 skipped | ✅ `e2e.yml` |
 | | `e2e/` (Playwright, browser journeys) | 31 | ✅ same workflow |
 | | `conformance/` (the MUST map — data, not tests) | — | ✅ checked by `test/conformance-map.test.ts` |
 | **suveren-as** | `src/__tests__/` | 284 | ✅ `ci.yml` |
