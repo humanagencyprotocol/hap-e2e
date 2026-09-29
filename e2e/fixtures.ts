@@ -12,11 +12,14 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveAsDir, resolveNextBin } from '../src/helpers/as-dir';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, '..', '..');
-const SP_DIR = join(ROOT, 'suveren-as');
+// suveren-as/ today, or suveren-as/apps/as/ in an npm-workspaces monorepo
+// layout — see src/helpers/as-dir.ts.
+const SP_DIR = resolveAsDir(ROOT);
 const GW_DIR = join(ROOT, 'suveren-gateway');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
@@ -132,7 +135,12 @@ export async function startServers(): Promise<void> {
   // once: `next dev` and `next start` are not the same server, and the
   // difference is not academic — a route prerendered at build time served a
   // stale signing key, which only production mode revealed.
-  const sp = spawn('npx', ['next', 'start', '-p', String(SP_PORT)], {
+  //
+  // Resolve the `next` CLI directly rather than through `npx` — see
+  // resolveNextBin's doc comment in src/helpers/as-dir.ts. It also finds a
+  // hoisted `next` if SP_DIR is the nested apps/as/ layout.
+  const nextBin = resolveNextBin(SP_DIR);
+  const sp = spawn(process.execPath, [nextBin, 'start', '-p', String(SP_PORT)], {
     cwd: SP_DIR,
     env: {
       ...process.env,

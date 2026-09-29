@@ -37,7 +37,8 @@ implementation falls short of a requirement, that is recorded in
   test reads a `SUVEREN_*` variable, and 19 of 31 suites never call `fetch`
   directly — they speak through `src/helpers/`. Three things would have to move
   behind an interface:
-  - `process-manager.ts` — hardcodes `npx next start` in `suveren-as/` and
+  - `process-manager.ts` — hardcodes `next start` against the Authority
+    Server (wherever it lives — see `src/helpers/as-dir.ts`) and
     `node apps/mcp-server/dist/http.mjs`
   - `sp-client.ts` / `gateway-client.ts` — of the Authority Server endpoints
     used, only the mandate and ticket payloads are specified; `register` and

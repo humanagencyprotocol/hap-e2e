@@ -36,8 +36,19 @@ export interface CoreMust {
   ledgered?: string;
 }
 
-/** Repo roots a `tests` path may be relative to, tried in order. */
-export const TEST_ROOTS = ['.', '../suveren-as', '../suveren-gateway'];
+/**
+ * Repo roots a `tests` path may be relative to, tried in order.
+ *
+ * `tests` entries below that reach into the Authority Server are written as
+ * `../suveren-as/src/__tests__/…` — the layout of the standalone Next.js app
+ * that lives at the repo root today. The Authority Server may instead live at
+ * `suveren-as/apps/as/` (an npm-workspaces monorepo layout). `'../suveren-as/apps/as'`
+ * is listed here for that case; `resolveTest` in `test/conformance-map.test.ts`
+ * is what actually tries the nested form (a straight root-join can't turn
+ * `../suveren-as/src/…` into `../suveren-as/apps/as/src/…` — the `suveren-as`
+ * segment has to be rewritten, not just prefixed).
+ */
+export const TEST_ROOTS = ['.', '../suveren-as', '../suveren-as/apps/as', '../suveren-gateway'];
 
 export const CORE_MUSTS: CoreMust[] = [
   // ── Receipt Issuance ──────────────────────────────────────────────────────

@@ -24,9 +24,28 @@ import { CORE_MUSTS, TEST_ROOTS, type CoreMust } from '../conformance/core-musts
 const E2E_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = join(E2E_ROOT, '..');
 
+/**
+ * Resolve a `tests` entry against whichever Authority Server layout is
+ * actually checked out.
+ *
+ * `TEST_ROOTS` entries are joined with `rel` as-is, which is enough when a
+ * root and a rel agree on where `suveren-as` sits (both do today — see the
+ * comment on `TEST_ROOTS`). It is not enough for the nested `apps/as/`
+ * layout: a `rel` like `../suveren-as/src/__tests__/foo.test.ts` names the
+ * `suveren-as` segment itself, so no root can be *joined in front of* it to
+ * reach `../suveren-as/apps/as/src/__tests__/foo.test.ts` — the segment has
+ * to be rewritten. So: try the plain join first (today's layout, and
+ * anything under suveren-gateway or this repo), then fall back to the
+ * rewritten path (the monorepo layout).
+ */
 function resolveTest(rel: string): string | null {
   for (const root of TEST_ROOTS) {
     const p = join(E2E_ROOT, root, rel);
+    if (existsSync(p)) return p;
+  }
+  if (rel.startsWith('../suveren-as/') && !rel.startsWith('../suveren-as/apps/')) {
+    const nested = rel.replace('../suveren-as/', '../suveren-as/apps/as/');
+    const p = join(E2E_ROOT, nested);
     if (existsSync(p)) return p;
   }
   return null;

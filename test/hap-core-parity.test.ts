@@ -21,6 +21,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { AS_DIR } from '../src/helpers/as-dir';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CORE = '@humanagencyp/hap-core';
@@ -45,7 +46,19 @@ function resolvedVersion(nodeModulesRoot: string): string | null {
   return readJson(join(nodeModulesRoot, 'node_modules', CORE, 'package.json'))?.version ?? null;
 }
 
-const AS_PKG = join(ROOT, 'suveren-as', 'package.json');
+/**
+ * Same, but for the Authority Server specifically: in an npm-workspaces
+ * monorepo layout, `next` and other shared deps can be hoisted up to
+ * `suveren-as/node_modules` rather than living under the nested app at
+ * AS_DIR. Try the app directory first, then the repo root.
+ */
+function resolvedAsVersion(): string | null {
+  return resolvedVersion(AS_DIR) ?? resolvedVersion(join(ROOT, 'suveren-as'));
+}
+
+// AS_DIR resolves to `suveren-as/` or, in an npm-workspaces monorepo layout,
+// `suveren-as/apps/as/` — see src/helpers/as-dir.ts.
+const AS_PKG = join(AS_DIR, 'package.json');
 // The gateway apps depend on the thin workspace wrapper, which is what pins
 // the published package — and what the npm bundle reads to build its alias.
 const GW_WRAPPER_PKG = join(ROOT, 'suveren-gateway', 'packages', 'hap-core', 'package.json');
@@ -72,7 +85,7 @@ describe('hap-core parity — the AS and the gateway share one wire contract', (
   });
 
   it('resolves to the same installed version where both are installed', () => {
-    const as = resolvedVersion(join(ROOT, 'suveren-as'));
+    const as = resolvedAsVersion();
     // pnpm puts the wrapper's dependency under the wrapper package itself.
     const gw = resolvedVersion(join(ROOT, 'suveren-gateway', 'packages', 'hap-core'));
 
