@@ -99,6 +99,28 @@ jobs:
     # at the checkout step; `offline` above is the check that still runs for it.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
+    # The Authority Server stores everything in Postgres (no in-memory store).
+    # The vitest harness carves a throwaway database per suite out of this
+    # server (ProcessManager.provisionAsStorage); the browser journeys use it
+    # directly. SUVEREN_SEED_DEV_USERS seeds the fixed test operator the suites
+    # sign in with — test-only, refused by the AS in the self-hosted edition.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: e2e
+          POSTGRES_DB: suveren_as
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SUVEREN_DB_URL: postgres://postgres:e2e@localhost:5432/suveren_as
+      SUVEREN_SEED_DEV_USERS: '1'
+
     steps:
       # The harness resolves siblings from the repo's PARENT directory
       # (process-manager.ts: ROOT = hap-e2e/../), so every repo is checked out

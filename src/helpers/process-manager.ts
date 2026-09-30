@@ -2,6 +2,8 @@ import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { Client } from 'pg';
 import { AS_DIR, resolveNextBin } from './as-dir';
 
 // src/helpers/ → src → hap-e2e → HAP repo root
@@ -15,6 +17,9 @@ interface ManagedProcess {
 export class ProcessManager {
   private processes: ManagedProcess[] = [];
   private dataDir: string | null = null;
+  /** Throwaway per-suite Postgres database this instance created (Redis → Postgres move), if any. */
+  private asDbName: string | null = null;
+  private asDbAdminUrl: string | null = null;
 
   /** Temporary data directory for the gateway (cleaned up in killAll). */
   getDataDir(): string {
@@ -52,8 +57,22 @@ export class ProcessManager {
    * Runs the production server against the build made once in globalSetup.
    * `next dev` was compiling every route on first request, in every one of the
    * 27 suites — ~9s to boot plus a stall on each new endpoint, against ~1s to
-   * boot here. Behaviour is unchanged: the same routes, the same in-memory
-   * store, a fresh process (and so a fresh store) per suite.
+   * boot here.
+   *
+   * Storage (work-plan step 3: Redis → Postgres): the Authority Server has no
+   * in-memory fallback anymore — it requires SUVEREN_DB_URL unconditionally.
+   * Dual-mode, and deliberately with no silent fallback of our own:
+   *   - SUVEREN_DB_URL set in THIS process's env (the caller's Postgres) →
+   *     create a throwaway per-suite database on that same server (same
+   *     host/user/credentials, a fresh random database name) and point the
+   *     spawned AS at it, so "a fresh process (and so a fresh store) per
+   *     suite" still holds — 27 suites sharing one database would cross-
+   *     contaminate the very isolation this comment used to get from separate
+   *     in-memory processes. Dropped again in killAll().
+   *   - SUVEREN_DB_URL not set → nothing Postgres-related is passed through,
+   *     and the spawned AS fails its OWN startup with a clear "SUVEREN_DB_URL
+   *     is not set" message (lib/db.ts) — the same fail-closed behaviour a
+   *     real deployment gets, not a suite-specific workaround.
    *
    * AS_DIR resolves to `suveren-as/` or, in an npm-workspaces monorepo layout,
    * `suveren-as/apps/as/` (see src/helpers/as-dir.ts). We run the `next` CLI
@@ -64,6 +83,9 @@ export class ProcessManager {
    */
   async startSP(port: number): Promise<ChildProcess> {
     console.error(`[E2E] Starting Authority Server on port ${port}...`);
+
+    const storageEnv = await this.provisionAsStorage();
+
     const nextBin = resolveNextBin(AS_DIR);
     const proc = spawn(process.execPath, [nextBin, 'start', '-p', String(port)], {
       cwd: AS_DIR,
@@ -76,15 +98,22 @@ export class ProcessManager {
         ALLOW_REGISTRATION: 'true',
         SUVEREN_TEST_DIRECT_REGISTER: 'true',
         // Seed local-admin (key 'local-dev-key') is an operator → can verify
-        // identities (v0.6 Identity Assurance e2e).
+        // identities (v0.6 Identity Assurance e2e). Its own flag, deliberately
+        // NOT SUVEREN_ALLOW_EPHEMERAL: that one means "ephemeral SIGNING KEY"
+        // only — seeding writes a PUBLIC, hardcoded credential into whatever
+        // durable store SUVEREN_DB_URL points at (fine for the throwaway
+        // per-suite database provisionAsStorage creates below, never fine for
+        // a persistent one), so the AS gates it separately (lib/config.ts
+        // refuses SUVEREN_SEED_DEV_USERS=1 outright under
+        // SUVEREN_EDITION=self-hosted).
         ADMIN_USER_IDS: 'local-admin',
+        SUVEREN_SEED_DEV_USERS: '1',
         PORT: String(port),
-        // No Redis env vars → in-memory storage. The fail-closed guard in
-        // redis.ts/keys.ts only trips in production; the dev escape hatch
-        // makes the intent explicit and keeps CI green regardless of NODE_ENV.
-        SP_KV_REST_API_URL: '',
-        SP_KV_REST_API_TOKEN: '',
+        // The signing-key escape hatch (unrelated to storage) — no
+        // SP_PRIVATE_KEY/SP_PUBLIC_KEY is supplied, so the AS generates an
+        // ephemeral Ed25519 keypair. Still needed with Postgres.
         SUVEREN_ALLOW_EPHEMERAL: '1',
+        ...storageEnv,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -95,6 +124,55 @@ export class ProcessManager {
     await this.waitForHealth(`http://localhost:${port}/api/as/pubkey`, 60_000);
     console.error(`[E2E] Authority Server ready on port ${port}.`);
     return proc;
+  }
+
+  /**
+   * Provision this suite's AS storage. Returns the env vars to overlay onto
+   * the spawned process — never mutates process.env, and never invents a
+   * fallback: if the caller gave us no SUVEREN_DB_URL, we hand back {} and
+   * the child fails closed on its own (see startSP's doc comment).
+   */
+  private async provisionAsStorage(): Promise<Record<string, string>> {
+    const callerUrl = process.env.SUVEREN_DB_URL;
+    if (!callerUrl) return {};
+
+    const admin = new URL(callerUrl);
+    const dbName = `hap_e2e_${randomBytes(6).toString('hex')}`;
+
+    const adminClient = new Client({ connectionString: admin.toString() });
+    await adminClient.connect();
+    await adminClient.query(`create database ${dbName}`);
+    await adminClient.end();
+
+    const suiteUrl = new URL(callerUrl);
+    suiteUrl.pathname = `/${dbName}`;
+
+    this.asDbName = dbName;
+    this.asDbAdminUrl = admin.toString();
+
+    console.error(`[E2E] Created throwaway AS database ${dbName} (Redis → Postgres move).`);
+    return { SUVEREN_DB_URL: suiteUrl.toString() };
+  }
+
+  /** Drops this suite's throwaway AS database, if provisionAsStorage created one. */
+  private async dropAsStorage(): Promise<void> {
+    if (!this.asDbName || !this.asDbAdminUrl) return;
+    const dbName = this.asDbName;
+    try {
+      const adminClient = new Client({ connectionString: this.asDbAdminUrl });
+      await adminClient.connect();
+      await adminClient.query(
+        `select pg_terminate_backend(pid) from pg_stat_activity where datname = $1 and pid <> pg_backend_pid()`,
+        [dbName],
+      );
+      await adminClient.query(`drop database if exists ${dbName}`);
+      await adminClient.end();
+    } catch (err) {
+      console.error(`[E2E] Failed to drop throwaway AS database ${dbName} (best-effort):`, err);
+    } finally {
+      this.asDbName = null;
+      this.asDbAdminUrl = null;
+    }
   }
 
   /**
@@ -261,6 +339,8 @@ export class ProcessManager {
       }
       this.dataDir = null;
     }
+
+    await this.dropAsStorage();
   }
 
   private pipeOutput(proc: ChildProcess, tag: string): void {
