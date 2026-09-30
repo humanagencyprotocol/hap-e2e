@@ -22,6 +22,7 @@ export default defineConfig({
       'test/canonical-vectors.test.ts',
       'test/profile-conformance.test.ts',
       'test/conformance-map.test.ts',
+      'test/as-dir.test.ts',
     ],
     testTimeout: 30_000,
     sequence: { concurrent: false },

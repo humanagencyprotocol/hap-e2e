@@ -2,6 +2,7 @@ import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { AS_DIR, resolveNextBin } from './as-dir';
 
 // src/helpers/ → src → hap-e2e → HAP repo root
 const ROOT = join(import.meta.dirname, '..', '..', '..');
@@ -53,14 +54,22 @@ export class ProcessManager {
    * 27 suites — ~9s to boot plus a stall on each new endpoint, against ~1s to
    * boot here. Behaviour is unchanged: the same routes, the same in-memory
    * store, a fresh process (and so a fresh store) per suite.
+   *
+   * AS_DIR resolves to `suveren-as/` or, in an npm-workspaces monorepo layout,
+   * `suveren-as/apps/as/` (see src/helpers/as-dir.ts). We run the `next` CLI
+   * directly (resolved via Node's own module resolution, which finds a
+   * hoisted `next` just as well as a local one) rather than through `npx`, so
+   * there is no wrapper process between us and the server — see
+   * resolveNextBin's doc comment and stopProcess below for why that matters.
    */
   async startSP(port: number): Promise<ChildProcess> {
     console.error(`[E2E] Starting Authority Server on port ${port}...`);
-    const proc = spawn('npx', ['next', 'start', '-p', String(port)], {
-      cwd: join(ROOT, 'suveren-as'),
-      // Own process group, so stopProcess/killAll can signal the whole tree.
-      // `npx` spawns the real server as a child; signalling only the wrapper
-      // leaves that child serving (and orphaned at job teardown).
+    const nextBin = resolveNextBin(AS_DIR);
+    const proc = spawn(process.execPath, [nextBin, 'start', '-p', String(port)], {
+      cwd: AS_DIR,
+      // Own process group, so stopProcess/killAll can signal the whole tree
+      // (Next may itself fork a worker; signalling only the top process could
+      // leave that behind).
       detached: true,
       env: {
         ...process.env,
@@ -165,12 +174,12 @@ export class ProcessManager {
     const { proc } = entry;
     console.error(`[E2E] Stopping ${name} (pid ${proc.pid})...`);
 
-    // Kill the process GROUP, not just the process we spawned. The Authority
-    // Server runs as `npx next start`: npx is a wrapper that spawns the real
-    // server as a child, and a SIGTERM delivered to the wrapper does not
-    // reach it. The wrapper exits, the server keeps serving, and a test that
-    // believed the service was down would quietly assert nothing — which is
-    // exactly what happened on CI while passing locally.
+    // Kill the process GROUP, not just the process we spawned. We run the
+    // `next` CLI directly (see startSP), but Next itself can fork a worker;
+    // signalling only the top process could leave that worker serving, and a
+    // test that believed the service was down would quietly assert nothing —
+    // which is exactly what happened on CI while passing locally, back when
+    // this ran through an `npx` wrapper that had the same failure mode.
     const signalGroup = (sig: NodeJS.Signals) => {
       try {
         if (proc.pid) process.kill(-proc.pid, sig);
@@ -223,9 +232,8 @@ export class ProcessManager {
     for (const { name, proc } of this.processes) {
       if (proc.exitCode != null) continue;
       console.error(`[E2E] Stopping ${name} (pid ${proc.pid})...`);
-      // Signal the group where we have one (see stopProcess): killing only the
-      // `npx` wrapper left the real server running, which is what produced the
-      // "Terminate orphan process" lines at job teardown.
+      // Signal the group where we have one (see stopProcess) so a forked
+      // worker can't outlive the process we thought we killed.
       const sig = (s: NodeJS.Signals) => {
         try {
           if (proc.pid) process.kill(-proc.pid, s);

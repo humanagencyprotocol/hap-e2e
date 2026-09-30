@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { AS_DIR } from './as-dir';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -46,9 +47,12 @@ export default async function setup(): Promise<void> {
   // A production build, so suites can start the AS with `next start`. `next
   // dev` re-compiles every route on first request in every suite, which is
   // where the bulk of the CI time went.
+  //
+  // AS_DIR resolves to `suveren-as/` or, in an npm-workspaces monorepo layout,
+  // `suveren-as/apps/as/` — see src/helpers/as-dir.ts.
   console.error('[E2E] Building Authority Server (once for the whole run)...');
   execSync('npm run build', {
-    cwd: join(ROOT, 'suveren-as'),
+    cwd: AS_DIR,
     stdio: 'pipe',
     timeout: 300_000,
     env: {

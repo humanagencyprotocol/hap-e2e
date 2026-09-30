@@ -15,7 +15,7 @@ most of it needs a checkout you may not have.
 
 | Layer | What it proves | What you need |
 |---|---|---|
-| **1. Offline conformance** | Canonicalisation bytes and hashes match the published vectors; every profile declares `actionTypes` and `appliesTo`; every mapped MUST resolves to a real test or a recorded gap | This repo and the public spec. `npm ci && npm run test:offline` — 66 tests, no server, no build, no credentials (it runs under its own `vitest.offline.config.ts`, which omits the build step the live suites need) |
+| **1. Offline conformance** | Canonicalisation bytes and hashes match the published vectors; every profile declares `actionTypes` and `appliesTo`; every mapped MUST resolves to a real test or a recorded gap | This repo and the public spec. `npm ci && npm run test:offline` — 70 tests, no server, no build, no credentials (it runs under its own `vitest.offline.config.ts`, which omits the build step the live suites need) |
 | **2. Live suite against Suveren** | The invariant itself: pre-flight tickets, fail-closed on an unreachable Authority Server, bounds, revocation, review flows, read governance, content binding | Everything in layer 1 **plus a checkout of `suveren-as`, which is proprietary and not public.** Without it, `npm test` fails in the build step |
 | **3. Live suite against your own Authority Server** | That *your* implementation satisfies the same MUSTs | Not possible yet — see *Bring your own Authority Server* |
 
@@ -76,6 +76,10 @@ inside it:
   suveren-as/         ← Authority Server — PROPRIETARY, not published
 ```
 
+The Authority Server's app may live at the repo root of `suveren-as/` or, in an
+npm-workspaces monorepo layout, at `suveren-as/apps/as/`. The suite resolves
+whichever is present; nothing else here needs to know which.
+
 Layers 1 and the parts of the browser suite that do not reach the Authority
 Server need the public five. Everything else needs `suveren-as`.
 
@@ -85,7 +89,7 @@ Layer 1, from a fresh clone of this repo alone:
 
 ```bash
 npm ci
-npm run test:offline      # 66 tests: vectors, profiles, the MUST map
+npm run test:offline      # 70 tests: vectors, profiles, the MUST map, the AS_DIR layout resolver
 ```
 
 Layer 2, with all six repositories checked out as siblings:
@@ -141,7 +145,7 @@ grepping the files under-counts).
 
 | Repo | Location | Cases | Runs in CI |
 |---|---|---|---|
-| **hap-e2e** | `test/` (vitest, real stack) | 207 + 32 skipped | ✅ `e2e.yml` |
+| **hap-e2e** | `test/` (vitest, real stack) | 233 + 32 skipped | ✅ `e2e.yml` |
 | | `e2e/` (Playwright, browser journeys) | 31 | ✅ same workflow |
 | | `conformance/` (the MUST map — data, not tests) | — | ✅ checked by `test/conformance-map.test.ts` |
 | **suveren-as** | `src/__tests__/` | 284 | ✅ `ci.yml` |
