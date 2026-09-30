@@ -98,8 +98,16 @@ export class ProcessManager {
         ALLOW_REGISTRATION: 'true',
         SUVEREN_TEST_DIRECT_REGISTER: 'true',
         // Seed local-admin (key 'local-dev-key') is an operator → can verify
-        // identities (v0.6 Identity Assurance e2e).
+        // identities (v0.6 Identity Assurance e2e). Its own flag, deliberately
+        // NOT SUVEREN_ALLOW_EPHEMERAL: that one means "ephemeral SIGNING KEY"
+        // only — seeding writes a PUBLIC, hardcoded credential into whatever
+        // durable store SUVEREN_DB_URL points at (fine for the throwaway
+        // per-suite database provisionAsStorage creates below, never fine for
+        // a persistent one), so the AS gates it separately (lib/config.ts
+        // refuses SUVEREN_SEED_DEV_USERS=1 outright under
+        // SUVEREN_EDITION=self-hosted).
         ADMIN_USER_IDS: 'local-admin',
+        SUVEREN_SEED_DEV_USERS: '1',
         PORT: String(port),
         // The signing-key escape hatch (unrelated to storage) — no
         // SP_PRIVATE_KEY/SP_PUBLIC_KEY is supplied, so the AS generates an
