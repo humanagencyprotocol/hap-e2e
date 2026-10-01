@@ -191,6 +191,18 @@ The central invariant has its own suite: `as-outage-fail-closed.test.ts` stops
 the Authority Server mid-session and proves the next write is refused — with a
 positive control first, so "blocked" cannot be confused with "broken".
 
+Which Authority Server the gateway trusts is covered by five suites that start
+the whole gateway (control plane and MCP server): `as-key-pinning` (the AS
+signing key is pinned at sign-in; a different key is refused and the gateway
+locks), `as-url-repairing` (changing the AS URL re-pairs; old mandates do not
+carry over, vault and ticket archive do; upgrades keep grants),
+`as-url-cli` (`--as-url` / `--ca-file` precedence and internal-CA TLS),
+`as-untrusted-server` (an AS that cannot sign the sign-in challenge never
+receives the API key; tickets must name the proposal and the request they
+authorize) and `as-tls-pinning` (with `pin-tls` on, a relay with a different
+certificate receives no credential). Without `pin-tls`, only TLS protects the
+connection — recorded as an explicit skipped case, not a gap.
+
 `conformance/core-musts.ts` maps 31 normative MUSTs from *Ticket Issuance*,
 *Gatekeeper & Executor* and *Read Authorization* to the tests that hold them.
 It doubles as the checklist an independent implementation would work through.

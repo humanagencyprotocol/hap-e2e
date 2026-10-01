@@ -4,7 +4,12 @@
  */
 import { fetchResilient } from './http.js';
 export class GatewayClient {
-  constructor(private baseUrl: string) {}
+  /**
+   * @param internalSecret Sent as X-Internal-Secret. Needed only when the
+   *   gateway was started with SUVEREN_INTERNAL_SECRET — i.e. paired with a
+   *   real control plane, which is the only way the two can talk.
+   */
+  constructor(private baseUrl: string, private internalSecret?: string) {}
 
   private async request(
     method: string,
@@ -13,7 +18,10 @@ export class GatewayClient {
   ): Promise<Response> {
     return fetchResilient(`${this.baseUrl}${path}`, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.internalSecret ? { 'X-Internal-Secret': this.internalSecret } : {}),
+      },
       body: body != null ? JSON.stringify(body) : undefined,
     });
   }
