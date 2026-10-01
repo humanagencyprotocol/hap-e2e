@@ -14,14 +14,15 @@
  * - every receipt_id in the ERP's export is a ticket the AS issued;
  * - a call the gateway refuses leaves no ticket and no ERP trace.
  *
- * Runs the connector from the sibling build (hap-erp-mcp/dist) so an unreleased
- * connector can be proven before it is published. Credential-free.
+ * The connector is the one the gateway installs itself from npm on start (the
+ * shipped manifest marks it a personal default) — the artefact a customer gets,
+ * not a local build. Credential-free.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,9 +38,8 @@ const GW_URL = `http://localhost:${GW_PORT}`;
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
-const ERP_BIN = join(ROOT, 'hap-erp-mcp', 'dist', 'index.js');
 const MANIFEST = join(ROOT, 'suveren-gateway', 'content', 'integrations', 'erp.json');
-const available = existsSync(ERP_BIN) && existsSync(MANIFEST);
+const available = existsSync(MANIFEST);
 
 const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/sales@0.1';
 const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max',
@@ -51,15 +51,22 @@ const pm = new ProcessManager();
 const sp = new SPClient(SP_URL);
 const gw = new GatewayClient(GW_URL);
 const work = mkdtempSync(join(tmpdir(), 'hap-e2e-erp-'));
-const ERP_DB = join(work, 'erp.db');
 const SCENARIO = join(work, 'scenario.json');
 
 let apiKey: string;
 let mcpClient: Client;
 
-/** The ERP's own operator command, against the same database the gateway-spawned connector uses. */
+/**
+ * The ERP's own operator command, run from the package the gateway installed and
+ * against the database the gateway-spawned connector uses (HAP_DATA_DIR = the
+ * gateway's data dir — the contract the gateway passes to its sub-MCPs).
+ */
 function erpCli(...args: string[]): string {
-  return execFileSync('node', [ERP_BIN, ...args], { env: { ...process.env, DATABASE_URL: ERP_DB }, encoding: 'utf8' });
+  const dataDir = pm.getDataDir();
+  const bin = join(dataDir, 'integrations', 'node_modules', '@humanagencyp', 'erp-mcp', 'dist', 'index.js');
+  const env: NodeJS.ProcessEnv = { ...process.env, HAP_DATA_DIR: dataDir };
+  delete env.DATABASE_URL;
+  return execFileSync('node', [bin, ...args], { env, encoding: 'utf8' });
 }
 
 async function call(tool: string, args: Record<string, unknown>) {
@@ -83,15 +90,8 @@ describe.skipIf(!available)('ERP simulation: request → ticket → effect (real
     await pm.startGateway({ port: GW_PORT, spUrl: SP_URL, spApiKey: apiKey, profilesDir: PROFILES_DIR });
     await gw.configure({ sessionCookie: 'erp-sim-e2e', apiKey });
 
-    // The shipped manifest auto-registers the published connector; replace it with
-    // the sibling build under the SAME id, so tool names stay what production uses.
-    const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
-    try { await gw.removeIntegration('erp'); } catch { /* not registered yet */ }
-    await gw.addIntegration({
-      id: 'erp', name: 'ERP', command: 'node', args: [ERP_BIN], envKeys: {},
-      env: { DATABASE_URL: ERP_DB, ERP_MODE: 'simulation' },
-      profile: 'sales', enabled: true, toolGating: manifest.toolGating,
-    });
+    // The shipped manifest registers the published connector as a personal default;
+    // the gateway installs it from npm and starts it in its default (simulation) mode.
     await gw.waitForIntegration('erp');
 
     const bounds = {
