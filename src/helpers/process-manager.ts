@@ -17,9 +17,13 @@ interface ManagedProcess {
 export class ProcessManager {
   private processes: ManagedProcess[] = [];
   private dataDir: string | null = null;
-  /** Throwaway per-suite Postgres database this instance created (Redis → Postgres move), if any. */
-  private asDbName: string | null = null;
-  private asDbAdminUrl: string | null = null;
+  /**
+   * Throwaway Postgres databases this instance created (Redis → Postgres
+   * move) — one per startSP call, so a suite that runs two Authority Servers,
+   * or restarts one as a DIFFERENT server, gives each its own store, as the
+   * in-memory AS used to. All dropped in killAll().
+   */
+  private asDbs: Array<{ name: string; adminUrl: string }> = [];
 
   /** Temporary data directory for the gateway (cleaned up in killAll). */
   getDataDir(): string {
@@ -81,7 +85,15 @@ export class ProcessManager {
    * there is no wrapper process between us and the server — see
    * resolveNextBin's doc comment and stopProcess below for why that matters.
    */
-  async startSP(port: number): Promise<ChildProcess> {
+  async startSP(
+    port: number,
+    opts: {
+      /** Process name for stopProcess — distinct names let a suite run two AS instances. */
+      name?: string;
+      /** Extra env, e.g. SP_PRIVATE_KEY/SP_PUBLIC_KEY to pin the signing key. */
+      env?: Record<string, string>;
+    } = {},
+  ): Promise<ChildProcess> {
     console.error(`[E2E] Starting Authority Server on port ${port}...`);
 
     const storageEnv = await this.provisionAsStorage();
@@ -114,11 +126,12 @@ export class ProcessManager {
         // ephemeral Ed25519 keypair. Still needed with Postgres.
         SUVEREN_ALLOW_EPHEMERAL: '1',
         ...storageEnv,
+        ...opts.env,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    this.processes.push({ name: 'as', proc });
+    this.processes.push({ name: opts.name ?? 'as', proc });
     this.pipeOutput(proc, 'AS');
 
     await this.waitForHealth(`http://localhost:${port}/api/as/pubkey`, 60_000);
@@ -147,31 +160,29 @@ export class ProcessManager {
     const suiteUrl = new URL(callerUrl);
     suiteUrl.pathname = `/${dbName}`;
 
-    this.asDbName = dbName;
-    this.asDbAdminUrl = admin.toString();
+    this.asDbs.push({ name: dbName, adminUrl: admin.toString() });
 
     console.error(`[E2E] Created throwaway AS database ${dbName} (Redis → Postgres move).`);
     return { SUVEREN_DB_URL: suiteUrl.toString() };
   }
 
-  /** Drops this suite's throwaway AS database, if provisionAsStorage created one. */
+  /** Drops every throwaway AS database provisionAsStorage created. */
   private async dropAsStorage(): Promise<void> {
-    if (!this.asDbName || !this.asDbAdminUrl) return;
-    const dbName = this.asDbName;
-    try {
-      const adminClient = new Client({ connectionString: this.asDbAdminUrl });
-      await adminClient.connect();
-      await adminClient.query(
-        `select pg_terminate_backend(pid) from pg_stat_activity where datname = $1 and pid <> pg_backend_pid()`,
-        [dbName],
-      );
-      await adminClient.query(`drop database if exists ${dbName}`);
-      await adminClient.end();
-    } catch (err) {
-      console.error(`[E2E] Failed to drop throwaway AS database ${dbName} (best-effort):`, err);
-    } finally {
-      this.asDbName = null;
-      this.asDbAdminUrl = null;
+    const dbs = this.asDbs;
+    this.asDbs = [];
+    for (const { name: dbName, adminUrl } of dbs) {
+      try {
+        const adminClient = new Client({ connectionString: adminUrl });
+        await adminClient.connect();
+        await adminClient.query(
+          `select pg_terminate_backend(pid) from pg_stat_activity where datname = $1 and pid <> pg_backend_pid()`,
+          [dbName],
+        );
+        await adminClient.query(`drop database if exists ${dbName}`);
+        await adminClient.end();
+      } catch (err) {
+        console.error(`[E2E] Failed to drop throwaway AS database ${dbName} (best-effort):`, err);
+      }
     }
   }
 
@@ -217,6 +228,68 @@ export class ProcessManager {
     await this.waitForHealth(`http://localhost:${opts.port}/health`, 30_000);
     console.error(`[E2E] Gateway ready on port ${opts.port}.`);
     return proc;
+  }
+
+  /**
+   * Start an arbitrary long-running process under this manager — for suites
+   * that need a shape `startGateway` does not give them (the control plane,
+   * the npm CLI, a restart of one half of the gateway). The caller owns the
+   * whole environment: nothing from `startGateway`'s defaults is applied.
+   *
+   * Spawned as its own process group so stopProcess/killAll reach anything
+   * it forks (the CLI re-execs itself and spawns two children).
+   */
+  async startManaged(
+    name: string,
+    command: string,
+    args: string[],
+    opts: { cwd: string; env: NodeJS.ProcessEnv; healthUrl?: string; timeoutMs?: number },
+  ): Promise<ChildProcess> {
+    console.error(`[E2E] Starting ${name}: ${command} ${args.join(' ')}`);
+    const proc = spawn(command, args, {
+      cwd: opts.cwd,
+      env: opts.env,
+      detached: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    this.processes.push({ name, proc });
+    this.pipeOutput(proc, name.toUpperCase());
+    if (opts.healthUrl) {
+      await Promise.race([
+        this.waitForHealth(opts.healthUrl, opts.timeoutMs ?? 30_000),
+        new Promise<never>((_, reject) =>
+          proc.once('exit', (code) => reject(new Error(`${name} exited (code ${code}) before ${opts.healthUrl} answered`))),
+        ),
+      ]);
+      console.error(`[E2E] ${name} ready.`);
+    }
+    return proc;
+  }
+
+  /**
+   * Poll until a URL stops answering at all (connection refused / timeout).
+   */
+  async waitForDown(url: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        await fetch(url, { signal: AbortSignal.timeout(1_000) });
+      } catch {
+        return;
+      }
+      if (Date.now() > deadline) throw new Error(`Still answering after ${timeoutMs}ms: ${url}`);
+      await sleep(250);
+    }
+  }
+
+  /**
+   * Signal ONLY the managed process itself, not its process group — to test
+   * that a process relays signals to its own children.
+   */
+  signalOnly(name: string, sig: NodeJS.Signals): void {
+    const entry = this.processes.find(p => p.name === name);
+    if (!entry) throw new Error(`No managed process named "${name}"`);
+    entry.proc.kill(sig);
   }
 
   /**
