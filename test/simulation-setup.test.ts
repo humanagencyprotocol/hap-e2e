@@ -161,6 +161,25 @@ describe.skipIf(!available)('simulation setup + first case (real AS + gateway + 
 
   const hashes: Record<string, string> = {};
 
+  it('all three simulators describe the same package format to the setup agent', async () => {
+    // load_simulation's `package` JSON Schema is one shared definition vendored into
+    // erp-mcp, crm-mcp and email-mcp. Each repo tests its own copy against its own
+    // parser; only here, across the published packages, can a drifted copy be seen.
+    // The per-tool `description` notes which part each connector uses, so it differs.
+    const { tools } = await mcpClient.listTools();
+    const schemaOf = (name: string) => {
+      const t = tools.find((x) => x.name === name);
+      expect(t, `${name} visible to the setup agent`).toBeTruthy();
+      const { description: _note, ...rest } = (t!.inputSchema as any).properties.package;
+      return rest;
+    };
+    const erp = schemaOf('erp__load_simulation');
+    expect(erp.required).toEqual(expect.arrayContaining(['name', 'currency', 'customers', 'products', 'cases']));
+    expect(Object.keys(erp.properties.products.items.properties)).toEqual(expect.arrayContaining(['sku', 'list_price', 'stock']));
+    expect(schemaOf('crm__load_simulation')).toEqual(erp);
+    expect(schemaOf('mail__load_simulation')).toEqual(erp);
+  });
+
   it('the same package loads into email, CRM and ERP — one fingerprint', async () => {
     for (const c of ['erp', 'crm', 'mail'] as const) {
       const r = await call(`${c}__load_simulation`, { package: pkg });
