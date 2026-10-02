@@ -7,9 +7,10 @@
  * 3. User reviews and commits/rejects in browser
  * 4. Revocation blocks further activity
  */
-import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups} from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups, latestProfileId} from './fixtures';
 
-const CUSTOMERS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/customers@0.7';
+// The version the gateway's CRM wizard grants under (newest) — see latestProfileId.
+const CUSTOMERS_PROFILE = latestProfileId('customers');
 
 test.describe.serial('Journey 5: Agent Flow', () => {
   let apiKey: string;

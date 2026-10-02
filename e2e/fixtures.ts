@@ -23,6 +23,21 @@ const SP_DIR = resolveAsDir(ROOT);
 const GW_DIR = join(ROOT, 'suveren-gateway');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
+/**
+ * The profile version the gateway grants under for a short profile name
+ * ("customers") — the LAST matching entry in hap-profiles/index.json, because the
+ * gateway's profile loader registers short names in index order and the last one
+ * wins. Team approvers are configured per profile VERSION, so a journey that
+ * enables a hard-coded older version stops matching the moment a newer version is
+ * published (journeys 1 + 5 broke this way when customers@0.8 shipped).
+ */
+export function latestProfileId(short: string): string {
+  const index = JSON.parse(readFileSync(join(PROFILES_DIR, 'index.json'), 'utf8')) as { profiles: Record<string, string> };
+  const ids = Object.keys(index.profiles).filter((id) => id.endsWith('/' + short) || id.includes('/' + short + '@'));
+  if (ids.length === 0) throw new Error(`No profile "${short}" in ${PROFILES_DIR}/index.json`);
+  return ids[ids.length - 1];
+}
+
 // ─── Ports ───────────────────────────────────────────────────────────────────
 
 export const SP_PORT = 19100;

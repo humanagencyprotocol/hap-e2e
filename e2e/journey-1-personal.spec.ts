@@ -7,10 +7,11 @@
  * Each test gets a fresh page, so we must login + do all checks in one test,
  * navigating via sidebar clicks (SPA navigation) not page.goto (full reload).
  */
-import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups} from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups, latestProfileId} from './fixtures';
 
 const RECORDS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/records@0.5';
-const CUSTOMERS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/customers@0.7';
+// The version the gateway's CRM wizard grants under (newest) — see latestProfileId.
+const CUSTOMERS_PROFILE = latestProfileId('customers');
 
 test.describe.serial('Journey 1: Personal User', () => {
   let apiKey: string;
