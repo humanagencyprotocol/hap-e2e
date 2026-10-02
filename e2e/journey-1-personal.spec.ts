@@ -38,7 +38,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     // Sidebar items (nav labels from Sidebar.tsx)
     await expect(page.locator('.sidebar')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Integrations")')).toBeVisible();
-    await expect(page.locator('.sidebar-item:has-text("AI Assistant")')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("Settings")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Pending Approvals")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Mandates")')).toBeVisible();
 
@@ -48,8 +48,8 @@ test.describe.serial('Journey 1: Personal User', () => {
     await page.waitForURL('**/integrations');
     await expect(page.locator('.page-title')).toHaveText('Integrations', { timeout: 10_000 });
 
-    // Navigate to AI Assistant
-    await page.click('.sidebar-item:has-text("AI Assistant")');
+    // Navigate to Settings (was "AI Assistant" before suveren-gateway #29)
+    await page.click('.sidebar-item:has-text("Settings")');
     await page.waitForURL('**/settings');
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
