@@ -17,10 +17,10 @@
  * - the people's actual replies (the reference the AI is later compared with)
  *   never appear in anything a tool returned to the AI.
  *
- * Connectors under test come from HAP_E2E_SIM_FIXTURES (built dist + manifest per
- * connector) until erp-mcp, crm-mcp and email-mcp are released with
- * load_simulation; then this switches to the gateway-installed npm packages, as
- * erp-simulation.test.ts did. Without the fixtures the suite is skipped.
+ * The connectors are the published packages, installed by the gateway itself:
+ * erp-mcp and crm-mcp as personal defaults, email-mcp registered from the shipped
+ * mail.json manifest (it is not a personal default, so it never starts next to
+ * Gmail on its own). Governed by the shipped manifests and the live profiles.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -42,9 +42,10 @@ const GW_URL = `http://localhost:${GW_PORT}`;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-type Fixtures = Record<'erp' | 'crm' | 'mail', { bin: string; manifest: string }> & { package: string };
-const FIXTURES_PATH = process.env.HAP_E2E_SIM_FIXTURES;
-const fx: Fixtures | null = FIXTURES_PATH && existsSync(FIXTURES_PATH) ? JSON.parse(readFileSync(FIXTURES_PATH, 'utf8')) : null;
+const INTEGRATIONS = join(ROOT, 'suveren-gateway', 'content', 'integrations');
+const MAIL_MANIFEST = join(INTEGRATIONS, 'mail.json');
+const available = existsSync(MAIL_MANIFEST);
+const PKG = { erp: 'erp-mcp', crm: 'crm-mcp', mail: 'email-mcp' } as const;
 
 const P = 'github.com/humanagencyprotocol/hap-profiles';
 const PROFILES = {
@@ -77,7 +78,6 @@ const pm = new ProcessManager();
 const sp = new SPClient(SP_URL);
 const gw = new GatewayClient(GW_URL);
 const work = mkdtempSync(join(tmpdir(), 'hap-e2e-sim-'));
-const DB = { erp: join(work, 'erp.db'), crm: join(work, 'crm.db'), mail: join(work, 'mail.db') };
 
 let apiKey: string;
 let did: string;
@@ -114,13 +114,18 @@ async function call(tool: string, args: Record<string, unknown>) {
   return { denied: r.isError === true, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() };
 }
 
+/** The connector's own operator command, from the package the gateway installed, on the gateway's data dir. */
 function exportOf(c: 'erp' | 'crm' | 'mail') {
-  const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: DB[c] };
-  return JSON.parse(execFileSync('node', [fx![c].bin, 'export'], { env, encoding: 'utf8' }));
+  const dataDir = pm.getDataDir();
+  const bin = join(dataDir, 'integrations', 'node_modules', '@humanagencyp', PKG[c], 'dist', 'index.js');
+  const env: NodeJS.ProcessEnv = { ...process.env, HAP_DATA_DIR: dataDir };
+  delete env.DATABASE_URL;
+  return JSON.parse(execFileSync('node', [bin, 'export'], { env, encoding: 'utf8' }));
 }
 
-describe.skipIf(!fx)('simulation setup + first case (real AS + gateway + email/CRM/ERP simulators)', () => {
-  const pkg = fx ? JSON.parse(readFileSync(fx.package, 'utf8')) : null;
+describe.skipIf(!available)('simulation setup + first case (real AS + gateway + email/CRM/ERP simulators)', () => {
+  // The canonical example package shipped with the email simulator (renamed spare-parts cases).
+  const pkg = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'simulation-package.example.json'), 'utf8'));
   const setupMandates: string[] = [];
 
   beforeAll(async () => {
@@ -132,15 +137,17 @@ describe.skipIf(!fx)('simulation setup + first case (real AS + gateway + email/C
     await pm.startGateway({ port: GW_PORT, spUrl: SP_URL, spApiKey: apiKey, profilesDir: PROFILES_DIR });
     await gw.configure({ sessionCookie: 'sim-setup-e2e', apiKey });
 
-    for (const [id, profile] of [['erp', 'sales'], ['crm', 'customers'], ['mail', 'email']] as const) {
-      try { await gw.removeIntegration(id); } catch { /* not auto-registered */ }
-      const manifest = JSON.parse(readFileSync(fx![id].manifest, 'utf8'));
-      await gw.addIntegration({
-        id, name: id, command: 'node', args: [fx![id].bin], envKeys: {},
-        env: { DATABASE_URL: DB[id] }, profile, enabled: true, toolGating: manifest.toolGating,
-      });
-      await gw.waitForIntegration(id);
-    }
+    // erp + crm: personal defaults, installed from npm by the gateway on start.
+    await gw.waitForIntegration('erp');
+    await gw.waitForIntegration('crm');
+    // mail: registered from the shipped manifest; the gateway installs the npm package.
+    const mail = JSON.parse(readFileSync(MAIL_MANIFEST, 'utf8'));
+    await gw.addIntegration({
+      id: 'mail', name: mail.name, command: mail.mcp.command, args: mail.mcp.args, envKeys: {},
+      profile: mail.profile, enabled: true, toolGating: mail.toolGating,
+      npmPackage: mail.npmPackage,
+    } as Parameters<GatewayClient['addIntegration']>[0]);
+    await gw.waitForIntegration('mail');
 
     for (const k of ['sales', 'customers', 'email'] as const) setupMandates.push(await grant(k, 'setup'));
     await reconnect();

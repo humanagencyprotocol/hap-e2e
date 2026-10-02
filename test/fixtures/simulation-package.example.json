@@ -1,0 +1,57 @@
+{
+  "name": "Bergmann Ersatzteile GmbH",
+  "currency": "EUR",
+  "customers": [
+    { "name": "Huber Maschinenbau GmbH", "email": "einkauf@huber.example", "country": "AT", "credit_limit": 15000, "open_balance": 2000, "payment_terms": "NET30" },
+    { "name": "Steiner Anlagentechnik KG", "email": "office@steiner.example", "country": "DE", "credit_limit": 4000, "open_balance": 3500, "payment_terms": "NET14" }
+  ],
+  "products": [
+    { "sku": "SP-100", "name": "Hydraulic seal kit", "unit": "set", "list_price": 84.5, "stock": 40 },
+    { "sku": "SP-200", "name": "Bearing set 6204", "unit": "set", "list_price": 120.0, "stock": 10 },
+    { "sku": "SP-310", "name": "Drive belt XPZ 1250", "unit": "pcs", "list_price": 18.9, "stock": 250 }
+  ],
+  "cases": [
+    {
+      "id": "c1",
+      "request": {
+        "from": { "name": "Markus Huber", "email": "einkauf@huber.example" },
+        "subject": "Angebot benötigt — Hydraulic seal kit",
+        "body": "Hallo, könnten Sie uns bitte ein Angebot über 10 Stück Hydraulic seal kit (SP-100) zusenden? Lieferung idealerweise nächste Woche. Danke, Markus Huber, Huber Maschinenbau GmbH.",
+        "received_at": "2026-09-02T08:14:00.000Z"
+      },
+      "reply": {
+        "subject": "Re: Angebot benötigt — Hydraulic seal kit",
+        "body": "Hallo Herr Huber, gerne: 10x SP-100 Hydraulic seal kit a EUR 84,50 = EUR 845,00 netto, Lieferzeit 3-5 Werktage ab Bestellung. Bitte bestätigen Sie, dann stellen wir das Angebot. Viele Grüße, Bergmann Ersatzteile GmbH."
+      },
+      "notes": "Straightforward quote request — one line, in-stock item."
+    },
+    {
+      "id": "c2",
+      "request": {
+        "from": { "name": "Lena Steiner", "email": "office@steiner.example" },
+        "subject": "Bestellung Lagerketten 6204",
+        "body": "Guten Tag, wir möchten 15 Stück Bearing set 6204 (SP-200) bestellen. Bitte um Bestätigung und Liefertermin. Mit freundlichen Grüßen, Lena Steiner, Steiner Anlagentechnik KG.",
+        "received_at": "2026-09-03T10:02:00.000Z"
+      },
+      "reply": {
+        "subject": "Re: Bestellung Lagerketten 6204",
+        "body": "Guten Tag Frau Steiner, von SP-200 haben wir aktuell 10 Stück auf Lager, die restlichen 5 sind in ca. 2 Wochen wieder verfügbar. Sollen wir die 10 Stück vorab liefern und den Rest nachliefern, oder warten Sie auf die komplette Menge? Viele Grüße, Bergmann Ersatzteile GmbH."
+      },
+      "notes": "Ordered quantity (15) exceeds stock (10) — the people's reply offers a split shipment instead of refusing outright."
+    },
+    {
+      "id": "c3",
+      "request": {
+        "from": { "name": "Markus Huber", "email": "einkauf@huber.example" },
+        "subject": "Frage zu Liefertermin SP-100",
+        "body": "Hallo, können Sie uns den genauen Liefertermin für unsere Bestellung der Hydraulic seal kits (SP-100) von letzter Woche nennen? Wir planen die Montage. Danke, Markus Huber.",
+        "received_at": "2026-09-09T09:30:00.000Z"
+      },
+      "reply": {
+        "subject": "Re: Frage zu Liefertermin SP-100",
+        "body": "Hallo Herr Huber, Ihre Bestellung (10x SP-100) ist versandbereit und geht morgen per Spedition raus, Ankunft voraussichtlich in 2-3 Werktagen. Die Trackingnummer senden wir Ihnen separat zu. Viele Grüße, Bergmann Ersatzteile GmbH."
+      },
+      "notes": "Pure status/delivery-date question on an existing order — no new quote or stock decision needed."
+    }
+  ]
+}
