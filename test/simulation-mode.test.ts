@@ -97,15 +97,19 @@ describe('gateway simulation mode (real AS + gateway + published simulators)', (
     expect(list.find((i) => i.id === 'crm')?.running).toBe(true);
   });
 
-  it('a real connector (no simulation mode) is blocked, with the reason shown', async () => {
-    // records-mcp is a personal default without a simulation marker.
-    let rec: { running?: boolean; error?: string } | undefined;
-    for (let i = 0; i < 60 && !rec?.error; i++) {
-      rec = (await gw.integrations()).find((x) => x.id === 'records');
-      if (!rec?.error) await new Promise((r) => setTimeout(r, 1_000));
+  it('a real connector (no simulation mode) is paused by design — reported as paused, not as an error', async () => {
+    // records-mcp is a personal default without a simulation marker. Since gateway
+    // 0.11.1 the status carries a structured `paused: 'simulation'` and `error` is
+    // reserved for real failures (the UI showed paused systems as "Crashed" before).
+    type Status = { id: string; running?: boolean; error?: string; paused?: string };
+    let rec: Status | undefined;
+    for (let i = 0; i < 60 && !rec?.paused; i++) {
+      rec = ((await gw.integrations()) as Status[]).find((x) => x.id === 'records');
+      if (!rec?.paused) await new Promise((r) => setTimeout(r, 1_000));
     }
     expect(rec?.running).toBeFalsy();
-    expect(rec?.error).toMatch(/simulation mode/i);
+    expect(rec?.paused).toBe('simulation');
+    expect(rec?.error).toBeFalsy();
   });
 
   it("the working agent sees the ERP's work tools but not load_simulation, and no tools of a blocked system", async () => {
