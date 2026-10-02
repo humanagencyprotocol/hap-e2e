@@ -7,10 +7,11 @@
  * Each test gets a fresh page, so we must login + do all checks in one test,
  * navigating via sidebar clicks (SPA navigation) not page.goto (full reload).
  */
-import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups} from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups, latestProfileId} from './fixtures';
 
 const RECORDS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/records@0.5';
-const CUSTOMERS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/customers@0.7';
+// The version the gateway's CRM wizard grants under (newest) — see latestProfileId.
+const CUSTOMERS_PROFILE = latestProfileId('customers');
 
 test.describe.serial('Journey 1: Personal User', () => {
   let apiKey: string;
@@ -37,7 +38,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     // Sidebar items (nav labels from Sidebar.tsx)
     await expect(page.locator('.sidebar')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Integrations")')).toBeVisible();
-    await expect(page.locator('.sidebar-item:has-text("AI Assistant")')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("Settings")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Pending Approvals")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Mandates")')).toBeVisible();
 
@@ -47,8 +48,8 @@ test.describe.serial('Journey 1: Personal User', () => {
     await page.waitForURL('**/integrations');
     await expect(page.locator('.page-title')).toHaveText('Integrations', { timeout: 10_000 });
 
-    // Navigate to AI Assistant
-    await page.click('.sidebar-item:has-text("AI Assistant")');
+    // Navigate to Settings (was "AI Assistant" before suveren-gateway #29)
+    await page.click('.sidebar-item:has-text("Settings")');
     await page.waitForURL('**/settings');
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
