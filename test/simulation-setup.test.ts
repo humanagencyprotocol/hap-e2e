@@ -202,12 +202,13 @@ describe.skipIf(!available)('simulation setup + first case (real AS + gateway + 
     for (const id of setupMandates) await sp.revokeAuthorization(apiKey, id);
     for (const k of ['sales', 'customers', 'email'] as const) await grant(k, 'work');
     await reconnect();
-    // Known gateway behaviour (reported 2026-10-02): the first ticketed call after a
-    // revoke can still select the revoked mandate; the AS refuses ("revoked"), the
-    // gateway purges it from its cache, and that one call fails instead of falling
-    // back to the other valid mandate on the same profile. So each connector gets one
-    // load attempt that may end as "revoked" — never as a load — and then the attempt
-    // that must hit the work mandate's setup_daily_max = 0.
+    // The first ticketed call after a revoke can still select the revoked setup
+    // mandate (the gateway's cache refresh is asynchronous); the AS refuses it as
+    // revoked. Since gateway #44 the gateway then falls back to another mandate that
+    // passes locally — but here there is none: the work mandate's setup_daily_max = 0
+    // cannot authorize a load. So the first attempt may still end as "revoked" —
+    // never as a load — and the second must hit setup_daily_max = 0. The fallback
+    // itself is covered by test/revoked-mandate-fallback.test.ts.
     for (const c of ['erp', 'crm', 'mail'] as const) {
       const first = await call(`${c}__load_simulation`, { package: pkg });
       expect(first.denied).toBe(true);
