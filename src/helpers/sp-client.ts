@@ -71,6 +71,27 @@ export class SPClient {
     return res.json();
   }
 
+  // ── Profiles ────────────────────────────────────────────
+
+  /**
+   * POST /api/profiles — create a community (author-your-own) profile.
+   * The AS auto-prefixes the id to `community/<userId>/<given id>` unless it
+   * already starts with `community/`. Used by tests that need a profile shape
+   * no published hap-profiles profile has yet — never a substitute for
+   * publishing a real profile version.
+   */
+  async createProfile(
+    apiKey: string,
+    profile: Record<string, unknown>,
+  ): Promise<{ profile_id: string; created_at: number }> {
+    const res = await this.request('POST', '/api/profiles', { profile }, apiKey);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(`createProfile failed (${res.status}): ${JSON.stringify(body)}`);
+    }
+    return res.json();
+  }
+
   // ── Groups ──────────────────────────────────────────────
 
   async getPersonalGroupId(apiKey: string): Promise<string> {
