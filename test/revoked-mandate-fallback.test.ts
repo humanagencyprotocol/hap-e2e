@@ -60,8 +60,8 @@ const CONTEXT_KEY_ORDER = ['contact_type'];
 // specificity (not bounds) decides which mandate is tried first.
 const BOUNDS = { profile: PROFILE_ID, write_daily_max: 10, delete_daily_max: 5 };
 
-const SP_PORT = 17240;
-const GW_PORT = 17241;
+const SP_PORT = 17300;
+const GW_PORT = 17301;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
