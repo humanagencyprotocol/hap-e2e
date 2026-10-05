@@ -113,6 +113,20 @@ test.describe.serial('Scope field discovery', () => {
       });
     });
 
+    // 2b. Alice is in a team by now (group-journey runs first), and the picker
+    //     applies the AS's team authority gate at selection (gateway 0.16.1): a
+    //     profile with no approvers — or without Alice among them — is greyed
+    //     out. This test is about scope discovery, not team rights, so the team's
+    //     calendar config names Alice as approver.
+    await page.route('**/api/groups/*/profile-config/*', async route => {
+      if (!decodeURIComponent(route.request().url()).includes('/calendar@')) return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ profileId: 'calendar', config: { approvers: [ALICE.id] } }),
+      });
+    });
+
     // 3. The test under test: the CP discovery endpoint.
     //    Hard failure if this call returns HTML instead of JSON (Vite proxy bug)
     //    or isn't reached at all.
