@@ -17,6 +17,11 @@
  * The connector is the one the gateway installs itself from npm on start (the
  * shipped manifest marks it a personal default) — the artefact a customer gets,
  * not a local build. Credential-free.
+ *
+ * The ERP starts empty (no demo data). Its customers and items are seeded from a
+ * company file through the installed connector's own operator command, before
+ * the agent makes its first call — the test's data is written down here, not
+ * borrowed from a demo catalog that could change.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -52,6 +57,21 @@ const sp = new SPClient(SP_URL);
 const gw = new GatewayClient(GW_URL);
 const work = mkdtempSync(join(tmpdir(), 'hap-e2e-erp-'));
 const SCENARIO = join(work, 'scenario.json');
+const COMPANY = join(work, 'company.json');
+
+/** Everything the requests below need, with fixed ids: 1 × item-7 + 1 × item-1 = 37, 4 × item-8 = 1,360, 1 × item-2 = 45. */
+const COMPANY_DATA = {
+  name: 'E2E Industrial', currency: 'EUR',
+  items: [
+    { id: 'item-1', sku: 'WIDGET-100', name: 'Widget 100', unit: 'pcs', list_price: 25, stock: 500 },
+    { id: 'item-2', sku: 'WIDGET-200', name: 'Widget 200 Pro', unit: 'pcs', list_price: 45, stock: 300 },
+    { id: 'item-7', sku: 'CABLE-5M', name: 'Cable 5m', unit: 'pcs', list_price: 12, stock: 1000 },
+    { id: 'item-8', sku: 'SERVICE-KIT', name: 'Maintenance Kit', unit: 'set', list_price: 340, stock: 20 },
+  ],
+  customers: [
+    { id: 'cust-4', name: 'Meridian Industrial Ltd', email: 'payables@meridianind.example', country: 'IE', credit_limit: 100000, open_balance: 0, payment_terms: 'NET60' },
+  ],
+};
 
 let apiKey: string;
 let mcpClient: Client;
@@ -62,9 +82,13 @@ let mcpClient: Client;
  * gateway's data dir — the contract the gateway passes to its sub-MCPs).
  */
 function erpCli(...args: string[]): string {
+  return erpCliWith({}, ...args);
+}
+
+function erpCliWith(extraEnv: Record<string, string>, ...args: string[]): string {
   const dataDir = pm.getDataDir();
   const bin = join(dataDir, 'integrations', 'node_modules', '@humanagencyp', 'erp-mcp', 'dist', 'index.js');
-  const env: NodeJS.ProcessEnv = { ...process.env, HAP_DATA_DIR: dataDir };
+  const env: NodeJS.ProcessEnv = { ...process.env, HAP_DATA_DIR: dataDir, ...extraEnv };
   delete env.DATABASE_URL;
   return execFileSync('node', [bin, ...args], { env, encoding: 'utf8' });
 }
@@ -93,6 +117,11 @@ describe.skipIf(!available)('ERP simulation: request → ticket → effect (real
     // The shipped manifest registers the published connector as a personal default;
     // the gateway installs it from npm and starts it in its default (simulation) mode.
     await gw.waitForIntegration('erp');
+
+    // Seed the (empty) ERP database the running connector uses: any command of the
+    // installed connector seeds an empty database from ERP_COMPANY_FILE on open.
+    writeFileSync(COMPANY, JSON.stringify(COMPANY_DATA));
+    erpCliWith({ ERP_COMPANY_FILE: COMPANY }, 'export');
 
     const bounds = {
       profile: PROFILE_ID, read_access: 'unlimited', value_max: 1000, discount_max: 10,

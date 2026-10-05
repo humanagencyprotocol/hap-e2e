@@ -120,6 +120,14 @@ per-suite isolation is unchanged — only compilation is shared. Set
 `HAP_E2E_SKIP_BUILD=1` to reuse existing output while iterating on one suite;
 never in CI, where a stale build would test code that is not under review.
 
+**Unpublished connector builds.** Suites run the connectors the gateway installs
+from npm at each manifest's pinned `npmVersion`. To run them against local
+builds instead, `npm install` the packed builds (`npm pack`) into a folder, then
+set `HAP_E2E_PREINSTALLED_INTEGRATIONS=<that folder>` and `SUVEREN_OFFLINE=1`:
+every suite's gateway gets that folder as its integrations dir and never calls
+npm. The packed versions must equal the pins, or the gateway refuses to start
+them; include every personal-default connector (erp, crm, records).
+
 The AS runs as `next start`, not `next dev`. That is deliberate: the two are
 not the same server, and the difference is not academic — a route prerendered
 at build time was serving a stale signing key, which only production mode

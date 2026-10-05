@@ -1,5 +1,5 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -25,10 +25,21 @@ export class ProcessManager {
    */
   private asDbs: Array<{ name: string; adminUrl: string }> = [];
 
-  /** Temporary data directory for the gateway (cleaned up in killAll). */
+  /**
+   * Temporary data directory for the gateway (cleaned up in killAll).
+   *
+   * HAP_E2E_PREINSTALLED_INTEGRATIONS=<dir> copies a ready connector install
+   * (`<dir>/node_modules/...`) into it as the gateway's integrations dir. With
+   * SUVEREN_OFFLINE=1 the gateway then runs those connectors instead of
+   * installing from npm — the way to run the suite against connector builds
+   * that are not published yet. Their package versions must equal the
+   * manifests' npmVersion pins, or the gateway refuses to start them.
+   */
   getDataDir(): string {
     if (!this.dataDir) {
       this.dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-'));
+      const preinstalled = process.env.HAP_E2E_PREINSTALLED_INTEGRATIONS;
+      if (preinstalled) cpSync(preinstalled, join(this.dataDir, 'integrations'), { recursive: true });
     }
     return this.dataDir;
   }
