@@ -36,6 +36,8 @@ const gw = new GatewayClient(GW_URL);
 const overrideDir = mkdtempSync(join(tmpdir(), 'hap-e2e-guides-'));
 const prev = { sim: process.env.SUVEREN_SIMULATION, guides: process.env.SUVEREN_GUIDES_DIR };
 let agent: Client;
+/** Grants the delegation mandate — run in the second test, the first checks the tool without it. */
+let grantGuides: () => Promise<void>;
 
 async function reconnect() {
   if (agent) { try { await agent.close(); } catch { /* ignore */ } }
@@ -68,8 +70,7 @@ describe.skipIf(!available)('setup guides (real AS + gateway in simulation mode)
     const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max']);
     const contextHash = computeContextHash({}, []);
     const gate = { intent: 'E2E: read the setup guides.' };
-    // Granted later, in the second test — the first checks the tool without it.
-    (globalThis as Record<string, unknown>).__grantGuides = async () => {
+    grantGuides = async () => {
       const att = await sp.submitAttestation(reg.apiKey, {
         profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
         domain: 'owner', did: reg.user.did, commitment_mode: 'review',
@@ -94,7 +95,7 @@ describe.skipIf(!available)('setup guides (real AS + gateway in simulation mode)
   });
 
   it('with one: the topics in order, each guide headed by the language rule and the connected systems', async () => {
-    await (globalThis as Record<string, () => Promise<void>>).__grantGuides();
+    await grantGuides();
     await reconnect();
     expect((await agent.listTools()).tools.map((t) => t.name)).toContain('setup__get_guide');
 
