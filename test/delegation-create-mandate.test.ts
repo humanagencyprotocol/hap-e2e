@@ -169,9 +169,15 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
 
     const summary = await sp.getAuthorizationSummary(anna.apiKey, id!);
     expect(summary.status, JSON.stringify(summary.body)).toBe(200);
-    const body = JSON.stringify(summary.body);
-    expect(body).toContain('Same-day quotes (AI)');
-    expect(body).toContain('"value_max":1000');
+    // Under Anna's account, with exactly the proposed limits (the AS recomputes
+    // the bounds hash from what it signed) and mode.
+    const SALES_KEYS = ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max', 'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'];
+    expect(summary.body).toMatchObject({
+      created_by: anna.user.id,
+      profile_id: `${P}/sales@0.3`,
+      commitment_mode: 'automatic',
+      bounds_hash: computeBoundsHash({ profile: `${P}/sales@0.3`, ...SALES_LIMITS }, SALES_KEYS),
+    });
   }, 60_000);
 
   it('team: after approval the intent is encrypted for every approver of the profile', async () => {
