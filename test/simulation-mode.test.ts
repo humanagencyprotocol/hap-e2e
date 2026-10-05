@@ -118,6 +118,7 @@ describe('gateway simulation mode (real AS + gateway + published simulators)', (
     const names = await toolNames();
     expect(names).toContain('erp__create_quote');
     expect(names).not.toContain('erp__load_simulation');
+    expect(names).not.toContain('erp__clear_simulation');
     expect(names.some((n) => n.startsWith('records__'))).toBe(false);
   });
 
