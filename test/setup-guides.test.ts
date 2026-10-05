@@ -106,8 +106,9 @@ describe.skipIf(!available)('setup guides (real AS + gateway in simulation mode)
     const mandates = await guide('mandates');
     expect(mandates.text.split('\n')[0]).toMatch(/This guide is in English/);
     // The systems the gateway installed itself (personal defaults), with what they can do.
-    expect(mandates.text).toMatch(/\*\*erp\*\* — profile `github\.com\/humanagencyprotocol\/hap-profiles\/sales@[\d.]+`; action types [^\n]*`quote`/);
-    expect(mandates.text).toMatch(/\*\*crm\*\* — profile `github\.com\/humanagencyprotocol\/hap-profiles\/customers@/);
+    // (a connector names its profile as its manifest does — short name or full id)
+    expect(mandates.text).toMatch(/\*\*erp\*\* — profile `[^`]*sales[^`]*`; action types [^\n]*`quote`, `send`, `order`/);
+    expect(mandates.text).toMatch(/\*\*crm\*\* — profile `[^`]*customers[^`]*`/);
     expect(mandates.text).not.toMatch(/\*\*setup\*\* —/);
     expect(mandates.text).toMatch(/## Ask first/);
   }, 60_000);
