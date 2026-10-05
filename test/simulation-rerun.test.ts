@@ -152,12 +152,15 @@ describe.skipIf(!available)('simulation re-run: clear, then load again (real AS 
     await pm.killAll();
   }, 30_000);
 
-  it('the working agent does not see clear_simulation', async () => {
+  it('the working agent can neither see nor call clear_simulation — no ticket', async () => {
     for (const k of ['sales', 'customers', 'email'] as const) await grant(k, 'work');
     await reconnect();
     const names = await toolNames();
     expect(names).toContain('erp__create_quote');
     for (const c of SYSTEMS) expect(names).not.toContain(`${c}__clear_simulation`);
+    for (const c of SYSTEMS) expect((await call(`${c}__clear_simulation`, {})).denied).toBe(true);
+    const { receipts } = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
+    expect(receipts).toHaveLength(0);
   });
 
   it('a setup mandate makes clear_simulation appear; the package loads into all three', async () => {
