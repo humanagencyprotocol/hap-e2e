@@ -259,8 +259,20 @@ and one component of this one is proprietary.)
 
 `.github/workflows/e2e.yml` runs both suites on every push to `main`, on every
 PR, and nightly at 06:00 UTC. It checks out all six repos, installs each,
-builds `hap-records-mcp`, then runs vitest followed by Playwright (sequentially
-— they compete for the same ports).
+builds `hap-records-mcp`, installs Chromium, then runs vitest followed by
+Playwright (sequentially — they compete for the same ports). Chromium is
+installed before vitest because one vitest suite drives a real browser too:
+`report-e2e.test.ts` lays out the gateway's rendered report and the gateway UI
+in Chromium (box overlap, the CSS-only switch, phone width) inside the same
+real-stack run that produced the report.
+
+Two harness tools exist for suites that need them, both opt-in:
+`src/helpers/local-profiles.ts` serves the spawned Authority Server the local
+`hap-profiles` checkout (its bundled-profiles mode, from a throwaway working
+directory) instead of GitHub `main`, so a profile on a branch can be tested;
+`src/helpers/clock.ts` runs the AS and the gateway on a shifted clock, so a
+ticket can genuinely be days old (its signed timestamp is real) without waiting
+days.
 
 The nightly is not redundant with the PR run: this suite spans six repos, and
 several breakages were pure cross-repo drift where nothing in *this* repo

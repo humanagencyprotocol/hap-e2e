@@ -221,6 +221,13 @@ jobs:
       - name: Warm the integration npm cache
         run: npm install -g @humanagencyp/crm-mcp @humanagencyp/records-mcp || true
 
+      # Before vitest, not just before the browser journeys: report-e2e.test.ts
+      # lays out the gateway's rendered report and UI in Chromium inside the
+      # vitest run, and fails (it does not skip) without a browser.
+      - name: Install Playwright browser
+        working-directory: hap-e2e
+        run: npx playwright install --with-deps chromium
+
       - name: Run E2E
         working-directory: hap-e2e
         # No Gmail/Google/Stripe credentials in CI — a deliberate decision, not
@@ -235,10 +242,6 @@ jobs:
       # authorization through the real wizard, revocation from the UI, the
       # group journey, and — only here — a genuine TTL expiry against a
       # short-lived grant. They existed for months and no workflow ran them.
-      - name: Install Playwright browser
-        working-directory: hap-e2e
-        run: npx playwright install --with-deps chromium
-
       - name: Run browser journeys
         working-directory: hap-e2e
         # Spawns its own AS + gateway via global-setup, so it must not run
