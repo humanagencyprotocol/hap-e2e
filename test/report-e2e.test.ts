@@ -130,8 +130,12 @@ const sp = new SPClient(AS_URL);
 const dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-report-'));
 const work = mkdtempSync(join(tmpdir(), 'hap-e2e-report-files-'));
 const secret = newSecret();
-/** Gateway processes draw timestamps in their local zone — pinned, so this test can format them independently. */
-const GW_TZ = { TZ: 'UTC' };
+/** Gateway processes draw timestamps in their local zone — pinned to a zone with a
+ *  non-zero, DST-free offset (UTC+5:30), so the numeric offset label is exercised
+ *  and this test can format every timestamp independently. */
+const GW_ZONE = 'Asia/Kolkata';
+const GW_OFFSET_MIN = 330;
+const GW_TZ = { TZ: GW_ZONE };
 const simStack: StackOptions = {
   dataDir, ports: { cp: CP_PORT, mcp: MCP_PORT }, secret, asUrl: AS_URL,
   extraEnv: { SUVEREN_SIMULATION: '1', SUVEREN_DISABLE_AUTO_INTEGRATIONS: '1', ...GW_TZ },
@@ -238,11 +242,12 @@ function seconds(v: string): number {
   return Math.floor(ms / 1000);
 }
 
-/** A timestamp as a verified box must show it (gateway zone pinned to UTC): "2026-10-06 09:27:34 UTC". */
+/** A timestamp as a verified box must show it: wall clock in the gateway's zone plus its
+ *  numeric offset — "2026-10-06 15:09:34 UTC+5:30". Computed here without the gateway's code. */
 function fmtTs(v: number | string): string {
   const s = typeof v === 'number' ? v : seconds(v);
-  const iso = new Date(s * 1000).toISOString();
-  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
+  const iso = new Date((s + GW_OFFSET_MIN * 60) * 1000).toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC+5:30`;
 }
 
 function median(xs: number[]): number {
@@ -872,6 +877,8 @@ loose text
 </body></html>`;
 
     const before = new Set((await asTickets()).map((x) => x.id));
+    const oldMandateUse = (await asTickets()).filter((x) => x.authorizationId === mandates['reporting:0.1'].id).length;
+    expect(oldMandateUse, 'the refused reporting@0.1 mandate was never charged').toBe(0);
     const w = await call('report__write_report', { html });
     expect(w.denied, w.text).toBe(false);
     // 8 metrics + 2 cases + 8 tickets + 1 approval + 2 mandates + 3 records; not verifiable: the bogus ref, the old ticket (twice).
@@ -898,6 +905,8 @@ loose text
     // reporting@0.1 one, which every report tool refuses (3d).
     expect(fresh[0].profileId, 'write_report ticketed under the refused reporting@0.1 mandate').toBe(REPORTING);
     expect(fresh[0].authorizationId).toBe(mandates.reporting.id);
+    // reporting@0.1's report_daily_max usage is unchanged: still no ticket on it.
+    expect((await asTickets()).filter((x) => x.authorizationId === mandates['reporting:0.1'].id)).toHaveLength(oldMandateUse);
   }, 90_000);
 
   // ── 6. the verified report vs the sources of truth ────────────────────────
@@ -1236,8 +1245,19 @@ loose text
     for (const name of Object.keys(mandates).filter((n) => n !== 'sales:work')) {
       expect(exportHtml.includes(mandates[name].intent), `intent of ${name} (not shown in the report) is in the export`).toBe(false);
     }
-    // Mandate data in the bundle: only the mandate the report places with sv-mandate.
-    expect(Object.keys(bundle.authorizations)).toEqual([mandates['sales:work'].id]);
+    // Mandate data in the bundle: the mandates the report draws — sales (sv-mandate, with
+    // intent) and email (only via the full reply ticket: limits/mode/owner, NO intent text).
+    expect(Object.keys(bundle.authorizations).sort()).toEqual([mandates['sales:work'].id, mandates['email:work'].id].sort());
+    expect(bundle.authorizations[mandates['sales:work'].id].intent).toBe(mandates['sales:work'].intent);
+    expect(bundle.authorizations[mandates['email:work'].id]).not.toHaveProperty('intent');
+    expect(JSON.stringify(bundle.authorizations[mandates['email:work'].id])).not.toContain(mandates['email:work'].intent);
+    // Scope values are drawn by no box, so they never travel.
+    for (const a of Object.values(bundle.authorizations) as any[]) expect(a.context).toBeUndefined();
+    expect(exportHtml).not.toContain(EMAIL.ctx.allowed_recipients);
+    expect(bundle.version).toBe(2);
+    // The zone the gateway drew in (ICU may report Asia/Kolkata under its older alias).
+    expect(new Intl.DateTimeFormat('en', { timeZone: bundle.timeZone }).resolvedOptions().timeZone).toBe(new Intl.DateTimeFormat('en', { timeZone: GW_ZONE }).resolvedOptions().timeZone);
+    expect(bundle.identityAttestations).toEqual([]);
   }, 60_000);
 
   it('8b. every ticket in the embedded bundle verifies with hap-core against the spawned AS key', async () => {
@@ -1266,6 +1286,7 @@ loose text
     const shownVerified = (report.elements as any[]).filter((e) => ticketKinds.has(e.kind) && e.status !== 'unverifiable').length;
     expect(shownVerified).toBe(10);
     const countsLine = `References: ${shownVerified} verified · 3 not verifiable (as shown in the report).`;
+    const nAuth = Object.keys(bundleOf(exportHtml).authorizations).length;
 
     const plain = runCli([exportFile]);
     expect(plain.status, plain.stdout + plain.stderr).toBe(2);
@@ -1279,7 +1300,18 @@ loose text
     for (const r of [plain, keyed, online]) {
       expect(r.stdout).toContain(countsLine);
       expect(r.stdout).toMatch(/Signatures: all \d+ valid/);
-      expect(r.stdout).toContain(`Mandates: all ${Object.keys(bundleOf(exportHtml).authorizations).length} valid`);
+      expect(r.stdout).toContain(`Mandates: all ${nAuth} valid`);
+      expect(r.stdout).toContain('Page: exactly what the signed data draws.');
+      expect(r.stdout).toMatch(/Boxes: \d+ fully checked · \d+ partly not checkable offline · 0 MISMATCH\./);
+      // Per box: what the file cannot back offline is listed as such, never as signed.
+      const nc = /Not checkable offline[^\n]*:\n((?: {4}- .*\n?)+)/.exec(r.stdout);
+      expect(nc, r.stdout).toBeTruthy();
+      const ncLines = Object.fromEntries(nc![1].trim().split('\n').map((l) => { const m = /- (\S+): (.*)/.exec(l.trim())!; return [m[1], m[2]]; }));
+      for (const id of ['sv-record-0', 'sv-record-1', 'sv-record-2']) expect(ncLines[id], `${id} not listed as not checkable`).toMatch(/\(database\)/);
+      for (const id of ['sv-case-0', 'sv-case-1']) expect(ncLines[id], `${id} case start not listed`).toMatch(/\(database\)/);
+      expect(ncLines['sv-approval-0']).toMatch(/\(archive\)/);
+      // A full ticket's signed fields are checked against the signature, not listed as uncheckable.
+      expect(r.stdout).toMatch(new RegExp(`- sv-ticket-2: checked against signature: [^\\n]*action`));
       expect(r.stdout).not.toMatch(/INVALID/);
       const section = /Not verifiable \(as shown in the report\):\n((?: {4}- .*\n?)+)/.exec(r.stdout);
       expect(section, r.stdout).toBeTruthy();
@@ -1290,7 +1322,7 @@ loose text
     }
   }, 120_000);
 
-  it('8d. tampering fails: one byte of a ticket → 1, a random key → 1, the old ticket\'s not-verifiable card upgraded to verified → 1', () => {
+  it('8d. tampering fails: one byte of a ticket, a random key, an upgraded or downgraded card, an edited drawn value, an edited bound → 1', () => {
     const m = /(<script[^>]*id="suveren-proof"[^>]*>)([\s\S]*?)(<\/script>)/i.exec(exportHtml)!;
     const bundle = JSON.parse(m[2]);
     const victim = bundle.tickets[0];
@@ -1325,6 +1357,59 @@ loose text
       expect(r.stdout).toMatch(/INVALID — 1 reference\(s\) shown as verified with no valid backing/);
       expect(r.stdout).toContain(`Ticket ${tOld.id} is not in the bundle.`);
     }
+
+    const expectInvalid = (file: string, what: string, pattern: RegExp) => {
+      for (const args of [[file], [file, '--key', asPublicKey], [file, '--online']]) {
+        const r = runCli(args);
+        expect(r.status, `${what} (${args.slice(1).join(' ') || 'no key'}): ${r.stdout}${r.stderr}`).toBe(1);
+        expect(r.stdout, what).toMatch(pattern);
+      }
+    };
+    const scriptAt = exportHtml.indexOf('<script');
+    const page = exportHtml.slice(0, scriptAt);
+    const tail = exportHtml.slice(scriptAt);
+
+    // A downgrade by hand: a verified card redrawn as "not verifiable".
+    const okCard = /<div class="sv-el sv-el-verified" data-sv-id="sv-ticket-2">/.exec(page);
+    expect(okCard).toBeTruthy();
+    const downFile = join(work, 'downgraded.html');
+    writeFileSync(downFile, page.replace(okCard![0], okCard![0].replace('sv-el-verified', 'sv-el-unverifiable')) + tail);
+    expectInvalid(downFile, 'downgraded card', /INVALID — page/);
+
+    // A drawn value edited on the page: the sales mandate's value_max in the sv-mandate box.
+    const limit = /(<div class="sv-el sv-el-verified" data-sv-id="sv-mandate-0">[\s\S]*?<span class="sv-k">value_max<\/span>(?:<rt>[^<]*<\/rt><\/ruby>)?<span class="sv-v">)1000(<\/span>)/.exec(page);
+    expect(limit, 'the mandate box draws value_max 1000').toBeTruthy();
+    const valueFile = join(work, 'edited-value.html');
+    writeFileSync(valueFile, page.replace(limit![0], `${limit![1]}9000${limit![2]}`) + tail);
+    expectInvalid(valueFile, 'edited mandate limit', /INVALID — page/);
+
+    // A full ticket's signed value edited on the page: the reply ticket's recipient_count.
+    const full = /(<div class="sv-el sv-el-verified" data-sv-id="sv-ticket-2">[\s\S]*?<span class="sv-k">recipient_count<\/span>(?:<rt>[^<]*<\/rt><\/ruby>)?<span class="sv-v">)1(<\/span>)/.exec(page);
+    expect(full, 'the full reply ticket draws recipient_count 1').toBeTruthy();
+    const fullFile = join(work, 'edited-ticket.html');
+    writeFileSync(fullFile, page.replace(full![0], `${full![1]}5${full![2]}`) + tail);
+    expectInvalid(fullFile, 'edited full-ticket value', /INVALID — page/);
+
+    // A bundled bound edited without its hash: page untouched, the mandate's bounds no longer hash to bounds_hash.
+    const b2 = bundleOf(exportHtml);
+    const salesAuth = b2.authorizations[mandates['sales:work'].id];
+    expect(salesAuth.bounds.value_max).toBe(1000);
+    salesAuth.bounds.value_max = 9000;
+    const boundFile = join(work, 'edited-bound.html');
+    writeFileSync(boundFile, exportHtml.replace(m[0], `${m[1]}${JSON.stringify(b2).replace(/<\//g, '<\\/')}${m[3]}`));
+    expectInvalid(boundFile, 'edited bundled bound', /Mandates: \d+\/\d+ valid — INVALID/);
+
+    // The same bound edited consistently everywhere — page, drawn elements, bundle — still fails:
+    // the bounds hash is signed by the AS.
+    const b3 = bundleOf(exportHtml);
+    b3.authorizations[mandates['sales:work'].id].bounds.value_max = 9000;
+    const el3 = (b3.elements as any[]).find((e) => e.id === 'sv-mandate-0');
+    expect(JSON.stringify(el3)).toContain('"value_max":1000');
+    const el3New = JSON.parse(JSON.stringify(el3).replace('"value_max":1000', '"value_max":9000'));
+    Object.assign(el3, el3New);
+    const consistentFile = join(work, 'edited-everywhere.html');
+    writeFileSync(consistentFile, page.replace(limit![0], `${limit![1]}9000${limit![2]}`) + tail.replace(m[0], `${m[1]}${JSON.stringify(b3).replace(/<\//g, '<\\/')}${m[3]}`));
+    expectInvalid(consistentFile, 'bound edited on page + elements + bundle', /Mandates: \d+\/\d+ valid — INVALID/);
   }, 120_000);
 
   it('8e. the export\'s translation switch works without any script (JavaScript off)', async () => {
