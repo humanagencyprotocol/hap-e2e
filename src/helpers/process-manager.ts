@@ -103,6 +103,13 @@ export class ProcessManager {
       name?: string;
       /** Extra env, e.g. SP_PRIVATE_KEY/SP_PUBLIC_KEY to pin the signing key. */
       env?: Record<string, string>;
+      /**
+       * Working directory for the server process. Default: the AS app dir.
+       * The AS reads `bundled-profiles/` and `migrations/` from its cwd, so a
+       * different cwd (see local-profiles.ts) serves it other profiles without
+       * touching the AS checkout; `next start` is then pointed at AS_DIR.
+       */
+      cwd?: string;
     } = {},
   ): Promise<ChildProcess> {
     console.error(`[E2E] Starting Authority Server on port ${port}...`);
@@ -110,8 +117,10 @@ export class ProcessManager {
     const storageEnv = await this.provisionAsStorage();
 
     const nextBin = resolveNextBin(AS_DIR);
-    const proc = spawn(process.execPath, [nextBin, 'start', '-p', String(port)], {
-      cwd: AS_DIR,
+    const cwd = opts.cwd ?? AS_DIR;
+    const args = cwd === AS_DIR ? [nextBin, 'start', '-p', String(port)] : [nextBin, 'start', AS_DIR, '-p', String(port)];
+    const proc = spawn(process.execPath, args, {
+      cwd,
       // Own process group, so stopProcess/killAll can signal the whole tree
       // (Next may itself fork a worker; signalling only the top process could
       // leave that behind).
