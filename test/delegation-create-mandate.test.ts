@@ -11,7 +11,11 @@
  *   exactly the proposed limits, mode and title — and the gateway holds its intent;
  * - in a team, the intent is encrypted for the profile's approvers (each approver
  *   can fetch their copy from the AS) — the sign page silently skipped this before;
- * - a rejected proposal creates nothing.
+ * - a rejected proposal creates nothing;
+ * - with the person's standing choice "always show my verified name", a mandate
+ *   the AI proposed carries the verified name, and so do its tickets — the
+ *   create path never sends disclose_identity (found 2026-10-06: 27 of 29
+ *   tickets of a verified owner came out without a name).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -200,5 +204,29 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
     expect(r.text).toMatch(/Awaiting commitment/);
     const p = (await pending()).find((x) => x.status === 'pending')!;
     expect(await approveAndWait(p.id, 'reject')).toBeNull();
+  }, 60_000);
+
+  it('standing "always show my name": an AI-created mandate and its tickets carry the verified name', async () => {
+    const verify = await fetch(`${AS_URL}/api/admin/users/${encodeURIComponent(anna.user.id)}/verify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': 'local-dev-key' },
+      body: JSON.stringify({ name: 'Anna Verified' }),
+    });
+    expect(verify.status).toBe(200);
+    const on = await as('PUT', '/api/users/me/identity-disclosure', anna.apiKey, { always: true });
+    expect(on.body).toMatchObject({ always: true, verified: true, name: 'Anna Verified' });
+
+    const r = await call({ profile: 'sales', limits: SALES_LIMITS, scope: { currency: 'EUR' }, intent: 'Why — named quotes.', mode: 'automatic', duration_hours: 24, title: 'Named quotes (AI)' });
+    expect(r.denied, r.text).toBe(false);
+    const p = (await pending()).find((x) => x.status === 'pending')!;
+    const id = await approveAndWait(p.id, 'commit');
+    expect(id).toBeTruthy();
+
+    const t = await sp.postReceipt(anna.apiKey, {
+      authorizationId: id!, profileId: `${P}/sales@0.3`, action: 'erp__create_quote', actionType: 'quote',
+      executionContext: { action_type: 'quote', value: 100, discount_pct: 0, currency: 'EUR' },
+    });
+    expect(t.status, JSON.stringify(t.body)).toBeLessThan(300);
+    const receipt = (t.body.receipt ?? t.body) as Record<string, any>;
+    expect(receipt.identity, JSON.stringify(t.body)).toMatchObject({ name: 'Anna Verified' });
   }, 60_000);
 });
