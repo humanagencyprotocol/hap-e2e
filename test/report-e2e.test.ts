@@ -439,6 +439,7 @@ describe.skipIf(!available)('R7a: evidence-backed reports (real AS + gateway + e
 <sv-metric kind="without-approval" cases="all"></sv-metric>
 <sv-metric kind="tickets" cases="all"></sv-metric>
 <sv-metric kind="median-approval-wait" cases="all"></sv-metric></section>
+<div id="ai-fake-box" class="sv-el sv-el-verified ai-own" data-sv-id="forged"><span class="sv-badge sv-badge-ok">AI-drawn look-alike</span></div>
 <h2>c1 — Huber, quote</h2>
 <sv-case start="email:${start.c1.id}" goal="ticket:${t.c1Reply.id}" steps="${t.c1Note.id} ${t.c1Quote.id}"></sv-case>
 <sv-ticket ref="${t.c1Note.id}"></sv-ticket>
@@ -489,6 +490,14 @@ describe.skipIf(!available)('R7a: evidence-backed reports (real AS + gateway + e
     expect(notVerified.map((e) => [e.kind, e.attrs.ref ?? e.attrs.ticket, e.status])).toEqual([['sv-ticket', BOGUS_REF, 'unverifiable']]);
     expect(notVerified[0].data).toBeUndefined();
     expect(report.renderedHtml).toMatch(/not verifiable/i);
+    // The gateway labels the AI's own prose, and nothing in the frame navigates the top window.
+    expect(report.renderedHtml).toContain('AI analysis — not verified');
+    expect(report.renderedHtml).not.toMatch(/target\s*=\s*["']?_top/i);
+    // The AI's look-alike of a verified box keeps its own class and id, loses every sv-* class and data-sv-* attribute.
+    const fake = /<div\b[^>]*id="ai-fake-box"[^>]*>[\s\S]*?<\/div>/.exec(report.renderedHtml);
+    expect(fake, 'the AI markup survives sanitizing').toBeTruthy();
+    expect(fake![0]).toContain('ai-own');
+    expect(fake![0]).not.toMatch(/\bsv-el\b|sv-el-verified|sv-badge|data-sv-/);
 
     const all = await asTickets();
     const asById = new Map(all.map((x) => [x.id, x]));
@@ -544,18 +553,25 @@ describe.skipIf(!available)('R7a: evidence-backed reports (real AS + gateway + e
     expect(recs.crm).toEqual({ kind: 'activity', ...(crmX.activities as any[]).find((a) => a.id === activity1Id) });
     expect(recs.email).toEqual({ kind: 'message', folder: 'sent', ...(mailX.sent as any[]).find((m) => m.id === replySentId) });
 
-    // sv-case: start, goal, steps, duration — from the inbox and the AS tickets.
-    const startTime = (c: string) => seconds((mailX.inbox as any[]).find((m) => m.id === start[c].id).received_at);
+    // sv-case: start, goal, steps, duration — from the inbox, the email load and the AS tickets.
+    // Effective case start = max(email received_at, the email simulator's
+    // simulation_load.loaded_at): a test package backdates its emails, so the
+    // load time is the earliest the case can really have started.
+    const loadedAt = seconds(mailX.simulation_load.loaded_at);
+    const emailTime = (c: string) => seconds((mailX.inbox as any[]).find((m) => m.id === start[c].id).received_at);
+    const startTime = (c: string) => Math.max(emailTime(c), loadedAt);
     const cases = Object.fromEntries(byKind('sv-case').map((e) => [e.data.caseId, e.data]));
     expect(Object.keys(cases).sort()).toEqual(['c1', 'c2']);
     const expectCase = (c: string, goal: AsTicket, steps: AsTicket[], approvals: number) => {
       expect(cases[c]).toMatchObject({
-        start: { id: start[c].id, time: startTime(c), sender: start[c].from },
+        start: { id: start[c].id, time: startTime(c), sender: start[c].from, emailTime: emailTime(c) },
         goal: { ticketId: goal.id, time: goal.timestamp, action: goal.action },
         steps: steps.map((s) => ({ ticketId: s.id, time: s.timestamp, action: s.action })),
         totalDurationSeconds: goal.timestamp - startTime(c),
       });
       expect(cases[c].approvals).toHaveLength(approvals);
+      // (a) no case starts before the test data existed.
+      expect(cases[c].start.time).toBeGreaterThanOrEqual(loadedAt);
     };
     expectCase('c1', t.c1Reply, [t.c1Note, t.c1Quote], 1);
     expectCase('c2', t.c2Send, [t.c2Note, t.c2Quote], 0);
@@ -633,6 +649,10 @@ describe.skipIf(!available)('R7a: evidence-backed reports (real AS + gateway + e
     // The drawn report is in the file — including the wrong reference, shown as such.
     expect(withoutData).toContain('first-report');
     expect(withoutData).toMatch(/not verifiable/i);
+    // (b) the gateway's "not verified" label for the AI's prose; (c) no top-window navigation.
+    expect(withoutData).toContain('AI analysis — not verified');
+    expect(withoutData).not.toMatch(/target\s*=\s*["']?_top/i);
+    expect(withoutData).not.toContain('sv-el-verified ai-own');
 
     exportFile = join(work, 'suveren-report.html');
     writeFileSync(exportFile, exportHtml);
