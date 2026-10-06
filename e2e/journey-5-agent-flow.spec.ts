@@ -16,6 +16,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
   let apiKey: string;
   let userDid: string;
   let authorizationId: string;
+  let proposalId: string;
 
   test('5.1 Register and activate integrations', async ({ page }) => {
     test.setTimeout(120_000);
@@ -86,21 +87,32 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     expect(res.ok()).toBe(true);
     const data = await res.json();
     expect(data.proposal.status).toBe('pending');
+    proposalId = data.proposal.id;
   });
 
-  test('5.5 Proposal appears in gateway Pending Reviews', async ({ page }) => {
+  test('5.5 Personal proposal is approvable while a team is active', async ({ page, request }) => {
+    // The mandate (5.3) lives in the personal workspace ('owner'), but by now
+    // the active group is a team. "Active context" is a display, not a switch,
+    // so the personal queue must still show — found 2026-10-05: ten review
+    // requests stayed invisible because the queue read only the team domain.
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
     await page.click('.sidebar-item:has-text("Pending Approvals")');
     await page.waitForURL('**/approvals');
-    await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
+    await page.click('.nav-tab:has-text("Awaiting me")');
+    const card = page.locator('.card', { hasText: 'jane@example.com' }).first();
+    await expect(card).toBeVisible({ timeout: 15_000 });
 
-    // Review-mode (deferred-commitment) proposals appear under the "All" tab,
-    // rendered as an ActionCard with an Approve action.
-    await page.click('.nav-tab:has-text("All")');
-    await expect(page.locator('.card').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('button:has-text("Approve")').first()).toBeVisible({ timeout: 10_000 });
+    // Approving resolves under the proposal's own domain ('owner'), not the team's.
+    await card.locator('button:has-text("Approve")').click();
+    await expect(async () => {
+      const res = await request.get(`${SP_URL}/api/proposals/${encodeURIComponent(proposalId)}`, {
+        headers: { 'x-api-key': apiKey },
+      });
+      expect(res.ok()).toBe(true);
+      expect(['committed', 'executed']).toContain((await res.json()).proposal.status);
+    }).toPass({ timeout: 15_000 });
   });
 
   test('5.6 Revoke blocks further receipts', async ({ request }) => {
