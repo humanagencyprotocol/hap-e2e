@@ -22,9 +22,10 @@
  *  6. GET /api/report/export is checked for executable content, every ticket in
  *     its embedded bundle is verified with hap-core directly against the
  *     spawned AS's key, and the real `verify-report` CLI is run on the file.
- *     That file still contains the wrong reference, which the CLI reports as
- *     invalid (exit 1, by its documented design); the AI then fixes the
- *     reference and the CLI's exit codes are checked on the new export;
+ *     That file still contains the wrong reference, which the gateway drew as
+ *     "not verifiable": the CLI passes the file (2 unconfirmed, 0 with --key /
+ *     --online) and lists that reference as not verifiable; a one-byte tamper,
+ *     a wrong key, or flipping that element's badge to verified each give 1;
  *  7. a rewrite replaces the report.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -223,7 +224,6 @@ let asPublicKey: string;
 let exportHtml: string;
 let exportFile: string;
 let firstSavedAt: number;
-let firstHtml: string;
 
 const BOGUS_REF = `tkt_does_not_exist_${randomBytes(4).toString('hex')}`;
 
@@ -459,7 +459,6 @@ describe.skipIf(!available)('R7a: evidence-backed reports (real AS + gateway + e
 <sv-ticket ref="${BOGUS_REF}"></sv-ticket>
 </body></html>`;
 
-    firstHtml = html;
     const before = new Set((await asTickets()).map((x) => x.id));
     const w = await call('report__write_report', { html });
     expect(w.denied, w.text).toBe(false);
@@ -667,39 +666,13 @@ describe.skipIf(!available)('R7a: evidence-backed reports (real AS + gateway + e
     await expect(verifyReceiptSignature(bundle.tickets[0], otherKey)).rejects.toThrow();
   }, 60_000);
 
-  it('6c. the real verify-report CLI on that export: the wrong reference makes the file invalid (exit 1) — and nothing else does', () => {
+  it('6c. the real verify-report CLI: the wrong reference, drawn as not verifiable, is listed and does not fail the file — unconfirmed key → 2, --key → 0, --online → 0', () => {
     expect(existsSync(CLI), `${CLI} — the npm bundle must be assembled (node bundle/build.mjs)`).toBe(true);
-    // Documented CLI behaviour ("1 — a missing reference"): a report that names a
-    // ticket the bundle cannot contain does not verify offline, key confirmed or not.
-    for (const args of [[exportFile], [exportFile, '--key', asPublicKey]]) {
-      const r = runCli(args);
-      expect(r.status, r.stdout + r.stderr).toBe(1);
-      const invalid = [...r.stdout.matchAll(/^ {4}- (\S+): (.*)$/gm)].map((x) => [x[1], x[2]]);
-      expect(invalid).toEqual([[BOGUS_REF, 'Not present in the bundle.']]);
-      // Every ticket actually in the bundle verifies: n of n+1 (the +1 is the absent bogus id).
-      const sig = /Signatures: (\d+)\/(\d+) valid/.exec(r.stdout)!;
-      expect(Number(sig[2]) - Number(sig[1])).toBe(1);
-      expect(r.stdout).toMatch(/References: 1 referenced ticket\(s\) missing from the bundle/);
-      expect(r.stdout).toMatch(/Mandates: all \d+ valid/);
-    }
-  }, 60_000);
-
-  it('6d. the AI fixes the reference; the new export: unconfirmed key → 2, --key → 0, --online → 0, tampered → 1, wrong key → 1', async () => {
-    const fixed = firstHtml.replace(/<p>A reference the AI got wrong:<\/p>\s*<sv-ticket ref="[^"]+"><\/sv-ticket>/, '');
-    expect(fixed).not.toContain(BOGUS_REF);
-    const w = await call('report__write_report', { html: fixed });
-    expect(w.denied, w.text).toBe(false);
-    expect(w.text).toMatch(/Report stored\. 20 element\(s\) verified, 0 warning\(s\), 0 not verifiable\./);
-    const res = await cpGet('/api/report/export');
-    expect(res.status).toBe(200);
-    exportHtml = await res.text();
-    exportFile = join(work, 'suveren-report-fixed.html');
-    writeFileSync(exportFile, exportHtml);
-    // Same checks on the new file's bundle as 6b.
-    const fixedBundle = JSON.parse(/<script[^>]*id="suveren-proof"[^>]*>([\s\S]*?)<\/script>/i.exec(exportHtml)![1]);
-    expect(fixedBundle.report.html).not.toContain(BOGUS_REF);
-    for (const ticket of fixedBundle.tickets as any[]) await expect(verifyReceiptSignature(ticket, asPublicKey)).resolves.toBeUndefined();
-
+    // Ticket-backed elements the gateway drew as verified (records/metrics are not ticket references).
+    const ticketKinds = new Set(['sv-ticket', 'sv-approval', 'sv-mandate', 'sv-case']);
+    const shownVerified = (report.elements as any[]).filter((e) => ticketKinds.has(e.kind) && e.status !== 'unverifiable').length;
+    expect(shownVerified).toBeGreaterThan(5);
+    const countsLine = `References: ${shownVerified} verified · 1 not verifiable (as shown in the report).`;
 
     const plain = runCli([exportFile]);
     expect(plain.status, plain.stdout + plain.stderr).toBe(2);
@@ -707,12 +680,27 @@ describe.skipIf(!available)('R7a: evidence-backed reports (real AS + gateway + e
 
     const keyed = runCli([exportFile, '--key', asPublicKey]);
     expect(keyed.status, keyed.stdout + keyed.stderr).toBe(0);
-    expect(keyed.stdout).toMatch(/Signatures: all \d+ valid/);
 
     const online = runCli([exportFile, '--online']);
     expect(online.status, online.stdout + online.stderr).toBe(0);
     expect(online.stdout).toMatch(/Key confirmed against the live Authority Server/);
 
+    for (const r of [plain, keyed, online]) {
+      expect(r.stdout).toContain(countsLine);
+      expect(r.stdout).toMatch(/Signatures: all \d+ valid/);
+      expect(r.stdout).toMatch(/Mandates: all \d+ valid/);
+      expect(r.stdout).not.toMatch(/INVALID/);
+      // The bogus reference is listed — and only it — under the not-verifiable section.
+      const section = /Not verifiable \(as shown in the report\):\n((?: {4}- .*\n?)+)/.exec(r.stdout);
+      expect(section, r.stdout).toBeTruthy();
+      const listed = section![1].trim().split('\n');
+      expect(listed).toHaveLength(1);
+      expect(listed[0]).toContain(BOGUS_REF);
+      expect(listed[0]).toContain(`not in the file: ${BOGUS_REF}`);
+    }
+  }, 60_000);
+
+  it('6d. tampering still fails: one byte of a ticket → 1, a wrong key → 1, the bogus element\'s badge flipped to verified → 1', () => {
     // One byte of one ticket changed: the last digit of its timestamp.
     const m = /(<script[^>]*id="suveren-proof"[^>]*>)([\s\S]*?)(<\/script>)/i.exec(exportHtml)!;
     const bundle = JSON.parse(m[2]);
@@ -733,6 +721,19 @@ describe.skipIf(!available)('R7a: evidence-backed reports (real AS + gateway + e
     const wrongKey = runCli([exportFile, '--key', randomBytes(32).toString('hex')]);
     expect(wrongKey.status, wrongKey.stdout + wrongKey.stderr).toBe(1);
     expect(wrongKey.stdout).toMatch(/Key MISMATCH/);
+
+    // A forger may downgrade a claim, never upgrade one: the bogus reference's
+    // drawn card is the file's only not-verifiable badge — flip it to verified.
+    const visible = exportHtml.slice(0, exportHtml.indexOf('<script'));
+    expect(visible.split('sv-badge sv-badge-bad').length - 1).toBe(1);
+    const upgradedFile = join(work, 'upgraded.html');
+    writeFileSync(upgradedFile, exportHtml.replace('sv-badge sv-badge-bad', 'sv-badge sv-badge-ok'));
+    for (const args of [[upgradedFile], [upgradedFile, '--key', asPublicKey], [upgradedFile, '--online']]) {
+      const r = runCli(args);
+      expect(r.status, r.stdout + r.stderr).toBe(1);
+      expect(r.stdout).toMatch(/INVALID — 1 reference\(s\) shown as verified with no valid backing/);
+      expect(r.stdout).toContain(`(${BOGUS_REF}): Ticket ${BOGUS_REF} is not in the bundle.`);
+    }
   }, 120_000);
 
   // ── 7. replace ────────────────────────────────────────────────────────────
