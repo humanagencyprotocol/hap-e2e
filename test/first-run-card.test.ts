@@ -123,6 +123,12 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
     await shot('1-phone');
     await page.setViewportSize({ width: 1280, height: 900 });
+
+    // Steps 1 and 2 are independent: the muted step-2 line opens it before an AI is connected.
+    await page.locator('button:has-text("Give the Delegation mandate")').click();
+    await page.locator('a:has-text("Give the Delegation mandate")').waitFor({ timeout: 5_000 });
+    expect(await page.locator('text=Ask your AI to connect to Suveren').count()).toBe(0);
+    await shot('1b-step2-picked');
   });
 
   it('2. an AI connects: step 1 done with its name; step 2 opens the Delegation mandate directly', async () => {
