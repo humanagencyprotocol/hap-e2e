@@ -35,6 +35,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17360;
 const GW_PORT = 17392;
@@ -46,9 +47,9 @@ const PROFILES_DIR = join(ROOT, 'hap-profiles');
 const MANIFEST = join(ROOT, 'suveren-gateway', 'content', 'integrations', 'erp.json');
 const available = existsSync(MANIFEST);
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/sales@0.1';
+const PROFILE_ID = PROFILE_V07.sales;
 const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max',
-  'quote_daily_max', 'send_daily_max', 'order_daily_max'];
+  'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'];
 const CONTEXT = { currency: 'EUR' };
 const GATE_CONTENT = { intent: 'E2E: quotes for scenario requests, within 1,000 EUR and 10% discount.' };
 
@@ -125,12 +126,12 @@ describe.skipIf(!available)('ERP simulation: request → ticket → effect (real
 
     const bounds = {
       profile: PROFILE_ID, read_access: 'unlimited', value_max: 1000, discount_max: 10,
-      order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10,
+      order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10, setup_daily_max: 0,
     };
     const boundsHash = computeBoundsHash(bounds, BOUNDS_KEY_ORDER);
     const contextHash = computeScopeHash(CONTEXT, ['currency']);
     const att = await sp.submitMandate(apiKey, {
-      profile_id: PROFILE_ID, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+      profile_id: PROFILE_ID, profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR), group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
       domain: 'owner', did: reg.user.did, commitment_mode: 'automatic',
       gate_content_hashes: hashGateContent(GATE_CONTENT),
       execution_context_hash: hashExecutionContext({ quote_count_daily: bounds.quote_daily_max }),
