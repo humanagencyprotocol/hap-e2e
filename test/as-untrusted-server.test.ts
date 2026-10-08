@@ -102,8 +102,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     if (req.method === 'GET' && url.startsWith('/api/proposals?') && url.includes('status=committed')) {
       return json(res, 200, { proposals: untrusted.committed });
     }
-    if (req.method === 'POST' && url.startsWith('/api/as/receipt') && untrusted.tickets.length > 0) {
-      return json(res, 200, { approved: true, receipt: untrusted.tickets.shift(), idempotent: false });
+    if (req.method === 'POST' && url.startsWith('/api/as/ticket') && untrusted.tickets.length > 0) {
+      return json(res, 200, { approved: true, ticket: untrusted.tickets.shift(), idempotent: false });
     }
   }
   // Everything else (incl. /api/as/pubkey — the public key IS public) is relayed.
@@ -152,7 +152,7 @@ async function mintGenuineTicket(): Promise<Record<string, unknown>> {
       : {}),
   } as Parameters<SPClient['postTicket']>[1]);
   expect(r.status, JSON.stringify(r.body)).toBeLessThan(300);
-  return r.body.receipt as Record<string, unknown>;
+  return r.body.ticket as Record<string, unknown>;
 }
 
 beforeAll(async () => {
