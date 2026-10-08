@@ -8,9 +8,9 @@
  *        rejected with BOUNDS_HASH_MISMATCH. (Simulates a tampered/stale store:
  *        we sign an attestation with a bogus bounds_hash while storing real
  *        bounds; the AS must recompute the hash on receipt and reject.)
- *  - H2: a receipt posted by someone who is neither the attestation's creator
+ *  - H2: a receipt posted by someone who is neither the mandate's creator
  *        nor an active member of its group is rejected with
- *        NOT_AUTHORIZED_FOR_ATTESTATION (closes cross-tenant bound consumption).
+ *        NOT_AUTHORIZED_FOR_MANDATE (closes cross-tenant bound consumption).
  *
  * H3 (fail-closed when Redis / signing key is absent in production) is covered
  * by unit tests in suveren-as (redis.ts / keys.ts).
@@ -23,11 +23,13 @@ import {
   hashExecutionContext,
   computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 15200;
 const SP_URL = `http://localhost:${SP_PORT}`;
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILE_ID = PROFILE_V07.charge;
 const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
 const BOUNDS = {
   profile: PROFILE_ID,
@@ -51,9 +53,10 @@ let bobKey = '';
 function attestBody(extra: Record<string, unknown>) {
   return {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: aliceGroup,
     bounds: BOUNDS,
-    context_hash: computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER),
+    scope_hash: computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER),
     domain: 'owner',
     did: aliceDid,
     commitment_mode: 'automatic' as const,
@@ -101,7 +104,7 @@ describe('H1 — receipt rejects bounds that do not match the signed bounds_hash
     const att = await sp.submitMandate(aliceKey, attestBody({}));
     const r = await sp.postTicket(aliceKey, receiptBody(att.authorization_id));
     expect(r.status).toBe(201);
-    expect(r.body.receipt).toBeTruthy();
+    expect(r.body.ticket).toBeTruthy();
   });
 
   it('refuses to sign a bounds_hash that disagrees with the bounds — the mismatch is now unreachable', async () => {
@@ -131,12 +134,12 @@ describe('H2 — receipt rejects a caller who does not own the attestation', () 
     // Bob is authenticated but is neither the creator nor a member of Alice's group.
     // In the per-ceremony identity model the AS finds the record by authorizationId
     // and then explicitly rejects Bob at the H2 ownership check (creator or active
-    // group member). 403 NOT_AUTHORIZED_FOR_ATTESTATION is the correct response.
+    // group member). 403 NOT_AUTHORIZED_FOR_MANDATE is the correct response.
     const r = await sp.postTicket(bobKey, receiptBody(att.authorization_id));
 
     expect(r.status).toBe(403);
     const err = (r.body.errors as Array<Record<string, unknown>>)[0];
-    expect(err.code).toBe('NOT_AUTHORIZED_FOR_ATTESTATION');
+    expect(err.code).toBe('NOT_AUTHORIZED_FOR_MANDATE');
   });
 
   it('still allows the rightful owner to post a receipt', async () => {
