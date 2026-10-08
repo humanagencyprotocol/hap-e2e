@@ -24,6 +24,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID ?? '';
 const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET ?? '';
@@ -35,7 +36,7 @@ const GW_PORT = 16040;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/email@0.4';
+const PROFILE_ID = PROFILE_V07.email;
 const PROFILE_SHORT = 'email';
 const EXEC_PATH = 'email-send';
 const ROOT = join(import.meta.dirname, '..', '..');
@@ -44,11 +45,11 @@ const PROFILES_DIR = join(ROOT, 'hap-profiles');
 // Email profile → verb "Sent"; ASCII "--" separator (mojibake-immune);
 // "Receipt:" label — the receipt is the precondition proof, not a "Verify" CTA.
 const FOOTER_MARKER = '-- Sent by an AI agent via Suveren. Receipt:';
-const RECEIPT_LINK = /https?:\/\/[^\s"]+\/r\/([0-9a-fA-F-]{36})/;
+const RECEIPT_LINK = /https?:\/\/[^\s"]+\/t\/([0-9a-fA-F-]{36})/;
 
 const TEST_RECIPIENT = 'andreas@sublin.app';
 const TEST_DOMAIN = 'sublin.app';
-const BOUNDS = { profile: PROFILE_ID, recipient_max: 5, send_daily_max: 10 };
+const BOUNDS = { profile: PROFILE_ID, read_access: 'unlimited', recipient_max: 5, send_daily_max: 10, setup_daily_max: 0 };
 const CONTEXT = { allowed_recipients: TEST_RECIPIENT, allowed_domains: TEST_DOMAIN };
 const GATE_CONTENT = { intent: 'E2E: verification-footer test — bounded automated email sending.' };
 
@@ -63,14 +64,15 @@ let mcpClient: Client | null = null;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function submitEmailAttestation(): Promise<string> {
-  const boundsHash = computeBoundsHash(BOUNDS, ['profile', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max']);
+  const boundsHash = computeBoundsHash(BOUNDS, ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'setup_daily_max']);
   const contextHash = computeScopeHash(CONTEXT, ['allowed_recipients', 'allowed_domains']);
   const result = await sp.submitMandate(userApiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: personalGroupId,
     bounds: BOUNDS,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'communications',
     did: userDid,
     commitment_mode: 'automatic',

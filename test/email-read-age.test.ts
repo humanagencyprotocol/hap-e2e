@@ -30,6 +30,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID ?? '';
 const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET ?? '';
@@ -43,20 +44,23 @@ const GW_PORT = 17271;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/email@0.4';
+const PROFILE_ID = PROFILE_V07.email;
 const PROFILE_SHORT = 'email';
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
 const READ_MAX_AGE_DAYS = 30;
-const BOUNDS_KEY_ORDER = ['profile', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max'];
+// v0.7: read_daily_max is gone (replaced by read_access; never enforced,
+// CONFORMANCE.md); read_access and setup_daily_max are new and required:true.
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['allowed_recipients', 'allowed_domains'];
 const BOUNDS = {
   profile: PROFILE_ID,
+  read_access: 'unlimited',
   recipient_max: 5,
   send_daily_max: 10,
   read_max_age_days: READ_MAX_AGE_DAYS,
-  read_daily_max: 100,
+  setup_daily_max: 0,
 };
 // Unscoped (no recipient scope) so these AGE tests aren't also gated by
 // coverage — an unscoped grant covers every correspondent. Coverage/scope
@@ -129,10 +133,11 @@ beforeAll(async () => {
 
   const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: groupId,
     bounds: BOUNDS,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'communications',
     did: user.user.did,
     commitment_mode: 'automatic',
