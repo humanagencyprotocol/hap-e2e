@@ -42,7 +42,7 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -129,10 +129,10 @@ async function bootScenario(spPort: number, gwPort: number, grants: Grant[]): Pr
 
   for (const grant of grants) {
     const context = { contact_type: grant.contactType };
-    const contextHash = computeContextHash(context, CONTEXT_KEY_ORDER);
+    const contextHash = computeScopeHash(context, CONTEXT_KEY_ORDER);
     const gateContent = { intent: grant.intent };
 
-    const att = await sp.submitAttestation(apiKey, {
+    const att = await sp.submitMandate(apiKey, {
       profile_id: PROFILE_ID,
       group_id: groupId,
       bounds: BOUNDS,

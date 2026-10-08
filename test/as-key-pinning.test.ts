@@ -75,7 +75,7 @@ async function createRecord(title: string) {
 }
 
 async function ticketCount(): Promise<number> {
-  return (await sp.getMyReceiptsPage(SEED_API_KEY)).receipts.length;
+  return (await sp.getMyTicketsPage(SEED_API_KEY)).tickets.length;
 }
 
 async function ensureRecordsIntegration(): Promise<void> {
@@ -126,7 +126,7 @@ describe('Sign-in pins the Authority Server key', () => {
     const groupId = await seedOperatorGroup(sp);
     const m = await grantRecordsMandate(sp, { apiKey: SEED_API_KEY, did: SEED_DID, intent: 'pin e2e: paired server', mode: 'automatic', groupId });
     await mcpInternal.pushGateContent(
-      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.contextHash, context: {} },
+      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.scopeHash, context: {} },
       RECORDS_PROFILE_ID,
       m.gateContent,
     );
@@ -162,7 +162,7 @@ describe('A different signing key at the same URL', () => {
     otherGroupId = await seedOperatorGroup(sp);
     const m = await grantRecordsMandate(sp, { apiKey: SEED_API_KEY, did: SEED_DID, intent: 'pin e2e: substituted server', mode: 'automatic', groupId: otherGroupId });
     await mcpInternal.pushGateContent(
-      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.contextHash, context: {} },
+      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.scopeHash, context: {} },
       RECORDS_PROFILE_ID,
       m.gateContent,
     );

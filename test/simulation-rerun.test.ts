@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 17660;
 const GW_PORT = 17692;
@@ -83,9 +83,9 @@ async function grant(key: ProfileKey, kind: 'setup' | 'work'): Promise<string> {
   const p = PROFILES[key];
   const bounds = { profile: p.id, ...p[kind] };
   const boundsHash = computeBoundsHash(bounds, [...p.keyOrder]);
-  const contextHash = computeContextHash(p.ctx, [...p.ctxOrder]);
+  const contextHash = computeScopeHash(p.ctx, [...p.ctxOrder]);
   const gate = { intent: `E2E ${kind} mandate for ${key}` };
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: p.id, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
     domain: 'owner', did, commitment_mode: 'automatic',
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ kind }),
@@ -159,7 +159,7 @@ describe.skipIf(!available)('simulation re-run: clear, then load again (real AS 
     expect(names).toContain('erp__create_quote');
     for (const c of SYSTEMS) expect(names).not.toContain(`${c}__clear_simulation`);
     for (const c of SYSTEMS) expect((await call(`${c}__clear_simulation`, {})).denied).toBe(true);
-    const { receipts } = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
+    const { tickets: receipts } = await sp.getMyTicketsPage(apiKey, { limit: 50 });
     expect(receipts).toHaveLength(0);
   });
 
@@ -215,7 +215,7 @@ describe.skipIf(!available)('simulation re-run: clear, then load again (real AS 
     // Per simulator: the clear + the second load.
     expect(traces).toHaveLength(6);
     // Tickets: 3 loads + the connector-refused second load + 3 clears + 3 loads = 10.
-    const { receipts } = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
+    const { tickets: receipts } = await sp.getMyTicketsPage(apiKey, { limit: 50 });
     const tickets = new Set(receipts.map((t) => String(t.id)));
     expect(tickets.size).toBe(10);
     for (const id of traces) expect(tickets.has(id)).toBe(true);

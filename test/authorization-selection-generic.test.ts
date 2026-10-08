@@ -38,7 +38,7 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: 'generic-selection-e2e', apiKey });
 
   const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash({}, []); // records has no context schema
+  const contextHash = computeScopeHash({}, []); // records has no context schema
   const executionContextHash = hashExecutionContext({ profile: PROFILE_ID, domain: 'owner' });
 
   // Two grants under records@0.4. No scope → neither can be "more specific".
@@ -123,7 +123,7 @@ beforeAll(async () => {
   ];
 
   for (const g of grants) {
-    const att = await sp.submitAttestation(apiKey, {
+    const att = await sp.submitMandate(apiKey, {
       profile_id: PROFILE_ID,
       group_id: groupId,
       bounds: BOUNDS,

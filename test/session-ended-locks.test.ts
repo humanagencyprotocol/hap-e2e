@@ -48,8 +48,8 @@ async function createContact(name: string) {
 }
 
 async function receiptCount(): Promise<number> {
-  const page = await sp.getMyReceiptsPage(apiKey);
-  return (page as { receipts?: unknown[] }).receipts?.length ?? 0;
+  const page = await sp.getMyTicketsPage(apiKey);
+  return (page as { tickets?: unknown[] }).tickets?.length ?? 0;
 }
 
 /** Sign in the way the gateway does: API key plus the gateway version header. */
@@ -93,7 +93,7 @@ beforeAll(async () => {
   const bounds = { profile: PROFILE, read_access: 'unlimited', write_daily_max: 50, delete_daily_max: 5 };
   const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE,
     group_id: groupId,
     domain: 'owner',

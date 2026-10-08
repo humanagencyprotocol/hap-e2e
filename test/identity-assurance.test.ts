@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 import {
   decodeAttestationBlob, encodeAttestationBlob, deriveIdentityLine, verifyAttestationSignature,
 } from '@humanagencyp/hap-core';
@@ -50,12 +50,12 @@ function adminVerify(userId: string, name: string) {
 }
 
 function attest(extra: Record<string, unknown> = {}) {
-  return sp.submitAttestation(agent.apiKey, {
+  return sp.submitMandate(agent.apiKey, {
     profile_id: PROFILE_ID,
     group_id: groupId,
     bounds: BOUNDS,
     bounds_hash: computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER),
-    context_hash: computeContextHash(CONTEXT, CONTEXT_KEY_ORDER),
+    context_hash: computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER),
     domain: 'owner',
     did: agent.did,
     commitment_mode: 'automatic',
@@ -65,7 +65,7 @@ function attest(extra: Record<string, unknown> = {}) {
       post_count_daily: 10, post_count_monthly: 50,
     }),
     ...extra,
-  } as Parameters<typeof sp.submitAttestation>[1]);
+  } as Parameters<typeof sp.submitMandate>[1]);
 }
 
 describe('Identity Assurance — operator verification → signed subject', () => {

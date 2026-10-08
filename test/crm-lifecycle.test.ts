@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -107,9 +107,9 @@ describe('Authorization', () => {
     });
 
     boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-    contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+    contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
-    const result = await sp.submitAttestation(user.apiKey, {
+    const result = await sp.submitMandate(user.apiKey, {
       profile_id: PROFILE_ID,
       group_id: personalGroupId,
       bounds: BOUNDS,

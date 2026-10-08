@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient, mintAuthorizationId } from '../src/helpers/sp-client.js';
-import { hashGateContent, hashExecutionContext, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 15300;
 const SP_URL = `http://localhost:${SP_PORT}`;
@@ -57,7 +57,7 @@ async function api(method: string, path: string, apiKey: string, body?: unknown)
 }
 
 const writeReceipt = () =>
-  sp.postReceipt(agentKey, {
+  sp.postTicket(agentKey, {
     authorizationId,
     profileId: PROFILE_ID,
     action: 'crm__create_contact',
@@ -119,7 +119,7 @@ describe('Above-cap authorization with shared intent', () => {
       group_id: groupId,
       bounds: BOUNDS,
       // bounds_hash omitted → AS computes it
-      context_hash: computeContextHash({}, []),
+      context_hash: computeScopeHash({}, []),
       domain: agentId, // v0.4 team: resolved domain is the member's userId
       did: agentDid,
       commitment_mode: 'automatic',
@@ -160,7 +160,7 @@ describe('Intent disclosure — C2 binding', () => {
       profile_id: PROFILE_ID,
       group_id: groupId,
       bounds: BOUNDS,
-      context_hash: computeContextHash({}, []),
+      context_hash: computeScopeHash({}, []),
       domain: agentId,
       did: agentDid,
       commitment_mode: 'automatic',

@@ -88,7 +88,7 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
     const scopeHash = computeScopeHash({}, []);
     const gate = { intent: 'E2E: let my AI lead me through the setup.' };
     grantDelegation = async () => {
-      const att = await sp.submitAttestation(reg.apiKey, {
+      const att = await sp.submitMandate(reg.apiKey, {
         profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: scopeHash,
         profile_hash: profileHash,
         domain: 'owner', did: reg.user.did, commitment_mode: 'review',

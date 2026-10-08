@@ -28,7 +28,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 import { ControlPlaneClient, newSecret, startControlPlane, startMcpServer, textOf, PROFILES_DIR, type StackOptions } from '../src/helpers/gateway-stack.js';
 
 const AS_PORT = 18500;
@@ -122,9 +122,9 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
     const bounds = { profile: DELEGATION, read_access: 'unlimited', brief_daily_max: 0, mandate_daily_max: 5 };
     const keys = ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max'];
     const boundsHash = computeBoundsHash(bounds, keys);
-    const contextHash = computeContextHash({}, []);
+    const contextHash = computeScopeHash({}, []);
     const gate = { intent: 'E2E: let the AI propose mandates for the test.' };
-    const att = await sp.submitAttestation(anna.apiKey, {
+    const att = await sp.submitMandate(anna.apiKey, {
       profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
       domain: 'owner', did: anna.user.did, commitment_mode: 'review',
       gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ m: 'delegation' }),
@@ -221,7 +221,7 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
     const id = await approveAndWait(p.id, 'commit');
     expect(id).toBeTruthy();
 
-    const t = await sp.postReceipt(anna.apiKey, {
+    const t = await sp.postTicket(anna.apiKey, {
       authorizationId: id!, profileId: `${P}/sales@0.3`, action: 'erp__create_quote', actionType: 'quote',
       executionContext: { action_type: 'quote', value: 100, discount_pct: 0, currency: 'EUR' },
     });

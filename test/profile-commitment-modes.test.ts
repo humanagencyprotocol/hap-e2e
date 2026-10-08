@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18300;
 const SP_URL = `http://localhost:${SP_PORT}`;
@@ -58,11 +58,11 @@ let groupId: string;
 
 function attest(profileId: string, commitment_mode: string) {
   const bounds = { profile: profileId, write_daily_max: 5 };
-  return sp.submitAttestationRaw(apiKey, {
+  return sp.submitMandateRaw(apiKey, {
     authorization_id: `authz_${randomUUID()}`,
     profile_id: profileId, group_id: groupId, bounds,
     bounds_hash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-    context_hash: computeContextHash({}, []),
+    context_hash: computeScopeHash({}, []),
     domain: 'owner', did, commitment_mode,
     gate_content_hashes: hashGateContent(GATE_CONTENT),
     execution_context_hash: hashExecutionContext({ profile: profileId, commitment_mode }),

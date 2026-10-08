@@ -23,7 +23,7 @@ import { randomUUID } from 'node:crypto';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18400;
 const GW_PORT = 18401;
@@ -54,7 +54,7 @@ function delegationBody(commitment_mode: 'review' | 'automatic') {
   return {
     bounds,
     boundsHash: computeBoundsHash(bounds, KEYS),
-    contextHash: computeContextHash({}, []),
+    contextHash: computeScopeHash({}, []),
     gate: { intent: `E2E delegation (${commitment_mode})` },
     commitment_mode,
   };
@@ -132,7 +132,7 @@ describe.skipIf(!available)('delegation: the AI proposes its agent brief, a pers
 
   it('the AS refuses an automatic delegation mandate (review only)', async () => {
     const d = delegationBody('automatic');
-    const r = await sp.submitAttestationRaw(apiKey, {
+    const r = await sp.submitMandateRaw(apiKey, {
       authorization_id: `authz_${randomUUID()}`, profile_id: DELEGATION, group_id: groupId,
       bounds: d.bounds, bounds_hash: d.boundsHash, context_hash: d.contextHash, domain: 'owner', did,
       commitment_mode: 'automatic', gate_content_hashes: hashGateContent(d.gate),
@@ -144,7 +144,7 @@ describe.skipIf(!available)('delegation: the AI proposes its agent brief, a pers
 
   it('with a review delegation mandate the tool is listed', async () => {
     const d = delegationBody('review');
-    const att = await sp.submitAttestation(apiKey, {
+    const att = await sp.submitMandate(apiKey, {
       profile_id: DELEGATION, group_id: groupId, bounds: d.bounds, bounds_hash: d.boundsHash,
       context_hash: d.contextHash, domain: 'owner', did, commitment_mode: 'review',
       gate_content_hashes: hashGateContent(d.gate), execution_context_hash: hashExecutionContext({ m: 'review' }),

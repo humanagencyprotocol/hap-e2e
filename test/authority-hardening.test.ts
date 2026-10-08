@@ -21,7 +21,7 @@ import { SPClient } from '../src/helpers/sp-client.js';
 import {
   hashGateContent,
   hashExecutionContext,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 const SP_PORT = 15200;
@@ -53,7 +53,7 @@ function attestBody(extra: Record<string, unknown>) {
     profile_id: PROFILE_ID,
     group_id: aliceGroup,
     bounds: BOUNDS,
-    context_hash: computeContextHash(CONTEXT, CONTEXT_KEY_ORDER),
+    context_hash: computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER),
     domain: 'owner',
     did: aliceDid,
     commitment_mode: 'automatic' as const,
@@ -98,8 +98,8 @@ afterAll(async () => {
 describe('H1 — receipt rejects bounds that do not match the signed bounds_hash', () => {
   it('positive control: a correctly-signed attestation produces a valid receipt', async () => {
     // bounds_hash omitted → AS computes the correct one. Receipt should succeed.
-    const att = await sp.submitAttestation(aliceKey, attestBody({}));
-    const r = await sp.postReceipt(aliceKey, receiptBody(att.authorization_id));
+    const att = await sp.submitMandate(aliceKey, attestBody({}));
+    const r = await sp.postTicket(aliceKey, receiptBody(att.authorization_id));
     expect(r.status).toBe(201);
     expect(r.body.receipt).toBeTruthy();
   });
@@ -116,7 +116,7 @@ describe('H1 — receipt rejects bounds that do not match the signed bounds_hash
     // defence in depth — it catches a record altered in storage after signing,
     // which is the only way the mismatch can still arise.
     await expect(
-      sp.submitAttestation(aliceKey, attestBody({ bounds_hash: BOGUS_BOUNDS_HASH })),
+      sp.submitMandate(aliceKey, attestBody({ bounds_hash: BOGUS_BOUNDS_HASH })),
     ).rejects.toThrow(/409|BOUNDS_HASH_MISMATCH/);
   });
 });
@@ -126,13 +126,13 @@ describe('H1 — receipt rejects bounds that do not match the signed bounds_hash
 describe('H2 — receipt rejects a caller who does not own the attestation', () => {
   it('blocks a different authenticated user from posting a receipt against the attestation', async () => {
     // Alice creates a (valid) attestation in her personal group.
-    const att = await sp.submitAttestation(aliceKey, attestBody({}));
+    const att = await sp.submitMandate(aliceKey, attestBody({}));
 
     // Bob is authenticated but is neither the creator nor a member of Alice's group.
     // In the per-ceremony identity model the AS finds the record by authorizationId
     // and then explicitly rejects Bob at the H2 ownership check (creator or active
     // group member). 403 NOT_AUTHORIZED_FOR_ATTESTATION is the correct response.
-    const r = await sp.postReceipt(bobKey, receiptBody(att.authorization_id));
+    const r = await sp.postTicket(bobKey, receiptBody(att.authorization_id));
 
     expect(r.status).toBe(403);
     const err = (r.body.errors as Array<Record<string, unknown>>)[0];
@@ -140,8 +140,8 @@ describe('H2 — receipt rejects a caller who does not own the attestation', () 
   });
 
   it('still allows the rightful owner to post a receipt', async () => {
-    const att = await sp.submitAttestation(aliceKey, attestBody({}));
-    const r = await sp.postReceipt(aliceKey, receiptBody(att.authorization_id));
+    const att = await sp.submitMandate(aliceKey, attestBody({}));
+    const r = await sp.postTicket(aliceKey, receiptBody(att.authorization_id));
     expect(r.status).toBe(201);
   });
 });

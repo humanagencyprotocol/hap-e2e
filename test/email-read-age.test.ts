@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID ?? '';
 const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET ?? '';
@@ -124,10 +124,10 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: 'email-readage-e2e', apiKey });
 
   const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+  const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
   const gateContent = { intent: 'Read recent mail within a 30-day window for E2E.' };
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
     group_id: groupId,
     bounds: BOUNDS,

@@ -5,9 +5,15 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { AS_DIR, resolveNextBin } from './as-dir';
+import { localProfilesForAs } from './local-profiles';
 
 // src/helpers/ → src → hap-e2e → HAP repo root
 const ROOT = join(import.meta.dirname, '..', '..', '..');
+
+/** The sibling hap-profiles checkout (v0.7 versions, draft branch) — same
+ *  resolution gateway-stack.ts uses, duplicated here to avoid a cycle
+ *  (gateway-stack imports ProcessManager's type). */
+const PROFILES_DIR = process.env.HAP_E2E_PROFILES_DIR ?? join(ROOT, 'hap-profiles');
 
 interface ManagedProcess {
   name: string;
@@ -104,10 +110,13 @@ export class ProcessManager {
       /** Extra env, e.g. SP_PRIVATE_KEY/SP_PUBLIC_KEY to pin the signing key. */
       env?: Record<string, string>;
       /**
-       * Working directory for the server process. Default: the AS app dir.
-       * The AS reads `bundled-profiles/` and `migrations/` from its cwd, so a
-       * different cwd (see local-profiles.ts) serves it other profiles without
-       * touching the AS checkout; `next start` is then pointed at AS_DIR.
+       * Working directory for the server process. Default: a throwaway dir
+       * serving the LOCAL hap-profiles checkout's v0.7 profile versions
+       * (local-profiles.ts) — explicit `cwd: AS_DIR` opts back into the AS's
+       * default (GitHub `main`, which has no v0.7 profile versions yet, so a
+       * mandate request under any profile_id would fail PROFILE_INVALID /
+       * PROFILE_HASH_MISMATCH there). The AS reads `bundled-profiles/` and
+       * `migrations/` from its cwd; `next start` is always pointed at AS_DIR.
        */
       cwd?: string;
     } = {},
@@ -115,9 +124,10 @@ export class ProcessManager {
     console.error(`[E2E] Starting Authority Server on port ${port}...`);
 
     const storageEnv = await this.provisionAsStorage();
+    const localProfiles = opts.cwd ? null : localProfilesForAs(PROFILES_DIR);
 
     const nextBin = resolveNextBin(AS_DIR);
-    const cwd = opts.cwd ?? AS_DIR;
+    const cwd = opts.cwd ?? localProfiles!.cwd;
     const args = cwd === AS_DIR ? [nextBin, 'start', '-p', String(port)] : [nextBin, 'start', AS_DIR, '-p', String(port)];
     const proc = spawn(process.execPath, args, {
       cwd,
@@ -146,6 +156,7 @@ export class ProcessManager {
         // ephemeral Ed25519 keypair. Still needed with Postgres.
         SUVEREN_ALLOW_EPHEMERAL: '1',
         ...storageEnv,
+        ...(localProfiles?.env ?? {}),
         ...opts.env,
       },
       stdio: ['pipe', 'pipe', 'pipe'],

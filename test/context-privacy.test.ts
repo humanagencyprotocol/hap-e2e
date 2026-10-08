@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient, mintAuthorizationId } from '../src/helpers/sp-client.js';
-import { hashGateContent, computeBoundsHash, computeContextHash, hashExecutionContext } from '../src/helpers/crypto.js';
+import { hashGateContent, computeBoundsHash, computeScopeHash, hashExecutionContext } from '../src/helpers/crypto.js';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ describe('Context Privacy', () => {
   describe('Attestation — context hash only, no plaintext context', () => {
     it('computes bounds and context hashes locally', () => {
       boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-      contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+      contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
       expect(boundsHash).toMatch(/^sha256:[a-f0-9]{64}$/);
       expect(contextHash).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -119,7 +119,7 @@ describe('Context Privacy', () => {
       // The context hash IS present
       expect(bodyJson).toContain(contextHash);
 
-      const result = await sp.submitAttestation(agentApiKey, requestBody);
+      const result = await sp.submitMandate(agentApiKey, requestBody);
       expect(result.bounds_hash).toBe(boundsHash);
       expect(result.status).toMatch(/active|pending/);
     });
@@ -208,7 +208,7 @@ describe('Context Privacy', () => {
     it('context hash is a one-way hash — cannot reconstruct context from it', () => {
       // Verify the hash is irreversible: different context produces different hash
       const differentContext = { currency: 'EUR', action_type: 'refund' };
-      const differentContextHash = computeContextHash(differentContext, CONTEXT_KEY_ORDER);
+      const differentContextHash = computeScopeHash(differentContext, CONTEXT_KEY_ORDER);
 
       expect(contextHash).not.toBe(differentContextHash);
 

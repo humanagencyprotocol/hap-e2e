@@ -76,7 +76,7 @@ beforeAll(async () => {
   const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE,
     group_id: groupId,
     domain: 'owner',

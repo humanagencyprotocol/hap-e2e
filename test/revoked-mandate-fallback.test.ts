@@ -44,7 +44,7 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
@@ -122,9 +122,9 @@ describe('Revoked-mandate fallback — the very next call succeeds via the remai
 
     async function grant(contactType: string, intent: string): Promise<string> {
       const context = { contact_type: contactType };
-      const contextHash = computeContextHash(context, CONTEXT_KEY_ORDER);
+      const contextHash = computeScopeHash(context, CONTEXT_KEY_ORDER);
       const gateContent = { intent };
-      const att = await sp.submitAttestation(apiKey, {
+      const att = await sp.submitMandate(apiKey, {
         profile_id: PROFILE_ID,
         group_id: groupId,
         bounds: BOUNDS,
@@ -173,8 +173,8 @@ describe('Revoked-mandate fallback — the very next call succeeds via the remai
   it('after NARROW is revoked, the very next call succeeds via BROAD with exactly one new receipt', async () => {
     await sp.revokeAuthorization(apiKey, narrowId);
 
-    const before = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
-    const beforeIds = new Set(before.receipts.map((r) => String(r.id)));
+    const before = await sp.getMyTicketsPage(apiKey, { limit: 50 });
+    const beforeIds = new Set(before.tickets.map((r) => String(r.id)));
 
     const result = await client.callTool({
       name: 'crm__create_contact',
@@ -192,8 +192,8 @@ describe('Revoked-mandate fallback — the very next call succeeds via the remai
     // EXACTLY ONE new ticket — issued against BROAD, never NARROW (dead), and
     // never two (one per candidate tried) — the downstream tool executes once,
     // only after a ticket was actually issued.
-    const after = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
-    const newReceipts = after.receipts.filter((r) => !beforeIds.has(String(r.id)));
+    const after = await sp.getMyTicketsPage(apiKey, { limit: 50 });
+    const newReceipts = after.tickets.filter((r) => !beforeIds.has(String(r.id)));
     expect(newReceipts).toHaveLength(1);
     expect(newReceipts[0].authorizationId).toBe(broadId);
     expect(newReceipts[0].authorizationId).not.toBe(narrowId);

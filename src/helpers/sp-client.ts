@@ -300,31 +300,42 @@ export class SPClient {
   // ── Tickets (v0.7) ──────────────────────────────────────
 
   /**
-   * POST /api/as/ticket — request the signed ticket pre-flight (v0.7).
+   * POST /api/as/ticket — request the signed ticket pre-flight (v0.7;
+   * moved from POST /api/as/receipt, which now answers 410).
    * Returns status and response body; does NOT throw on errors.
    *
-   * Wire (v0.7): the request names the governing grant by `authorization_id`;
-   * `bounds_hash` is an optional integrity cross-check (409 on disagreement).
+   * Wire (v0.7, protocol.md → *Ticket Request Schema*): fields are camelCase
+   * — unlike the Mandate Request Schema (snake_case) — and this is
+   * unchanged from v0.6: only the path (`/receipt` → `/ticket`) and the
+   * success envelope's key (`receipt` → `ticket`) moved. The request names
+   * the governing grant by `authorizationId` (Authorization Identity);
+   * `boundsHash` is an optional integrity cross-check (409 on disagreement).
    */
   async postTicket(
     apiKey: string,
     body: {
-      authorization_id: string;
+      authorizationId: string;
       /** Optional cross-check — the AS 409s if it disagrees with the record. */
-      bounds_hash?: string;
-      profile_id: string;
+      boundsHash?: string;
+      profileId: string;
       action: string;
-      action_type?: string;
+      actionType?: string;
       amount?: number;
-      execution_context?: Record<string, unknown>;
+      executionContext?: Record<string, unknown>;
       /** v0.7 M3 — replay protection. Same key → same ticket, no double-count. */
-      idempotency_key?: string;
+      idempotencyKey?: string;
+      /** Review-mode: the committed proposal this ticket settles. */
+      proposalId?: string;
+      toolArgs?: Record<string, unknown>;
+      /** v0.5 Content Provenance (optional). */
+      contentHash?: string;
+      contentBinding?: Record<string, unknown>;
     },
   ): Promise<{ status: number; body: Record<string, unknown> }> {
     // Synchronous (automatic-mode) tickets REQUIRE an idempotency key. Default a
     // unique one when the caller didn't set its own — mirrors the real gateway.
-    // An explicit `idempotency_key` in `body` overrides this.
-    const withKey = { idempotency_key: `e2e-${Date.now()}-${++ticketKeySeq}`, ...body };
+    // An explicit `idempotencyKey` in `body` overrides this.
+    const withKey = { idempotencyKey: `e2e-${Date.now()}-${++ticketKeySeq}`, ...body };
     const res = await this.request('POST', '/api/as/ticket', withKey, apiKey);
     const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { status: res.status, body: responseBody };
@@ -381,104 +392,4 @@ export class SPClient {
     return { tickets: data.tickets ?? [], nextBefore: data.nextBefore ?? null };
   }
 
-  // ── Backward compatibility aliases (for gradual migration) ────────────────
-
-  /**
-   * Deprecated: use submitMandate() instead.
-   * This method redirects to submitMandate for backward compatibility during migration.
-   */
-  async submitAttestation(
-    apiKey: string,
-    body: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    // Convert old field names to new ones
-    const converted = this.convertAttestationToMandate(body);
-    return this.submitMandate(apiKey, converted as Parameters<typeof this.submitMandate>[1]);
-  }
-
-  /**
-   * Deprecated: use submitMandateRaw() instead.
-   */
-  async submitAttestationRaw(
-    apiKey: string,
-    body: Record<string, unknown>,
-  ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const converted = this.convertAttestationToMandate(body);
-    return this.submitMandateRaw(apiKey, converted);
-  }
-
-  /**
-   * Deprecated: use postTicket() instead.
-   */
-  async postReceipt(
-    apiKey: string,
-    body: Record<string, unknown>,
-  ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const converted = this.convertReceiptToTicket(body);
-    return this.postTicket(apiKey, converted as Parameters<typeof this.postTicket>[1]);
-  }
-
-  /**
-   * Deprecated: use getGroupTickets() instead.
-   */
-  async getGroupReceipts(
-    apiKey: string,
-    groupId: string,
-  ): Promise<{ receipts: Array<Record<string, unknown>> }> {
-    const result = await this.getGroupTickets(apiKey, groupId);
-    return { receipts: result.tickets };
-  }
-
-  /**
-   * Deprecated: use getMyTicketsPage() instead.
-   */
-  async getMyReceiptsPage(
-    apiKey: string,
-    options?: { before?: string; limit?: number },
-  ): Promise<{ receipts: Array<Record<string, unknown>>; nextBefore: string | null }> {
-    const result = await this.getMyTicketsPage(apiKey, options);
-    return { receipts: result.tickets, nextBefore: result.nextBefore };
-  }
-
-  // ── Field conversion helpers ────────────────────────────
-
-  private convertAttestationToMandate(body: Record<string, unknown>): Record<string, unknown> {
-    const converted = { ...body };
-    // Convert old field names to new ones
-    if ('context_hash' in converted) {
-      converted.scope_hash = converted.context_hash;
-      delete converted.context_hash;
-    }
-    return converted;
-  }
-
-  private convertReceiptToTicket(body: Record<string, unknown>): Record<string, unknown> {
-    const converted = { ...body };
-    // Convert old field names to new ones
-    if ('authorizationId' in converted) {
-      converted.authorization_id = converted.authorizationId;
-      delete converted.authorizationId;
-    }
-    if ('profileId' in converted) {
-      converted.profile_id = converted.profileId;
-      delete converted.profileId;
-    }
-    if ('actionType' in converted) {
-      converted.action_type = converted.actionType;
-      delete converted.actionType;
-    }
-    if ('executionContext' in converted) {
-      converted.execution_context = converted.executionContext;
-      delete converted.executionContext;
-    }
-    if ('idempotencyKey' in converted) {
-      converted.idempotency_key = converted.idempotencyKey;
-      delete converted.idempotencyKey;
-    }
-    if ('boundsHash' in converted) {
-      converted.bounds_hash = converted.boundsHash;
-      delete converted.boundsHash;
-    }
-    return converted;
-  }
 }

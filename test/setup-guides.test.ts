@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18600;
 const GW_PORT = 18601;
@@ -68,10 +68,10 @@ describe.skipIf(!available)('setup guides (real AS + gateway in simulation mode)
     const groupId = await sp.getPersonalGroupId(reg.apiKey);
     const bounds = { profile: DELEGATION, read_access: 'unlimited', brief_daily_max: 0, mandate_daily_max: 0 };
     const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max']);
-    const contextHash = computeContextHash({}, []);
+    const contextHash = computeScopeHash({}, []);
     const gate = { intent: 'E2E: read the setup guides.' };
     grantGuides = async () => {
-      const att = await sp.submitAttestation(reg.apiKey, {
+      const att = await sp.submitMandate(reg.apiKey, {
         profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
         domain: 'owner', did: reg.user.did, commitment_mode: 'review',
         gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ g: 1 }),

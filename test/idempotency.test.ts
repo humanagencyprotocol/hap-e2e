@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
-import { hashGateContent, hashExecutionContext, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeScopeHash } from '../src/helpers/crypto.js';
 // The production gateway's receipt client — imported from the gateway source so
 // the integration test exercises the SAME retry/idempotency code that ships,
 // not a re-implementation. It is dependency-free (uses only globalThis.fetch),
@@ -44,11 +44,11 @@ beforeAll(async () => {
   did = user.user.did;
   groupId = await sp.getPersonalGroupId(apiKey);
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
     group_id: groupId,
     bounds: { profile: PROFILE_ID, amount_max: 100, amount_daily_max: 500, amount_monthly_max: 5000, transaction_count_daily_max: 20 },
-    context_hash: computeContextHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
+    context_hash: computeScopeHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
     domain: 'owner',
     did,
     commitment_mode: 'automatic',
@@ -78,7 +78,7 @@ describe('M3 — automatic-mode idempotency', () => {
 
   it('issues a receipt on first POST (201)', async () => {
     receiptBody.authorizationId = authorizationId;
-    const r = await sp.postReceipt(apiKey, receiptBody);
+    const r = await sp.postTicket(apiKey, receiptBody);
     expect(r.status).toBe(201);
     const receipt = r.body.receipt as Record<string, unknown>;
     expect(receipt.id).toBeTruthy();
@@ -89,7 +89,7 @@ describe('M3 — automatic-mode idempotency', () => {
   });
 
   it('returns the SAME receipt on replay (200, idempotent) without double-counting', async () => {
-    const r = await sp.postReceipt(apiKey, receiptBody);
+    const r = await sp.postTicket(apiKey, receiptBody);
     expect(r.status).toBe(200);
     expect(r.body.idempotent).toBe(true);
     const receipt = r.body.receipt as Record<string, unknown>;
@@ -102,7 +102,7 @@ describe('M3 — automatic-mode idempotency', () => {
   });
 
   it('treats a different idempotencyKey as a new execution (counts again)', async () => {
-    const r = await sp.postReceipt(apiKey, {
+    const r = await sp.postTicket(apiKey, {
       ...receiptBody,
       idempotencyKey: `${key}-DISTINCT`,
     });
@@ -153,15 +153,15 @@ describe('M3 — automatic-mode idempotency', () => {
       idempotencyKey: lostKey,
     };
 
-    const before = (await sp.getGroupReceipts(apiKey, groupId)).receipts.length;
+    const before = (await sp.getGroupTickets(apiKey, groupId)).tickets.length;
 
-    const first = await sp.postReceipt(apiKey, body); // AS commits + persists
+    const first = await sp.postTicket(apiKey, body); // AS commits + persists
     expect(first.status).toBe(201);
-    const retry = await sp.postReceipt(apiKey, body); // the "lost response" retry
+    const retry = await sp.postTicket(apiKey, body); // the "lost response" retry
     expect(retry.status).toBe(200);
     expect(retry.body.idempotent).toBe(true);
 
-    const after = (await sp.getGroupReceipts(apiKey, groupId)).receipts.length;
+    const after = (await sp.getGroupTickets(apiKey, groupId)).tickets.length;
     expect(after - before).toBe(1); // exactly one record for one logical execution
     expect((retry.body.receipt as { id: string }).id).toBe(
       (first.body.receipt as { id: string }).id,
@@ -183,17 +183,17 @@ describe('M3 — automatic-mode idempotency', () => {
       idempotencyKey: conflictKey,
     });
 
-    const first = await sp.postReceipt(apiKey, mk(7));
+    const first = await sp.postTicket(apiKey, mk(7));
     expect(first.status).toBe(201);
 
     // Same key, different executionContext (amount 8 vs 7) → conflict.
-    const conflict = await sp.postReceipt(apiKey, mk(8));
+    const conflict = await sp.postTicket(apiKey, mk(8));
     expect(conflict.status).toBe(409);
     const errors = conflict.body.errors as Array<{ code: string }> | undefined;
     expect(errors?.[0]?.code).toBe('IDEMPOTENCY_MISMATCH');
 
     // Same key, SAME payload still returns the original (only different payloads conflict).
-    const replay = await sp.postReceipt(apiKey, mk(7));
+    const replay = await sp.postTicket(apiKey, mk(7));
     expect(replay.status).toBe(200);
     expect(replay.body.idempotent).toBe(true);
     expect((replay.body.receipt as { id: string }).id).toBe(
@@ -229,11 +229,11 @@ describe('M3 seam — real gateway client + real AS + lost response', () => {
     const user = await sp.register('Idem Seam', `idem-seam-${Date.now()}@test.local`);
     gwApiKey = user.apiKey;
     const gwGroupId = await sp.getPersonalGroupId(gwApiKey);
-    const att = await sp.submitAttestation(gwApiKey, {
+    const att = await sp.submitMandate(gwApiKey, {
       profile_id: PROFILE_ID,
       group_id: gwGroupId,
       bounds: { profile: PROFILE_ID, amount_max: 100, amount_daily_max: 500, amount_monthly_max: 5000, transaction_count_daily_max: 20 },
-      context_hash: computeContextHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
+      context_hash: computeScopeHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
       domain: 'owner',
       did: user.user.did,
       commitment_mode: 'automatic',
@@ -287,7 +287,7 @@ describe('M3 seam — real gateway client + real AS + lost response', () => {
     }
 
     // Authoritative AS state: exactly one receipt persisted for one execution.
-    const receipts = (await sp.getGroupReceipts(gwApiKey, await sp.getPersonalGroupId(gwApiKey))).receipts;
+    const receipts = (await sp.getGroupTickets(gwApiKey, await sp.getPersonalGroupId(gwApiKey))).tickets;
     expect(receipts.length).toBe(1);
   });
 });

@@ -32,7 +32,7 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -87,9 +87,9 @@ async function submitGrant(grant: {
   const gateContentHashes = hashGateContent(grant.gateContent);
   const executionContextHash = hashExecutionContext({ recipient_count: 1, ...grant.context });
   const boundsHash = computeBoundsHash(grant.bounds, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash(grant.context, CONTEXT_KEY_ORDER);
+  const contextHash = computeScopeHash(grant.context, CONTEXT_KEY_ORDER);
 
-  const result = await sp.submitAttestation(userApiKey, {
+  const result = await sp.submitMandate(userApiKey, {
     profile_id: PROFILE_ID,
     group_id: personalGroupId,
     bounds: grant.bounds,

@@ -53,7 +53,7 @@ beforeAll(async () => {
   const gateHashes = hashGateContent({ intent: 'test' });
   const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: profile,
     group_id: groupId,
     domain: 'owner',

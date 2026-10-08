@@ -93,7 +93,7 @@ beforeAll(async () => {
   const bounds = { profile: PROFILE, write_daily_max: 10, delete_daily_max: 5 };
   const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
   const contextHash = computeBoundsHash({}, []);
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE,
     group_id: groupId,
     domain: 'owner',
@@ -175,7 +175,7 @@ describe('Exactly-once execution under concurrent triggers', () => {
 
     // 3. The AS's record: one receipt for this proposal. (This half already
     //    held on 2026-09-04 — it is here so a regression on either side shows.)
-    const { receipts } = await sp.getGroupReceipts(apiKey, groupId);
+    const { tickets: receipts } = await sp.getGroupTickets(apiKey, groupId);
     const forProposal = receipts.filter(r => r.proposalId === proposalId);
     expect(forProposal).toHaveLength(1);
     expect(forProposal[0].id).toBe(rows[0].ticketId);

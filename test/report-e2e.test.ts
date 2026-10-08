@@ -58,7 +58,7 @@ import { verifyReceiptSignature } from 'hap-core-current';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 import {
   ControlPlaneClient, GW_DIR, MANIFESTS_DIR, PROFILES_DIR, RECORDS_DIST, RECORDS_INTEGRATION, RECORDS_PROFILE_ID,
   newSecret, startControlPlane, startMcpServer, textOf, type StackOptions,
@@ -165,9 +165,9 @@ async function grant(name: string, mode: 'automatic' | 'review' = 'automatic'): 
   const s = SPECS[name];
   const bounds = { profile: s.id, ...s.bounds };
   const boundsHash = computeBoundsHash(bounds, s.keyOrder);
-  const contextHash = computeContextHash(s.ctx, s.ctxOrder);
+  const contextHash = computeScopeHash(s.ctx, s.ctxOrder);
   const gate = { intent: intentOf(name) };
-  const att = await sp.submitAttestation(user.apiKey, {
+  const att = await sp.submitMandate(user.apiKey, {
     profile_id: s.id, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
     domain: 'owner', did: user.user.did, commitment_mode: mode,
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ name }),
@@ -203,7 +203,7 @@ type AsTicket = Record<string, any> & { id: string; action: string; timestamp: n
 
 /** The caller's tickets as the Authority Server itself lists them — the source of truth. */
 async function asTickets(): Promise<AsTicket[]> {
-  const { receipts } = await sp.getMyReceiptsPage(user.apiKey, { limit: 200 });
+  const { tickets: receipts } = await sp.getMyTicketsPage(user.apiKey, { limit: 200 });
   return receipts as AsTicket[];
 }
 
@@ -659,9 +659,9 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
     const s = SPECS.reporting;
     const bounds = { profile: s.id, ...s.bounds, read_max_age_days: 367 };
     const authorizationId = `authz_${randomUUID()}`;
-    const r = await sp.submitAttestationRaw(user.apiKey, {
+    const r = await sp.submitMandateRaw(user.apiKey, {
       authorization_id: authorizationId, profile_id: s.id, group_id: groupId, bounds,
-      bounds_hash: computeBoundsHash(bounds, s.keyOrder), context_hash: computeContextHash({}, []),
+      bounds_hash: computeBoundsHash(bounds, s.keyOrder), context_hash: computeScopeHash({}, []),
       domain: 'owner', did: user.user.did, commitment_mode: 'automatic',
       gate_content_hashes: hashGateContent({ intent: 'too wide' }), execution_context_hash: hashExecutionContext({ m: 367 }),
     });

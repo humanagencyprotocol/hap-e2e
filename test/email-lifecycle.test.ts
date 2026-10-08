@@ -29,7 +29,7 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 // ── Credentials ─────────────────────────────────────────────────────────────
@@ -104,9 +104,9 @@ async function submitEmailAttestation(bounds: Record<string, unknown>): Promise<
   });
 
   const boundsHash = computeBoundsHash(bounds, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+  const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
-  const result = await sp.submitAttestation(userApiKey, {
+  const result = await sp.submitMandate(userApiKey, {
     profile_id: PROFILE_ID,
     group_id: personalGroupId,
     bounds,
@@ -256,7 +256,7 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Send (authorized)', () => {
 
   it('receipt was recorded in SP', async () => {
     // Verify via direct SP API — the receipt should exist
-    const result = await sp.postReceipt(userApiKey, {
+    const result = await sp.postTicket(userApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'send',
@@ -334,7 +334,7 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Re-authorize', () => {
 
     const newId = await submitEmailAttestation(tighterBounds);
     expect(newId).toBeTruthy();
-    // Each submitAttestation mints a fresh authorization_id — the new grant is independent.
+    // Each submitMandate mints a fresh authorization_id — the new grant is independent.
     expect(newId).not.toBe(authorizationId);
     authorizationId = newId;
     console.error(`[E2E-Email] New authorization id: ${authorizationId}`);

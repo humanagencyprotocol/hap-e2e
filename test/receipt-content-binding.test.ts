@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -143,9 +143,9 @@ describe('Setup', () => {
     const gateContentHashes = hashGateContent(GATE_CONTENT);
     const executionContextHash = hashExecutionContext({ write_count_daily: BOUNDS.write_daily_max });
     boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-    contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+    contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
-    const result = await sp.submitAttestation(user.apiKey, {
+    const result = await sp.submitMandate(user.apiKey, {
       profile_id: PROFILE_ID,
       group_id: personalGroupId,
       bounds: BOUNDS,
@@ -261,16 +261,16 @@ describe('Content binding — end to end', () => {
   // /api/receipts/mine returns recent receipts (not the old today-only default)
   // and a `nextBefore` cursor that "Load older" walks to the floor.
   it('the receipt is returned by the windowed /api/receipts/mine, with a cursor', async () => {
-    const page = await sp.getMyReceiptsPage(user.apiKey, { limit: 200 });
-    expect(page.receipts.some(r => r.id === receiptId)).toBe(true);
+    const page = await sp.getMyTicketsPage(user.apiKey, { limit: 200 });
+    expect(page.tickets.some(r => r.id === receiptId)).toBe(true);
     expect(typeof page.nextBefore).toBe('string'); // "Load older" cursor present
   });
 
   it('the "Load older" cursor walk terminates at the history floor', async () => {
-    let cursor: string | null = (await sp.getMyReceiptsPage(user.apiKey, { limit: 50 })).nextBefore;
+    let cursor: string | null = (await sp.getMyTicketsPage(user.apiKey, { limit: 50 })).nextBefore;
     let steps = 0;
     while (cursor && steps++ < 40) {
-      cursor = (await sp.getMyReceiptsPage(user.apiKey, { before: cursor, limit: 50 })).nextBefore;
+      cursor = (await sp.getMyTicketsPage(user.apiKey, { before: cursor, limit: 50 })).nextBefore;
     }
     expect(cursor).toBeNull();
   });

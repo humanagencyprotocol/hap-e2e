@@ -34,7 +34,7 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
@@ -100,10 +100,10 @@ async function boot(spPort: number, gwPort: number, readAccess: 'unlimited' | 'n
     archive_access: 'allowed',
   };
   const boundsHash = computeBoundsHash(bounds, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash({}, []);
+  const contextHash = computeScopeHash({}, []);
   const gateContent = { intent: `records read_access=${readAccess}` };
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
     group_id: groupId,
     bounds,

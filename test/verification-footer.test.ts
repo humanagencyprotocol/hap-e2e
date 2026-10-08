@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID ?? '';
 const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET ?? '';
@@ -64,8 +64,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function submitEmailAttestation(): Promise<string> {
   const boundsHash = computeBoundsHash(BOUNDS, ['profile', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max']);
-  const contextHash = computeContextHash(CONTEXT, ['allowed_recipients', 'allowed_domains']);
-  const result = await sp.submitAttestation(userApiKey, {
+  const contextHash = computeScopeHash(CONTEXT, ['allowed_recipients', 'allowed_domains']);
+  const result = await sp.submitMandate(userApiKey, {
     profile_id: PROFILE_ID,
     group_id: personalGroupId,
     bounds: BOUNDS,

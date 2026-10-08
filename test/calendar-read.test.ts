@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? '';
@@ -98,10 +98,10 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: 'cal-read-e2e', apiKey });
 
   const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+  const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
   const gateContent = { intent: 'Read the primary calendar only for E2E.' };
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
     group_id: groupId,
     bounds: BOUNDS,

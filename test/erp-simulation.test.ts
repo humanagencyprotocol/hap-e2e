@@ -34,7 +34,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 17360;
 const GW_PORT = 17392;
@@ -128,8 +128,8 @@ describe.skipIf(!available)('ERP simulation: request → ticket → effect (real
       order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10,
     };
     const boundsHash = computeBoundsHash(bounds, BOUNDS_KEY_ORDER);
-    const contextHash = computeContextHash(CONTEXT, ['currency']);
-    const att = await sp.submitAttestation(apiKey, {
+    const contextHash = computeScopeHash(CONTEXT, ['currency']);
+    const att = await sp.submitMandate(apiKey, {
       profile_id: PROFILE_ID, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
       domain: 'owner', did: reg.user.did, commitment_mode: 'automatic',
       gate_content_hashes: hashGateContent(GATE_CONTENT),
@@ -203,7 +203,7 @@ describe.skipIf(!available)('ERP simulation: request → ticket → effect (real
 
     // Tickets the AS issued: create, false-value create, send, convert = 4.
     // The over-limit attempt was refused by the gateway and has none.
-    const { receipts } = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
+    const { tickets: receipts } = await sp.getMyTicketsPage(apiKey, { limit: 50 });
     const ticketIds = receipts.map((t) => String(t.id)).sort();
 
     // One to one: every ticket has exactly one ERP trace, every trace is a ticket.

@@ -50,7 +50,7 @@ beforeAll(async () => {
   const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
   const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: profile,
     group_id: groupId,
     domain: 'owner',
@@ -148,7 +148,7 @@ describe('Deferred Commitment', () => {
     const gh = hashGateContent({ intent: 'test' });
     const eh = hashExecutionContext({ profile, domain: 'owner' });
 
-    const att2 = await sp.submitAttestation(apiKey, {
+    const att2 = await sp.submitMandate(apiKey, {
       profile_id: profile,
       group_id: groupId,
       domain: 'owner',

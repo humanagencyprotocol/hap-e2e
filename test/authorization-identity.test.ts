@@ -31,7 +31,7 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ let foreignGroupId = '';
 let mcpClient: Client | null = null;
 
 const boundsHash = computeBoundsHash(SHARED_BOUNDS, BOUNDS_KEY_ORDER);
-const contextHash = computeContextHash(SHARED_CONTEXT, CONTEXT_KEY_ORDER);
+const contextHash = computeScopeHash(SHARED_CONTEXT, CONTEXT_KEY_ORDER);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -147,8 +147,8 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
   let idB = '';
 
   it('two ceremonies with identical bounds+context mint two ACTIVE grants', async () => {
-    const a = await sp.submitAttestation(apiKey, attestBody(INTENT_A) as Parameters<typeof sp.submitAttestation>[1]);
-    const b = await sp.submitAttestation(apiKey, attestBody(INTENT_B) as Parameters<typeof sp.submitAttestation>[1]);
+    const a = await sp.submitMandate(apiKey, attestBody(INTENT_A) as Parameters<typeof sp.submitMandate>[1]);
+    const b = await sp.submitMandate(apiKey, attestBody(INTENT_B) as Parameters<typeof sp.submitMandate>[1]);
     idA = a.authorization_id;
     idB = b.authorization_id;
 
@@ -167,7 +167,7 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
   });
 
   it('receipts name the governing grant by its id', async () => {
-    const r = await sp.postReceipt(apiKey, receiptBody(idA));
+    const r = await sp.postTicket(apiKey, receiptBody(idA));
     expect(r.status).toBe(201);
     const receipt = r.body.receipt as Record<string, unknown>;
     expect(receipt.authorizationId).toBe(idA);
@@ -177,13 +177,13 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
     await sp.revokeAuthorization(apiKey, idA, 'twin A no longer needed');
 
     // A is dead: no receipt can be issued against it.
-    const dead = await sp.postReceipt(apiKey, receiptBody(idA));
+    const dead = await sp.postTicket(apiKey, receiptBody(idA));
     expect(dead.status).toBe(403);
     const codes = (dead.body.errors as Array<{ code: string }>).map(e => e.code);
     expect(codes).toContain('ATTESTATION_REVOKED');
 
     // B — same fingerprint — is untouched.
-    const alive = await sp.postReceipt(apiKey, receiptBody(idB));
+    const alive = await sp.postTicket(apiKey, receiptBody(idB));
     expect(alive.status).toBe(201);
     expect((alive.body.receipt as Record<string, unknown>).authorizationId).toBe(idB);
 
@@ -192,7 +192,7 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
   });
 
   it('F3 — a revoked id can NEVER be resurrected by re-attesting', async () => {
-    const resurrect = await sp.submitAttestationRaw(apiKey, {
+    const resurrect = await sp.submitMandateRaw(apiKey, {
       ...attestBody(INTENT_A),
       authorization_id: idA,
     });
@@ -200,19 +200,19 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
     expect(resurrect.body.error).toBe('AUTHZ_REVOKED');
 
     // Still revoked afterwards — the attempt changed nothing.
-    const dead = await sp.postReceipt(apiKey, receiptBody(idA));
+    const dead = await sp.postTicket(apiKey, receiptBody(idA));
     expect(dead.status).toBe(403);
   });
 
   it('"I want it back" = a NEW ceremony with a NEW id — old id stays dead', async () => {
-    const again = await sp.submitAttestation(apiKey, attestBody(INTENT_A) as Parameters<typeof sp.submitAttestation>[1]);
+    const again = await sp.submitMandate(apiKey, attestBody(INTENT_A) as Parameters<typeof sp.submitMandate>[1]);
     expect(again.authorization_id).not.toBe(idA);
     expect(again.status).toBe('active');
 
-    const r = await sp.postReceipt(apiKey, receiptBody(again.authorization_id));
+    const r = await sp.postTicket(apiKey, receiptBody(again.authorization_id));
     expect(r.status).toBe(201);
 
-    const stillDead = await sp.postReceipt(apiKey, receiptBody(idA));
+    const stillDead = await sp.postTicket(apiKey, receiptBody(idA));
     expect(stillDead.status).toBe(403);
   });
 });
@@ -222,8 +222,8 @@ describe('Ceremony retry and identity integrity', () => {
     const id = mintAuthorizationId();
     const body = attestBody('RETRY: lost-response ceremony retry.', { authorization_id: id });
 
-    const first = await sp.submitAttestationRaw(apiKey, body);
-    const retry = await sp.submitAttestationRaw(apiKey, body);
+    const first = await sp.submitMandateRaw(apiKey, body);
+    const retry = await sp.submitMandateRaw(apiKey, body);
     expect(first.status).toBe(201);
     expect(retry.status).toBe(201);
     expect(retry.body.authorization_id).toBe(id);
@@ -233,16 +233,16 @@ describe('Ceremony retry and identity integrity', () => {
 
   it('F2 — content swap on an existing id is rejected with AUTHZ_MISMATCH; original intact', async () => {
     const id = mintAuthorizationId();
-    const original = await sp.submitAttestationRaw(apiKey, attestBody('SWAP: the original decision.', { authorization_id: id }));
+    const original = await sp.submitMandateRaw(apiKey, attestBody('SWAP: the original decision.', { authorization_id: id }));
     expect(original.status).toBe(201);
 
     // Same id, different intent → different decision → rejected.
-    const swap = await sp.submitAttestationRaw(apiKey, attestBody('SWAP: a very different decision.', { authorization_id: id }));
+    const swap = await sp.submitMandateRaw(apiKey, attestBody('SWAP: a very different decision.', { authorization_id: id }));
     expect(swap.status).toBe(409);
     expect(swap.body.error).toBe('AUTHZ_MISMATCH');
 
     // Same id, different commitment mode → also a different decision.
-    const flip = await sp.submitAttestationRaw(apiKey, attestBody('SWAP: the original decision.', {
+    const flip = await sp.submitMandateRaw(apiKey, attestBody('SWAP: the original decision.', {
       authorization_id: id,
       commitment_mode: 'review',
     }));
@@ -255,10 +255,10 @@ describe('Ceremony retry and identity integrity', () => {
 
   it('a foreign user cannot graft onto someone else\'s authorization id', async () => {
     const id = mintAuthorizationId();
-    const mine = await sp.submitAttestationRaw(apiKey, attestBody('FOREIGN: my grant.', { authorization_id: id }));
+    const mine = await sp.submitMandateRaw(apiKey, attestBody('FOREIGN: my grant.', { authorization_id: id }));
     expect(mine.status).toBe(201);
 
-    const theft = await sp.submitAttestationRaw(foreignApiKey, {
+    const theft = await sp.submitMandateRaw(foreignApiKey, {
       ...attestBody('FOREIGN: my grant.', { authorization_id: id }),
       group_id: foreignGroupId,
       did: foreignDid,
@@ -273,17 +273,17 @@ describe('Ceremony retry and identity integrity', () => {
     const id = mintAuthorizationId();
     const body = attestBody('RENEW: keep this grant alive.', { authorization_id: id });
 
-    const created = await sp.submitAttestationRaw(apiKey, body);
+    const created = await sp.submitMandateRaw(apiKey, body);
     expect(created.status).toBe(201);
     expect(created.body.version).toBe(1);
 
-    const renewed = await sp.submitAttestationRaw(apiKey, { ...body, renew: true });
+    const renewed = await sp.submitMandateRaw(apiKey, { ...body, renew: true });
     expect(renewed.status).toBe(201);
     expect(renewed.body.authorization_id).toBe(id);
     expect(renewed.body.version).toBe(2);
 
     // Renew is expiry-only: content is locked at creation.
-    const mutate = await sp.submitAttestationRaw(apiKey, {
+    const mutate = await sp.submitMandateRaw(apiKey, {
       ...attestBody('RENEW: sneak in new content.', { authorization_id: id }),
       renew: true,
     });
@@ -298,8 +298,8 @@ describe('Ceremony retry and identity integrity', () => {
     // one id, never a silent merge.
     const id = mintAuthorizationId();
     const [r1, r2] = await Promise.all([
-      sp.submitAttestationRaw(apiKey, attestBody('RACE: decision one.', { authorization_id: id })),
-      sp.submitAttestationRaw(apiKey, attestBody('RACE: decision two.', { authorization_id: id })),
+      sp.submitMandateRaw(apiKey, attestBody('RACE: decision one.', { authorization_id: id })),
+      sp.submitMandateRaw(apiKey, attestBody('RACE: decision two.', { authorization_id: id })),
     ]);
     const statuses = [r1.status, r2.status].sort();
     expect(statuses).toEqual([201, 409]);
@@ -312,21 +312,21 @@ describe('Ceremony retry and identity integrity', () => {
   });
 
   it('malformed or missing ids are rejected up front', async () => {
-    const missing = await sp.submitAttestationRaw(apiKey, (() => {
+    const missing = await sp.submitMandateRaw(apiKey, (() => {
       const b = attestBody('BAD: no id.');
       delete b.authorization_id;
       return b;
     })());
     expect(missing.status).toBe(400);
 
-    const malformed = await sp.submitAttestationRaw(apiKey, attestBody('BAD: wrong shape.', {
+    const malformed = await sp.submitMandateRaw(apiKey, attestBody('BAD: wrong shape.', {
       authorization_id: 'sha256:deadbeef:user-1',
     }));
     expect(malformed.status).toBe(400);
   });
 
   it('receipts reject legacy fingerprint fields and cross-check boundsHash', async () => {
-    const grant = await sp.submitAttestation(apiKey, attestBody('RECEIPT: wire contract.') as Parameters<typeof sp.submitAttestation>[1]);
+    const grant = await sp.submitMandate(apiKey, attestBody('RECEIPT: wire contract.') as Parameters<typeof sp.submitMandate>[1]);
 
     // Legacy field → 400 (the wire moved; fail loudly, not silently).
     const legacy = await fetch(`${SP_URL}/api/as/receipt`, {
@@ -342,7 +342,7 @@ describe('Ceremony retry and identity integrity', () => {
     expect(legacy.status).toBe(400);
 
     // boundsHash disagreeing with the record → 409 BOUNDS_HASH_MISMATCH.
-    const mismatch = await sp.postReceipt(apiKey, receiptBody(grant.authorization_id, {
+    const mismatch = await sp.postTicket(apiKey, receiptBody(grant.authorization_id, {
       boundsHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
     }));
     expect(mismatch.status).toBe(409);
@@ -367,7 +367,7 @@ describe('Gateway parity — identical-bounds twins keep separate intents end-to
   let twinB = '';
 
   async function attestAndPush(intent: string): Promise<string> {
-    const result = await sp.submitAttestation(gwApiKey, {
+    const result = await sp.submitMandate(gwApiKey, {
       profile_id: PROFILE_ID,
       group_id: gwGroupId,
       bounds: SHARED_BOUNDS,

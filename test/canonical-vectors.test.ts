@@ -13,10 +13,8 @@
  * This is a pure unit test: no server, no build, so it runs even when the
  * stack does not.
  *
- * Vocabulary note: the vector file is v0.7, which renamed "context" to
- * "scope". The wire is still v0.6, so `kind: "scope"` cases run through
- * computeContextHash and SCOPE_INVALID_VALUE is asserted as
- * CONTEXT_INVALID_VALUE. The bytes and hashes the vectors pin are unaffected.
+ * Vocabulary: v0.7 only. `kind: "scope"` cases run through computeScopeHash
+ * and assert SCOPE_INVALID_VALUE directly — no v0.6 code-name translation.
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
@@ -24,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
   canonicalRecords,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
   CanonicalValueError,
 } from '../src/helpers/crypto';
 
@@ -53,13 +51,6 @@ interface VectorFile {
   must_refuse: VectorCase[];
 }
 
-/** v0.7 vector code → the code this (v0.6-wire) helper throws. */
-function expectedCode(vc: VectorCase): string {
-  return vc.expected_error === 'SCOPE_INVALID_VALUE'
-    ? 'CONTEXT_INVALID_VALUE'
-    : String(vc.expected_error);
-}
-
 if (!VECTORS_PATH) {
   console.warn(
     '\n' + '='.repeat(78) +
@@ -84,12 +75,12 @@ describe.skipIf(!VECTORS_PATH)('canonical bounds & scope — spec conformance ve
   describe('canonical string + hash', () => {
     for (const vc of vectors.cases) {
       it(`${vc.id} (${vc.kind})`, () => {
-        const code = vc.kind === 'bounds' ? 'BOUNDS_INVALID_VALUE' : 'CONTEXT_INVALID_VALUE';
+        const code = vc.kind === 'bounds' ? 'BOUNDS_INVALID_VALUE' : 'SCOPE_INVALID_VALUE';
         expect(canonicalRecords(vc.values, vc.key_order, code)).toBe(vc.canonical);
 
         const hash = vc.kind === 'bounds'
           ? computeBoundsHash(vc.values, vc.key_order)
-          : computeContextHash(vc.values, vc.key_order);
+          : computeScopeHash(vc.values, vc.key_order);
         expect(hash).toBe(vc.hash);
       });
     }
@@ -103,7 +94,7 @@ describe.skipIf(!VECTORS_PATH)('canonical bounds & scope — spec conformance ve
         let thrown: unknown;
         try {
           if (vc.kind === 'bounds') computeBoundsHash(vc.values, vc.key_order);
-          else computeContextHash(vc.values, vc.key_order);
+          else computeScopeHash(vc.values, vc.key_order);
         } catch (err) {
           thrown = err;
         }
@@ -111,7 +102,7 @@ describe.skipIf(!VECTORS_PATH)('canonical bounds & scope — spec conformance ve
         expect(thrown, 'canonicalization should have refused this value').toBeInstanceOf(
           CanonicalValueError,
         );
-        expect((thrown as CanonicalValueError).code).toBe(expectedCode(vc));
+        expect((thrown as CanonicalValueError).code).toBe(vc.expected_error);
       });
     }
   });
@@ -134,7 +125,7 @@ describe('the rule that changes existing hashes', () => {
   });
 
   it('keeps an empty string distinct from an absent key', () => {
-    expect(canonicalRecords({ a: '' }, ['a'], 'CONTEXT_INVALID_VALUE')).toBe('a=');
-    expect(canonicalRecords({}, ['a'], 'CONTEXT_INVALID_VALUE')).toBe('');
+    expect(canonicalRecords({ a: '' }, ['a'], 'SCOPE_INVALID_VALUE')).toBe('a=');
+    expect(canonicalRecords({}, ['a'], 'SCOPE_INVALID_VALUE')).toBe('');
   });
 });

@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 import { ControlPlaneClient, PROFILES_DIR, newSecret, startControlPlane, startMcpServer, type StackOptions } from '../src/helpers/gateway-stack.js';
 import { localProfilesForAs } from '../src/helpers/local-profiles.js';
 
@@ -184,9 +184,9 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
   it('3. Delegation given: step 3 open with the sentence to say to the AI', async () => {
     const bounds = { profile: DELEGATION, read_access: 'unlimited', brief_daily_max: 5, mandate_daily_max: 30 };
     const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max']);
-    const contextHash = computeContextHash({}, []);
+    const contextHash = computeScopeHash({}, []);
     const gate = { intent: 'E2E: let my AI set itself up.' };
-    const att = await sp.submitAttestation(user.apiKey, {
+    const att = await sp.submitMandate(user.apiKey, {
       profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
       domain: 'owner', did: user.user.did, commitment_mode: 'review',
       gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ g: 1 }),

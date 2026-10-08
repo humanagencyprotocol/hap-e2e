@@ -40,7 +40,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 17860;
 const GW_PORT = 17892;
@@ -81,9 +81,9 @@ let mcpClient: Client;
 
 async function grant(profileId: string, keyOrder: string[], bounds: Record<string, unknown>, context: Record<string, unknown>): Promise<string> {
   const boundsHash = computeBoundsHash(bounds, keyOrder);
-  const contextHash = computeContextHash(context, Object.keys(context));
+  const contextHash = computeScopeHash(context, Object.keys(context));
   const gate = { intent: `E2E simulation-visibility mandate for ${profileId}` };
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: profileId, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
     domain: 'owner', did, commitment_mode: 'automatic',
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ profile_id: profileId }),

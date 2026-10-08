@@ -26,7 +26,7 @@ import { SPClient } from '../src/helpers/sp-client.js';
 import {
   hashGateContent,
   hashExecutionContext,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -96,9 +96,9 @@ describe('Authorization Bounds — Attestation', () => {
       amount: TIGHT_BOUNDS.amount_max,
       currency: CONTEXT.currency,
     });
-    const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+    const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
-    const result = await sp.submitAttestation(agentApiKey, {
+    const result = await sp.submitMandate(agentApiKey, {
       profile_id: PROFILE_ID,
       group_id: groupId,
       bounds: TIGHT_BOUNDS,
@@ -124,7 +124,7 @@ describe('Authorization Bounds — Attestation', () => {
 
 describe('Authorization Bounds — Receipt Enforcement', () => {
   it('$20 receipt succeeds (under per-tx max of $25)', async () => {
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -138,7 +138,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
   });
 
   it('$30 receipt fails — exceeds per-tx amount_max of $25', async () => {
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -156,7 +156,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
   });
 
   it('second $20 receipt succeeds (cumulative: $40, under daily max $50)', async () => {
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -178,7 +178,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
   });
 
   it('third $20 receipt fails — cumulative $60 exceeds daily amount_max of $50', async () => {
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -197,7 +197,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
   it('receipt response includes cumulative state values', async () => {
     // Daily amount is $40 (from two $20 successes). A $5 transaction stays under
     // the $50 daily ceiling but may hit the daily count limit (3) — both valid.
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -226,7 +226,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     // actionType is the cumulative-bucket key. The AS used to derive a missing
     // one from the tool name (forbidden by protocol.md → Receipt Request rules);
     // it now fails closed. A rejected request consumes no bounds.
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',

@@ -33,7 +33,7 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 17460;
 const GW_PORT = 17492;
@@ -89,9 +89,9 @@ async function grant(key: ProfileKey, kind: 'setup' | 'work'): Promise<string> {
   const p = PROFILES[key];
   const bounds = { profile: p.id, ...p[kind] };
   const boundsHash = computeBoundsHash(bounds, [...p.keyOrder]);
-  const contextHash = computeContextHash(p.ctx, [...p.ctxOrder]);
+  const contextHash = computeScopeHash(p.ctx, [...p.ctxOrder]);
   const gate = { intent: `E2E ${kind} mandate for ${p.short}` };
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: p.id, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
     domain: 'owner', did, commitment_mode: 'automatic',
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ kind }),
@@ -282,7 +282,7 @@ describe.skipIf(!available)('simulation setup + first case (real AS + gateway + 
 
     // 3 loads + the connector-refused second load + log_activity + create_quote + send_message = 7.
     // Gateway refusals (load under the work mandate, reply outside the domains) have none.
-    const { receipts } = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
+    const { tickets: receipts } = await sp.getMyTicketsPage(apiKey, { limit: 50 });
     const tickets = receipts.map((t) => String(t.id)).sort();
     expect(tickets).toHaveLength(7);
     expect([...traces].sort()).toEqual(tickets);

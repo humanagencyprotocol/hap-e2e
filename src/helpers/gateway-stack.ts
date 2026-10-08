@@ -22,7 +22,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ProcessManager } from './process-manager';
 import type { SPClient } from './sp-client';
-import { computeBoundsHash, computeContextHash, hashExecutionContext, hashGateContent } from './crypto';
+import { computeBoundsHash, computeScopeHash, hashExecutionContext, hashGateContent } from './crypto';
+import { PROFILE_V07, profileHashFor } from './profiles';
 
 // src/helpers/ → src → hap-e2e → workspace root
 export const ROOT = join(import.meta.dirname, '..', '..', '..');
@@ -39,7 +40,7 @@ export const MANIFESTS_DIR = join(GW_DIR, 'content', 'integrations');
 export const SEED_API_KEY = 'local-dev-key';
 export const SEED_DID = 'did:key:local-admin';
 
-export const RECORDS_PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
+export const RECORDS_PROFILE_ID = PROFILE_V07.records;
 const RECORDS_BOUNDS_KEY_ORDER = ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access'];
 
 /** Raw Ed25519 keypair in the hex form the AS reads from SP_PRIVATE_KEY / SP_PUBLIC_KEY. */
@@ -230,7 +231,7 @@ export async function seedOperatorGroup(sp: SPClient, userId = 'local-admin'): P
 export async function grantRecordsMandate(
   sp: SPClient,
   opts: { apiKey: string; did: string; intent: string; mode: 'automatic' | 'review'; groupId?: string; writeDailyMax?: number },
-): Promise<{ authorizationId: string; boundsHash: string; contextHash: string; gateContent: { intent: string } }> {
+): Promise<{ authorizationId: string; boundsHash: string; scopeHash: string; gateContent: { intent: string } }> {
   const groupId = opts.groupId ?? await sp.getPersonalGroupId(opts.apiKey);
   const bounds = {
     profile: RECORDS_PROFILE_ID,
@@ -240,21 +241,22 @@ export async function grantRecordsMandate(
     archive_access: 'allowed',
   };
   const boundsHash = computeBoundsHash(bounds, RECORDS_BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash({}, []);
+  const scopeHash = computeScopeHash({}, []);
   const gateContent = { intent: opts.intent };
-  const att = await sp.submitAttestation(opts.apiKey, {
+  const att = await sp.submitMandate(opts.apiKey, {
     profile_id: RECORDS_PROFILE_ID,
+    profile_hash: profileHashFor(RECORDS_PROFILE_ID, PROFILES_DIR),
     group_id: groupId,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: scopeHash,
     domain: 'owner',
     did: opts.did,
     commitment_mode: opts.mode,
     gate_content_hashes: hashGateContent(gateContent),
     execution_context_hash: hashExecutionContext({ profile: RECORDS_PROFILE_ID, domain: 'owner' }),
   });
-  return { authorizationId: att.authorization_id, boundsHash, contextHash, gateContent };
+  return { authorizationId: att.authorization_id, boundsHash, scopeHash, gateContent };
 }
 
 export function textOf(result: unknown): string {
