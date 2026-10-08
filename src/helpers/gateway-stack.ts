@@ -27,7 +27,9 @@ import { computeBoundsHash, computeContextHash, hashExecutionContext, hashGateCo
 // src/helpers/ → src → hap-e2e → workspace root
 export const ROOT = join(import.meta.dirname, '..', '..', '..');
 export const GW_DIR = join(ROOT, 'suveren-gateway');
-export const PROFILES_DIR = join(ROOT, 'hap-profiles');
+/** The sibling hap-profiles checkout, or HAP_E2E_PROFILES_DIR (e.g. a worktree of an
+ *  unmerged profile branch, while the sibling checkout is on another branch). */
+export const PROFILES_DIR = process.env.HAP_E2E_PROFILES_DIR ?? join(ROOT, 'hap-profiles');
 export const RECORDS_DIST = join(ROOT, 'hap-records-mcp', 'dist', 'index.js');
 export const MANIFESTS_DIR = join(GW_DIR, 'content', 'integrations');
 

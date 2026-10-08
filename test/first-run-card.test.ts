@@ -146,7 +146,24 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
     await page.locator('text=Delegation').first().waitFor({ timeout: 15_000 });
     // Straight into the Delegation mandate, not the grid of every connector.
     expect(await page.locator('body').innerText()).not.toMatch(/Choose what to authorize|Pick a system/i);
+    // The limits start at the profile's own defaults (delegation@0.2), not "Select…" and 0.
+    await page.locator('select').first().waitFor({ timeout: 10_000 });
+    expect(await page.locator('select').first().inputValue()).toBe('unlimited');
+    const counts = await page.locator('input[type="number"], input[inputmode="numeric"]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+    expect(counts).toEqual(['5', '30']);
     await shot('2b-delegation-opened');
+
+    // Next: the intent starts with the setup built-in's starter text; no AI assistant
+    // is set up here, so there is no chat column — only the pointer to Settings.
+    await page.locator('button:has-text("Next")').first().click();
+    await page.locator('textarea.intent-textarea').waitFor({ timeout: 10_000 });
+    const intent = await page.locator('textarea.intent-textarea').inputValue();
+    expect(intent).toMatch(/^Why — With test data only/);
+    expect(intent).toContain('You only propose; nothing happens until I approve it in the Suveren Gateway.');
+    expect(await page.locator('.intent-pane.chat').count()).toBe(0);
+    await page.locator('text=Set up an AI assistant in Settings').waitFor();
+    expect(await page.locator('button:has-text("Check against my other grants")').count()).toBe(0);
+    await shot('2c-delegation-intent');
   });
 
   it('3. Delegation given: step 3 open with the sentence to say to the AI', async () => {
