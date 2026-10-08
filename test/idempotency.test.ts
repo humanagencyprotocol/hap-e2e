@@ -18,6 +18,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { hashGateContent, hashExecutionContext, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
+
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 // The production gateway's receipt client — imported from the gateway source so
 // the integration test exercises the SAME retry/idempotency code that ships,
 // not a re-implementation. It is dependency-free (uses only globalThis.fetch),
@@ -26,7 +29,7 @@ import { SPClient as GatewaySPClient } from '../../suveren-gateway/apps/mcp-serv
 
 const SP_PORT = 15401;
 const SP_URL = `http://localhost:${SP_PORT}`;
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILE_ID = PROFILE_V07.charge;
 
 const pm = new ProcessManager();
 const sp = new SPClient(SP_URL);
@@ -46,9 +49,10 @@ beforeAll(async () => {
 
   const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: groupId,
     bounds: { profile: PROFILE_ID, amount_max: 100, amount_daily_max: 500, amount_monthly_max: 5000, transaction_count_daily_max: 20 },
-    context_hash: computeScopeHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
+    scope_hash: computeScopeHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
     domain: 'owner',
     did,
     commitment_mode: 'automatic',
@@ -80,7 +84,7 @@ describe('M3 — automatic-mode idempotency', () => {
     receiptBody.authorizationId = authorizationId;
     const r = await sp.postTicket(apiKey, receiptBody);
     expect(r.status).toBe(201);
-    const receipt = r.body.receipt as Record<string, unknown>;
+    const receipt = r.body.ticket as Record<string, unknown>;
     expect(receipt.id).toBeTruthy();
     firstReceiptId = receipt.id as string;
     const cum = receipt.cumulativeState as { daily: { amount: number; count: number } };
@@ -92,7 +96,7 @@ describe('M3 — automatic-mode idempotency', () => {
     const r = await sp.postTicket(apiKey, receiptBody);
     expect(r.status).toBe(200);
     expect(r.body.idempotent).toBe(true);
-    const receipt = r.body.receipt as Record<string, unknown>;
+    const receipt = r.body.ticket as Record<string, unknown>;
     // Same receipt id — not a freshly minted one.
     expect(receipt.id).toBe(firstReceiptId);
     // Cumulative state is the original (count still 1, amount still 30).
@@ -107,7 +111,7 @@ describe('M3 — automatic-mode idempotency', () => {
       idempotencyKey: `${key}-DISTINCT`,
     });
     expect(r.status).toBe(201);
-    const receipt = r.body.receipt as Record<string, unknown>;
+    const receipt = r.body.ticket as Record<string, unknown>;
     expect(receipt.id).not.toBe(firstReceiptId);
     const cum = receipt.cumulativeState as { daily: { amount: number; count: number } };
     // Now the second genuine execution: count 2, amount 60.
@@ -119,7 +123,7 @@ describe('M3 — automatic-mode idempotency', () => {
     // The key is required on the synchronous (automatic) path so exactly-once is
     // guaranteed, not opt-in. Bypass the SPClient helper (which auto-defaults a
     // key) with a raw fetch to genuinely omit it.
-    const res = await fetch(`${SP_URL}/api/as/receipt`, {
+    const res = await fetch(`${SP_URL}/api/as/ticket`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
       body: JSON.stringify({
@@ -163,8 +167,8 @@ describe('M3 — automatic-mode idempotency', () => {
 
     const after = (await sp.getGroupTickets(apiKey, groupId)).tickets.length;
     expect(after - before).toBe(1); // exactly one record for one logical execution
-    expect((retry.body.receipt as { id: string }).id).toBe(
-      (first.body.receipt as { id: string }).id,
+    expect((retry.body.ticket as { id: string }).id).toBe(
+      (first.body.ticket as { id: string }).id,
     );
   });
 
@@ -196,8 +200,8 @@ describe('M3 — automatic-mode idempotency', () => {
     const replay = await sp.postTicket(apiKey, mk(7));
     expect(replay.status).toBe(200);
     expect(replay.body.idempotent).toBe(true);
-    expect((replay.body.receipt as { id: string }).id).toBe(
-      (first.body.receipt as { id: string }).id,
+    expect((replay.body.ticket as { id: string }).id).toBe(
+      (first.body.ticket as { id: string }).id,
     );
   });
 });
@@ -231,9 +235,10 @@ describe('M3 seam — real gateway client + real AS + lost response', () => {
     const gwGroupId = await sp.getPersonalGroupId(gwApiKey);
     const att = await sp.submitMandate(gwApiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: gwGroupId,
       bounds: { profile: PROFILE_ID, amount_max: 100, amount_daily_max: 500, amount_monthly_max: 5000, transaction_count_daily_max: 20 },
-      context_hash: computeScopeHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
+      scope_hash: computeScopeHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
       domain: 'owner',
       did: user.user.did,
       commitment_mode: 'automatic',
@@ -251,7 +256,7 @@ describe('M3 seam — real gateway client + real AS + lost response', () => {
     // the response — it's dropped, as a real socket reset would.
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/as/receipt')) {
+      if (url.includes('/api/as/ticket')) {
         receiptAttempts++;
         if (receiptAttempts === 1) {
           await realFetch(input as Parameters<typeof realFetch>[0], init); // AS commits + counts
