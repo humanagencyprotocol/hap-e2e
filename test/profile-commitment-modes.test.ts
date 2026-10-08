@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash, computeProfileHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18300;
 const SP_URL = `http://localhost:${SP_PORT}`;
@@ -35,7 +35,7 @@ function testProfile(id: string, commitment_modes?: string[]) {
         profile: { type: 'string', required: true },
         write_daily_max: {
           type: 'number', required: true, displayName: 'Writes per day', description: 'Test fixture.',
-          unit: 'count', boundType: { kind: 'cumulative', of: 'count', window: 'daily' },
+          unit: 'count', boundType: { kind: 'cumulative_count', window: 'daily' }, appliesTo: ['write'],
         },
       },
     },
@@ -56,13 +56,15 @@ let apiKey: string;
 let did: string;
 let groupId: string;
 
-function attest(profileId: string, commitment_mode: string) {
+function attest(profileId: string, commitment_mode: string, profileDoc?: Record<string, unknown>) {
   const bounds = { profile: profileId, write_daily_max: 5 };
   return sp.submitMandateRaw(apiKey, {
     authorization_id: `authz_${randomUUID()}`,
-    profile_id: profileId, group_id: groupId, bounds,
+    profile_id: profileId,
+    ...(profileDoc ? { profile_hash: computeProfileHash({ ...profileDoc, id: profileId }) } : {}),
+    group_id: groupId, bounds,
     bounds_hash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-    context_hash: computeScopeHash({}, []),
+    scope_hash: computeScopeHash({}, []),
     domain: 'owner', did, commitment_mode,
     gate_content_hashes: hashGateContent(GATE_CONTENT),
     execution_context_hash: hashExecutionContext({ profile: profileId, commitment_mode }),
@@ -72,6 +74,8 @@ function attest(profileId: string, commitment_mode: string) {
 describe('profile commitment_modes (real AS)', () => {
   let reviewOnly: string;
   let unrestricted: string;
+  let reviewOnlyDoc: Record<string, unknown>;
+  let unrestrictedDoc: Record<string, unknown>;
 
   beforeAll(async () => {
     await pm.startSP(SP_PORT);
@@ -79,8 +83,10 @@ describe('profile commitment_modes (real AS)', () => {
     apiKey = user.apiKey;
     did = user.user.did;
     groupId = await sp.getPersonalGroupId(apiKey);
-    reviewOnly = (await sp.createProfile(apiKey, testProfile('review-only-fixture@1.0', ['review']))).profile_id;
-    unrestricted = (await sp.createProfile(apiKey, testProfile('unrestricted-fixture@1.0'))).profile_id;
+    reviewOnlyDoc = testProfile('review-only-fixture@1.0', ['review']);
+    unrestrictedDoc = testProfile('unrestricted-fixture@1.0');
+    reviewOnly = (await sp.createProfile(apiKey, reviewOnlyDoc)).profile_id;
+    unrestricted = (await sp.createProfile(apiKey, unrestrictedDoc)).profile_id;
   }, 300_000);
 
   afterAll(async () => {
@@ -93,20 +99,21 @@ describe('profile commitment_modes (real AS)', () => {
   });
 
   it('review-only profile: an automatic mandate is refused by the AS, nothing signed', async () => {
-    const r = await attest(reviewOnly, 'automatic');
+    const r = await attest(reviewOnly, 'automatic', reviewOnlyDoc);
     expect(r.status).toBe(422);
-    expect(r.body.error).toBe('commitment_mode_not_allowed');
-    expect(r.body.allowed).toEqual(['review']);
+    const err = (r.body.errors as Array<Record<string, unknown>>)[0];
+    expect(err.code).toBe('commitment_mode_not_allowed');
+    expect(err.allowed).toEqual(['review']);
     expect(r.body.blob).toBeUndefined();
   });
 
   it('review-only profile: a review mandate is signed', async () => {
-    const r = await attest(reviewOnly, 'review');
+    const r = await attest(reviewOnly, 'review', reviewOnlyDoc);
     expect(r.status, JSON.stringify(r.body)).toBe(201);
   });
 
   it('a profile without the field: both modes are signed, as before', async () => {
-    expect((await attest(unrestricted, 'automatic')).status).toBe(201);
-    expect((await attest(unrestricted, 'review')).status).toBe(201);
+    expect((await attest(unrestricted, 'automatic', unrestrictedDoc)).status).toBe(201);
+    expect((await attest(unrestricted, 'review', unrestrictedDoc)).status).toBe(201);
   });
 });
