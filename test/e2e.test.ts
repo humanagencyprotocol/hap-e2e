@@ -8,6 +8,7 @@ import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 import { ctx } from '../src/helpers/context.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ const GW_PORT = 13030;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILE_ID = PROFILE_V07.charge;
 const PROFILE_SHORT = 'charge';
 const EXEC_PATH = 'charge-routine';
 
@@ -160,11 +161,12 @@ describe('Attestation', () => {
 
     const result = await sp.submitMandate(ctx.agentUser!.apiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: ctx.groupId!,
       bounds: BOUNDS,
       bounds_hash: boundsHash,
-      context_hash: contextHash,
-      // v0.4 team group: the AS resolves the member's domain to their userId.
+      scope_hash: contextHash,
+      // team group: the AS resolves the member's domain to their userId.
       domain: ctx.agentUser!.id,
       did: ctx.agentUser!.did,
       commitment_mode: 'automatic',
