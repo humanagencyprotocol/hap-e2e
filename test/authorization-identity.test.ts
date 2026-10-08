@@ -180,7 +180,7 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
     const dead = await sp.postTicket(apiKey, receiptBody(idA));
     expect(dead.status).toBe(403);
     const codes = (dead.body.errors as Array<{ code: string }>).map(e => e.code);
-    expect(codes).toContain('ATTESTATION_REVOKED');
+    expect(codes).toContain('MANDATE_REVOKED');
 
     // B — same fingerprint — is untouched.
     const alive = await sp.postTicket(apiKey, receiptBody(idB));

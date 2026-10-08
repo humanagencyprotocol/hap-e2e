@@ -56,7 +56,7 @@ const BOUNDS = {
   archive_access: 'none',
 };
 
-// records has no contextSchema → empty context, hashes the sha256 of "".
+// records has no scopeSchema → empty scope, hashes the sha256 of "".
 const CONTEXT: Record<string, string> = {};
 const CONTEXT_KEY_ORDER: string[] = [];
 

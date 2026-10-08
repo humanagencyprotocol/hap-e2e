@@ -87,7 +87,7 @@ function testProfile(id: string) {
         },
       },
     },
-    contextSchema: { keyOrder: [], fields: {} },
+    scopeSchema: { keyOrder: [], fields: {} },
     executionContextSchema: {
       fields: {
         action_type: {

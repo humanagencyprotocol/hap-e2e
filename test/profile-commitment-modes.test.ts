@@ -39,7 +39,7 @@ function testProfile(id: string, commitment_modes?: string[]) {
         },
       },
     },
-    contextSchema: { keyOrder: [], fields: {} },
+    scopeSchema: { keyOrder: [], fields: {} },
     executionContextSchema: {
       fields: {
         action_type: { source: 'declared', description: 'write', required: true, constraint: { type: 'string', enforceable: ['enum'] } },

@@ -76,7 +76,7 @@ const BOUNDS = {
   archive_access: 'none',
 };
 
-// records has no contextSchema → empty context.
+// records has no scopeSchema → empty scope.
 const CONTEXT: Record<string, string> = {};
 const CONTEXT_KEY_ORDER: string[] = [];
 

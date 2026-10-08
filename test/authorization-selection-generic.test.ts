@@ -3,11 +3,11 @@
  * doc/read-bounds-enforcement-plan.md).
  *
  * The selection logic must be PROFILE-AGNOSTIC: driven by each profile's
- * declared contextSchema, with no hardcoded field names. authorization-
+ * declared scopeSchema, with no hardcoded field names. authorization-
  * selection.test.ts proves most-specific-wins on the customers profile
  * (scope field: contact_type). This file proves the SAME engine behaves
  * correctly on a SECOND, structurally different profile — records@0.4 — which
- * has a different bounds schema and, crucially, NO contextSchema at all.
+ * has a different bounds schema and, crucially, NO scopeSchema at all.
  *
  * With no scope dimension, no grant can ever be "more specific" than another,
  * so every overlap is incomparable → the fail-safe branch (§7.2) must fire:
@@ -55,7 +55,7 @@ const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
 // records@0.4 bounds schema — deliberately different shape from customers, and
-// there is NO contextSchema (empty context), which is the whole point.
+// there is NO scopeSchema (empty scope), which is the whole point.
 const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access'];
 const BOUNDS = {
   profile: PROFILE_ID,

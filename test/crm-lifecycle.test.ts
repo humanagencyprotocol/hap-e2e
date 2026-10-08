@@ -7,6 +7,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -15,24 +16,24 @@ const GW_PORT = 17030;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-// customers@0.5 — the CRM read gate binds to `read_access`, a bound that
-// only exists from 0.5 onward. A 0.4 grant cannot satisfy it, so every CRM
-// read fails closed under 0.4.
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.5';
+// customers@0.9 (v0.7 wire) — the CRM read gate binds to `read_access`.
+const PROFILE_ID = PROFILE_V07.customers;
 const PROFILE_SHORT = 'customers';
 const EXEC_PATH = PROFILE_ID;
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'write_daily_max', 'delete_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['contact_type'];
 
 const BOUNDS = {
   profile: PROFILE_ID,
   read_access: 'unlimited',
+  export_access: 'none',
   write_daily_max: 10,
   delete_daily_max: 5,
+  setup_daily_max: 0,
 };
 
 const CONTEXT = {
@@ -111,10 +112,11 @@ describe('Authorization', () => {
 
     const result = await sp.submitMandate(user.apiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: personalGroupId,
       bounds: BOUNDS,
       bounds_hash: boundsHash,
-      context_hash: contextHash,
+      scope_hash: contextHash,
       domain: 'owner',
       did: user.did,
       commitment_mode: 'automatic',
@@ -224,7 +226,7 @@ describe('Gateway Configuration', () => {
 // Declared context: contact_type = 'customer,lead'.
 // create_contact maps tool arg `type` → execution context `contact_type`.
 // Calling with type='vendor' violates the subset constraint and must be
-// rejected locally by the Gatekeeper (the SP holds only context_hash).
+// rejected locally by the Gatekeeper (the SP holds only scope_hash).
 //
 // Placed BEFORE any write ops to avoid an unrelated known bug that disables
 // CRM write tools after several successful calls.
