@@ -24,6 +24,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17560;
 const GW_PORT = 17592;
@@ -32,7 +33,7 @@ const GW_URL = `http://localhost:${GW_PORT}`;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const SALES = 'github.com/humanagencyprotocol/hap-profiles/sales@0.2';
+const SALES = PROFILE_V07.sales;
 const SALES_KEYS = ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max', 'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'];
 const SALES_WORK = { read_access: 'unlimited', value_max: 1000, discount_max: 10, order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10, setup_daily_max: 0 };
 const SALES_SETUP = { read_access: 'none', value_max: 0, discount_max: 0, order_value_daily_max: 0, quote_daily_max: 0, send_daily_max: 0, order_daily_max: 0, setup_daily_max: 1 };
@@ -55,7 +56,7 @@ async function grantSales(bounds: Record<string, unknown>) {
   const contextHash = computeScopeHash(ctx, ['currency']);
   const gate = { intent: 'E2E simulation mode' };
   const att = await sp.submitMandate(apiKey, {
-    profile_id: SALES, group_id: groupId, bounds: full, bounds_hash: boundsHash, context_hash: contextHash,
+    profile_id: SALES, profile_hash: profileHashFor(SALES, PROFILES_DIR), group_id: groupId, bounds: full, bounds_hash: boundsHash, scope_hash: contextHash,
     domain: 'owner', did, commitment_mode: 'automatic',
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ b: Object.keys(bounds).length }),
   });
