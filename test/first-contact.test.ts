@@ -86,6 +86,12 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
   it('no Delegation mandate: the instructions name the one step a person takes; no ungated tool', async () => {
     const section = gettingStarted();
     expect(section).toMatch(/create a "Delegation" mandate in the Suveren Gateway at http:\/\/localhost:\d+/);
+    // Always told, in every session: never the gateway page, the key or an approval; only the Suveren tools.
+    const instructions = agent.getInstructions() ?? '';
+    expect(instructions).toContain('=== RULES ===');
+    expect(instructions).toMatch(/Never open or operate the Suveren Gateway's web page/);
+    expect(instructions).toMatch(/Never approve a proposal/);
+    expect(instructions).toMatch(/No terminal, HTTP or browser calls to the gateway's ports/);
     expect(section).not.toMatch(/simulat|\btest/i);
     const names = (await agent.listTools()).tools.map((t) => t.name);
     expect(names).not.toContain('debug_test_tool');
@@ -108,5 +114,21 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
     const text = (r.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('\n');
     expect(r.isError).not.toBe(true);
     expect(text).toMatch(/\*\*Approvals:\*\* every mandate and brief you propose waits until the person approves it in the Suveren Gateway at http:\/\/localhost:\d+\/approvals/);
+    // The email simulator is installed but not activated here: named, with where to activate it.
+    expect(text).toMatch(/\*\*Available but not activated:\*\* [^\n]*Email \(simulation\)/);
+    expect(text).toMatch(/Never ask for, read or type the person's API key/);
+
+    // Before any mandate for them, the guides already give the exact names a valid proposal needs.
+    const read = async (topic: string) => (await agent.callTool({ name: 'setup__get_guide', arguments: { topic } }))
+      .content as Array<{ text?: string }>;
+    const mandates = (await read('mandates')).map((c) => c.text ?? '').join('\n');
+    expect(mandates).toMatch(/### erp — profile `[^`]*sales@[^`]*`/);
+    expect(mandates).toMatch(/- `value_max`/);
+    expect(mandates).toMatch(/\*\*Scope:\*\*\n- `currency`/);
+    expect(mandates).not.toContain('<!-- generated');
+    const pkg = (await read('package')).map((c) => c.text ?? '').join('\n');
+    expect(pkg).toContain('## The package format');
+    expect(pkg).toMatch(/"customers"/);
+    expect(pkg).toMatch(/"products"/);
   }, 60_000);
 });
