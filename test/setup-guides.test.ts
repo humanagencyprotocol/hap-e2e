@@ -19,6 +19,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 18600;
 const GW_PORT = 18601;
@@ -26,8 +27,8 @@ const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
-const DELEGATION = 'github.com/humanagencyprotocol/hap-profiles/delegation@0.1';
-const available = existsSync(join(PROFILES_DIR, 'delegation', '0.1.profile.json'))
+const DELEGATION = PROFILE_V07.delegation;
+const available = existsSync(join(PROFILES_DIR, 'delegation', '0.3.profile.json'))
   && existsSync(join(ROOT, 'suveren-gateway', 'content', 'guides'));
 
 const pm = new ProcessManager();
@@ -72,7 +73,7 @@ describe.skipIf(!available)('setup guides (real AS + gateway in simulation mode)
     const gate = { intent: 'E2E: read the setup guides.' };
     grantGuides = async () => {
       const att = await sp.submitMandate(reg.apiKey, {
-        profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+        profile_id: DELEGATION, profile_hash: profileHashFor(DELEGATION, PROFILES_DIR), group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
         domain: 'owner', did: reg.user.did, commitment_mode: 'review',
         gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ g: 1 }),
       });
