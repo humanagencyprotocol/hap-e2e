@@ -132,3 +132,13 @@ export function computeBoundsHash(bounds: Record<string, unknown>, keyOrder: str
 export function computeContextHash(context: Record<string, unknown>, keyOrder: string[]): string {
   return sha256Hash(canonicalRecords(context, keyOrder, 'CONTEXT_INVALID_VALUE'));
 }
+
+// ─── v0.7 aliases ────────────────────────────────────────────────────────────
+
+/**
+ * v0.7 alias for computeContextHash — computes scope hash instead of context hash.
+ * Both use the same algorithm; only the terminology changed in v0.7.
+ */
+export function computeScopeHash(scope: Record<string, unknown>, keyOrder: string[]): string {
+  return sha256Hash(canonicalRecords(scope, keyOrder, 'CONTEXT_INVALID_VALUE'));
+}
