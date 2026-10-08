@@ -22,19 +22,20 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17160;
 const GW_PORT = 17092;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.6';
+const PROFILE_ID = PROFILE_V07.customers;
 const EXEC_PATH = PROFILE_ID;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-// customers@0.6 boundsSchema keyOrder — export_access sits after read_access.
-const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max'];
+// v0.7 boundsSchema keyOrder — export_access sits after read_access, setup_daily_max at the end.
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['contact_type'];
 const CONTEXT = { contact_type: 'customer,lead' };
 
@@ -60,16 +61,18 @@ async function authorize(readAccess: string, exportAccess: string) {
     export_access: exportAccess,
     write_daily_max: 5,
     delete_daily_max: 1,
+    setup_daily_max: 0,
   };
   const boundsHash = computeBoundsHash(bounds, BOUNDS_KEY_ORDER);
   const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
   const result = await sp.submitMandate(user.apiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: personalGroupId,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'owner',
     did: user.did,
     commitment_mode: 'automatic',

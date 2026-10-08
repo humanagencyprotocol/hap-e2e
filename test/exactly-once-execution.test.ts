@@ -26,9 +26,11 @@ import { ProcessManager } from '../src/helpers/process-manager';
 import { SPClient } from '../src/helpers/sp-client';
 import { GatewayClient } from '../src/helpers/gateway-client';
 import { computeBoundsHash, hashGateContent, hashExecutionContext } from '../src/helpers/crypto';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles';
 
 const SP_PORT = 16410;
 const GW_PORT = 16440;
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
 const pm = new ProcessManager();
 let sp: SPClient;
@@ -39,7 +41,7 @@ let groupId: string;
 let mcpClient: Client;
 let dataDir: string;
 
-const PROFILE = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
+const PROFILE = PROFILE_V07.customers;
 
 /** Count CRM contacts by exact name — the real downstream effect. */
 function contactsNamed(name: string): number {
@@ -90,17 +92,21 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: `api-key=${apiKey}`, apiKey });
 
   // Review-mode grant under the customers profile → every write is a proposal.
-  const bounds = { profile: PROFILE, write_daily_max: 10, delete_daily_max: 5 };
-  const boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
+  const bounds = {
+    profile: PROFILE, read_access: 'unlimited', export_access: 'none',
+    write_daily_max: 10, delete_daily_max: 5, setup_daily_max: 0,
+  };
+  const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max']);
   const contextHash = computeBoundsHash({}, []);
   const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE,
+    profile_hash: profileHashFor(PROFILE, PROFILES_DIR),
     group_id: groupId,
     domain: 'owner',
     did: userDid,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     gate_content_hashes: hashGateContent({ intent: 'test' }),
     execution_context_hash: hashExecutionContext({ profile: PROFILE, domain: 'owner' }),
     commitment_mode: 'review',
