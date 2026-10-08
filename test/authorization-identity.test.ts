@@ -33,6 +33,7 @@ import {
   computeBoundsHash,
   computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -41,8 +42,11 @@ const GW_PORT = 15502;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/email@0.4';
-const BOUNDS_KEY_ORDER = ['profile', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max'];
+const PROFILE_ID = PROFILE_V07.email;
+// v0.7: read_daily_max is gone (replaced by read_access, declared: false,
+// never enforced -- CONFORMANCE.md); read_access and setup_daily_max are new
+// and required:true.
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['allowed_recipients', 'allowed_domains'];
 
 const ROOT = join(import.meta.dirname, '..', '..');
@@ -51,7 +55,9 @@ const PROFILES_DIR = join(ROOT, 'hap-profiles');
 // The incident shape: IDENTICAL bounds and context — only the intent (and the
 // human decision behind it) differs. Under fingerprint identity these were one
 // frame; under per-ceremony identity they are two independent grants.
-const SHARED_BOUNDS = { profile: PROFILE_ID, recipient_max: 2, send_daily_max: 10 };
+const SHARED_BOUNDS = {
+  profile: PROFILE_ID, read_access: 'unlimited', recipient_max: 2, send_daily_max: 10, setup_daily_max: 0,
+};
 const SHARED_CONTEXT = { allowed_recipients: 'twin@sublin.app' };
 const INTENT_A = 'TWIN-A: couple communication — friendly and funny.';
 const INTENT_B = 'TWIN-B: business outreach — formal tone only.';
@@ -81,10 +87,11 @@ function sleep(ms: number): Promise<void> {
 function attestBody(intent: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: groupId,
     bounds: SHARED_BOUNDS,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'owner',
     did,
     commitment_mode: 'automatic' as const,
@@ -169,7 +176,7 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
   it('receipts name the governing grant by its id', async () => {
     const r = await sp.postTicket(apiKey, receiptBody(idA));
     expect(r.status).toBe(201);
-    const receipt = r.body.receipt as Record<string, unknown>;
+    const receipt = r.body.ticket as Record<string, unknown>;
     expect(receipt.authorizationId).toBe(idA);
   });
 
@@ -185,7 +192,7 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
     // B — same fingerprint — is untouched.
     const alive = await sp.postTicket(apiKey, receiptBody(idB));
     expect(alive.status).toBe(201);
-    expect((alive.body.receipt as Record<string, unknown>).authorizationId).toBe(idB);
+    expect((alive.body.ticket as Record<string, unknown>).authorizationId).toBe(idB);
 
     const statusB = await sp.getAuthorizationStatus(apiKey, idB);
     expect(statusB.body.status).toBe('active');
@@ -197,7 +204,7 @@ describe('F1 — same-fingerprint twins are independent grants', () => {
       authorization_id: idA,
     });
     expect(resurrect.status).toBe(409);
-    expect(resurrect.body.error).toBe('AUTHZ_REVOKED');
+    expect((resurrect.body.errors as Array<{ code: string }>)[0].code).toBe('AUTHZ_REVOKED');
 
     // Still revoked afterwards — the attempt changed nothing.
     const dead = await sp.postTicket(apiKey, receiptBody(idA));
@@ -239,7 +246,7 @@ describe('Ceremony retry and identity integrity', () => {
     // Same id, different intent → different decision → rejected.
     const swap = await sp.submitMandateRaw(apiKey, attestBody('SWAP: a very different decision.', { authorization_id: id }));
     expect(swap.status).toBe(409);
-    expect(swap.body.error).toBe('AUTHZ_MISMATCH');
+    expect((swap.body.errors as Array<{ code: string }>)[0].code).toBe('AUTHZ_MISMATCH');
 
     // Same id, different commitment mode → also a different decision.
     const flip = await sp.submitMandateRaw(apiKey, attestBody('SWAP: the original decision.', {
@@ -288,7 +295,7 @@ describe('Ceremony retry and identity integrity', () => {
       renew: true,
     });
     expect(mutate.status).toBe(409);
-    expect(mutate.body.error).toBe('AUTHZ_MISMATCH');
+    expect((mutate.body.errors as Array<{ code: string }>)[0].code).toBe('AUTHZ_MISMATCH');
   });
 
   it('concurrent attests on the SAME id with DIFFERENT content: exactly one wins', async () => {
@@ -304,7 +311,7 @@ describe('Ceremony retry and identity integrity', () => {
     const statuses = [r1.status, r2.status].sort();
     expect(statuses).toEqual([201, 409]);
     const loser = r1.status === 409 ? r1 : r2;
-    expect(loser.body.error).toBe('AUTHZ_MISMATCH');
+    expect((loser.body.errors as Array<{ code: string }>)[0].code).toBe('AUTHZ_MISMATCH');
 
     // The surviving grant is intact and receipt-able.
     const status = await sp.getAuthorizationStatus(apiKey, id);
@@ -328,8 +335,12 @@ describe('Ceremony retry and identity integrity', () => {
   it('receipts reject legacy fingerprint fields and cross-check boundsHash', async () => {
     const grant = await sp.submitMandate(apiKey, attestBody('RECEIPT: wire contract.') as Parameters<typeof sp.submitMandate>[1]);
 
-    // Legacy field → 400 (the wire moved; fail loudly, not silently).
-    const legacy = await fetch(`${SP_URL}/api/as/receipt`, {
+    // Legacy field on the CURRENT endpoint → 400 (the wire moved; fail
+    // loudly, not silently). /api/as/receipt itself is now retired (410) --
+    // that is a separate, dedicated case (wire-switch-v07.test.ts); this one
+    // is about the retired IDENTIFIER (attestationHash) on the route that
+    // replaced it.
+    const legacy = await fetch(`${SP_URL}/api/as/ticket`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
       body: JSON.stringify({
@@ -340,6 +351,8 @@ describe('Ceremony retry and identity integrity', () => {
       }),
     });
     expect(legacy.status).toBe(400);
+    const legacyBody = await legacy.json() as { errors?: Array<{ code: string }> };
+    expect(legacyBody.errors?.[0]?.code).toBe('MALFORMED_TICKET_REQUEST');
 
     // boundsHash disagreeing with the record → 409 BOUNDS_HASH_MISMATCH.
     const mismatch = await sp.postTicket(apiKey, receiptBody(grant.authorization_id, {
@@ -369,10 +382,11 @@ describe('Gateway parity — identical-bounds twins keep separate intents end-to
   async function attestAndPush(intent: string): Promise<string> {
     const result = await sp.submitMandate(gwApiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: gwGroupId,
       bounds: SHARED_BOUNDS,
       bounds_hash: boundsHash,
-      context_hash: contextHash,
+      scope_hash: contextHash,
       domain: 'owner',
       did: gwDid,
       commitment_mode: 'automatic',
@@ -434,7 +448,7 @@ describe('Gateway parity — identical-bounds twins keep separate intents end-to
     expect(text).toContain('TWIN-A');
     expect(text).toContain('TWIN-B');
     // Two separate grant blocks despite the identical fingerprint.
-    const blocks = (text.match(/email@0\.4/g) ?? []).length;
+    const blocks = (text.match(/email@0\.8/g) ?? []).length;
     expect(blocks).toBeGreaterThanOrEqual(2);
   });
 
