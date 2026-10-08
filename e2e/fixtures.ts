@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveAsDir, resolveNextBin } from '../src/helpers/as-dir';
+import { localProfilesForAs } from '../src/helpers/local-profiles';
+import { profileHashFor } from '../src/helpers/profiles';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -101,14 +103,17 @@ try {
 
 // ─── Profile IDs ─────────────────────────────────────────────────────────────
 
+// Resolved from the local hap-profiles checkout at import time (same rule as
+// latestProfileId's own doc comment warns about: a hardcoded version here
+// goes stale the moment a newer one is published -- it already did, twice).
 export const PROFILE_IDS = [
-  'github.com/humanagencyprotocol/hap-profiles/charge@0.4',
-  'github.com/humanagencyprotocol/hap-profiles/purchase@0.4',
-  'github.com/humanagencyprotocol/hap-profiles/email@0.4',
-  'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
-  'github.com/humanagencyprotocol/hap-profiles/calendar@0.4',
-  'github.com/humanagencyprotocol/hap-profiles/publish@0.4',
-  'github.com/humanagencyprotocol/hap-profiles/records@0.4',
+  latestProfileId('charge'),
+  latestProfileId('purchase'),
+  latestProfileId('email'),
+  latestProfileId('customers'),
+  latestProfileId('calendar'),
+  latestProfileId('publish'),
+  latestProfileId('records'),
 ] as const;
 
 // ─── Process management ──────────────────────────────────────────────────────
@@ -155,8 +160,14 @@ export async function startServers(): Promise<void> {
   // resolveNextBin's doc comment in src/helpers/as-dir.ts. It also finds a
   // hoisted `next` if SP_DIR is the nested apps/as/ layout.
   const nextBin = resolveNextBin(SP_DIR);
-  const sp = spawn(process.execPath, [nextBin, 'start', '-p', String(SP_PORT)], {
-    cwd: SP_DIR,
+  // Serve the local hap-profiles checkout's v0.7 profile versions, same as
+  // the vitest harness (process-manager.ts) -- the default (GitHub main)
+  // has no v0.7 versions yet, so every mandate would fail PROFILE_INVALID /
+  // PROFILE_HASH_MISMATCH. next start is still pointed at SP_DIR; only the
+  // cwd (bundled-profiles/migrations source) changes.
+  const localProfiles = localProfilesForAs(PROFILES_DIR);
+  const sp = spawn(process.execPath, [nextBin, 'start', SP_DIR, '-p', String(SP_PORT)], {
+    cwd: localProfiles.cwd,
     env: {
       ...process.env,
       ALLOW_REGISTRATION: 'true',
@@ -164,6 +175,7 @@ export async function startServers(): Promise<void> {
       SP_KV_REST_API_URL: '',
       SP_KV_REST_API_TOKEN: '',
       SUVEREN_ALLOW_EPHEMERAL: '1',
+      ...localProfiles.env,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -514,7 +526,10 @@ export async function spApiAttest(
 ): Promise<Record<string, unknown>> {
   // Normalize v0.3 → v0.4: map defer_commitment → commitment_mode, drop the
   // removed `path` field, and inject the caller's personal group_id (now
-  // required) when not supplied.
+  // required) when not supplied. v0.7: context_hash → scope_hash, and
+  // profile_hash (new, required) is computed from the SAME local
+  // hap-profiles bytes the spawned AS reads (localProfilesForAs in
+  // startServers) when the caller doesn't supply one.
   const body: Record<string, unknown> = { ...data };
   if (body.authorization_id === undefined) {
     body.authorization_id = `authz_${randomUUID()}`;
@@ -527,13 +542,21 @@ export async function spApiAttest(
   }
   if (body.commitment_mode === undefined) body.commitment_mode = 'automatic';
   delete body.path;
+  if ('context_hash' in body && body.scope_hash === undefined) {
+    body.scope_hash = body.context_hash;
+    delete body.context_hash;
+  }
   if (body.group_id === undefined) {
     const gr = await request.get(`${SP_URL}/api/groups`, { headers: { 'x-api-key': apiKey } });
     const groups = ((await gr.json()).groups ?? []) as Array<{ id: string; allowLazyEnable?: boolean; isPersonal?: boolean }>;
     const personal = groups.find(g => g.allowLazyEnable || g.isPersonal) ?? groups[0];
     body.group_id = personal?.id;
   }
-  const res = await request.post(`${SP_URL}/api/as/attest`, {
+  if (body.profile_hash === undefined && typeof body.profile_id === 'string') {
+    body.profile_hash = profileHashFor(body.profile_id, PROFILES_DIR);
+  }
+  if (body.supported_versions === undefined) body.supported_versions = ['0.7'];
+  const res = await request.post(`${SP_URL}/api/as/mandate`, {
     headers: { 'x-api-key': apiKey },
     data: body,
   });
@@ -549,7 +572,10 @@ export async function spApiReceipt(
   apiKey: string,
   data: Record<string, unknown>,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const res = await request.post(`${SP_URL}/api/as/receipt`, {
+  // v0.7: /api/as/receipt is retired (410) -- moved to /api/as/ticket. Field
+  // names are unchanged (camelCase was already the wire shape; see
+  // sp-client.ts's postTicket doc comment for why).
+  const res = await request.post(`${SP_URL}/api/as/ticket`, {
     headers: { 'x-api-key': apiKey },
     data,
   });
