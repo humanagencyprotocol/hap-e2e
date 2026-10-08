@@ -8,7 +8,7 @@
  * test exercises the SAME gateway footer code with NO credentials by gating the
  * local records MCP's `create_record` under the `publish` profile: the gateway
  * appends the footer to the record's `content`, the store persists it, and we
- * read it back and verify the embedded /r/<id> receipt on the AS.
+ * read it back and verify the embedded /t/<id> ticket on the AS.
  *
  * It is a deliberately synthetic wiring (records-as-publish-target) — the point
  * is the footer + receipt loop, which is identical to the real email/post path.
@@ -24,13 +24,14 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17130;
 const GW_PORT = 17062;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/publish@0.4';
+const PROFILE_ID = PROFILE_V07.publish;
 const PROFILE_SHORT = 'publish';
 const EXEC_PATH = PROFILE_ID;
 
@@ -53,7 +54,7 @@ const FOOTER_MARKER = '-- Published by an AI agent via Suveren. Receipt:';
 // Footer v1.1 wording (suveren-gateway e56555b shortened it). Source of truth:
 // apps/mcp-server/src/lib/receipt-footer.ts — keep this in step with it.
 const HAP_LINE = '-- Suveren implements HAP, the open Human Agency Protocol: https://www.humanagencyprotocol.org/';
-const RECEIPT_LINK = /\/r\/([0-9a-fA-F-]{36})/;
+const RECEIPT_LINK = /\/t\/([0-9a-fA-F-]{36})/;
 
 const pm = new ProcessManager();
 const sp = new SPClient(SP_URL);
@@ -95,10 +96,11 @@ describe('Setup', () => {
 
     const result = await sp.submitMandate(user.apiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: personalGroupId,
       bounds: BOUNDS,
       bounds_hash: boundsHash,
-      context_hash: contextHash,
+      scope_hash: contextHash,
       domain: 'owner',
       did: user.did,
       commitment_mode: 'automatic',
@@ -196,7 +198,7 @@ describe('Footer — end to end', () => {
     expect(result.isError).not.toBe(true);
     const record = JSON.parse((result.content as Array<{ text: string }>)[0].text);
     expect(record.content).toContain(FOOTER_MARKER);
-    expect(record.content).toContain(`/r/${receiptId}`);
+    expect(record.content).toContain(`/t/${receiptId}`);
   });
 
   it('the embedded receipt verifies on the AS (signatureValid)', async () => {
