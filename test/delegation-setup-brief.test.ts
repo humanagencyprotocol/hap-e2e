@@ -24,6 +24,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 18400;
 const GW_PORT = 18401;
@@ -31,9 +32,9 @@ const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
-const DELEGATION = 'github.com/humanagencyprotocol/hap-profiles/delegation@0.1';
+const DELEGATION = PROFILE_V07.delegation;
 const KEYS = ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max'];
-const available = existsSync(join(PROFILES_DIR, 'delegation', '0.1.profile.json'));
+const available = existsSync(join(PROFILES_DIR, 'delegation', '0.3.profile.json'));
 
 const pm = new ProcessManager();
 const sp = new SPClient(SP_URL);
@@ -133,20 +134,21 @@ describe.skipIf(!available)('delegation: the AI proposes its agent brief, a pers
   it('the AS refuses an automatic delegation mandate (review only)', async () => {
     const d = delegationBody('automatic');
     const r = await sp.submitMandateRaw(apiKey, {
-      authorization_id: `authz_${randomUUID()}`, profile_id: DELEGATION, group_id: groupId,
-      bounds: d.bounds, bounds_hash: d.boundsHash, context_hash: d.contextHash, domain: 'owner', did,
+      authorization_id: `authz_${randomUUID()}`, profile_id: DELEGATION,
+      profile_hash: profileHashFor(DELEGATION, PROFILES_DIR), group_id: groupId,
+      bounds: d.bounds, bounds_hash: d.boundsHash, scope_hash: d.contextHash, domain: 'owner', did,
       commitment_mode: 'automatic', gate_content_hashes: hashGateContent(d.gate),
       execution_context_hash: hashExecutionContext({ m: 'automatic' }),
     });
     expect(r.status).toBe(422);
-    expect(r.body.error).toBe('commitment_mode_not_allowed');
+    expect((r.body.errors as Array<{ code: string }>)[0].code).toBe('commitment_mode_not_allowed');
   });
 
   it('with a review delegation mandate the tool is listed', async () => {
     const d = delegationBody('review');
     const att = await sp.submitMandate(apiKey, {
-      profile_id: DELEGATION, group_id: groupId, bounds: d.bounds, bounds_hash: d.boundsHash,
-      context_hash: d.contextHash, domain: 'owner', did, commitment_mode: 'review',
+      profile_id: DELEGATION, profile_hash: profileHashFor(DELEGATION, PROFILES_DIR), group_id: groupId, bounds: d.bounds, bounds_hash: d.boundsHash,
+      scope_hash: d.contextHash, domain: 'owner', did, commitment_mode: 'review',
       gate_content_hashes: hashGateContent(d.gate), execution_context_hash: hashExecutionContext({ m: 'review' }),
     });
     await gw.pushGateContent({ authorizationId: att.authorization_id, boundsHash: d.boundsHash, contextHash: d.contextHash, context: {} }, DELEGATION, d.gate);
