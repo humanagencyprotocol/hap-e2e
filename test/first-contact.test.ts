@@ -27,7 +27,7 @@ const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
-const DELEGATION = 'github.com/humanagencyprotocol/hap-profiles/delegation@0.1';
+const DELEGATION = 'github.com/humanagencyprotocol/hap-profiles/delegation@0.3';
 const available = existsSync(join(PROFILES_DIR, 'delegation', '0.1.profile.json'))
   && existsSync(join(ROOT, 'suveren-gateway', 'content', 'guides'));
 
