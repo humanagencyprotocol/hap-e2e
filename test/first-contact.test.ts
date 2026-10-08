@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
+import { localProfilesForAs } from '../src/helpers/local-profiles.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18620;
@@ -28,7 +29,7 @@ const GW_URL = `http://localhost:${GW_PORT}`;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 const DELEGATION = 'github.com/humanagencyprotocol/hap-profiles/delegation@0.3';
-const available = existsSync(join(PROFILES_DIR, 'delegation', '0.1.profile.json'))
+const available = existsSync(join(PROFILES_DIR, 'delegation', '0.3.profile.json'))
   && existsSync(join(ROOT, 'suveren-gateway', 'content', 'guides'));
 
 const pm = new ProcessManager();
@@ -64,7 +65,11 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
   beforeAll(async () => {
     process.env.SUVEREN_SIMULATION = '1';
     pm.buildGateway();
-    await pm.startSP(SP_PORT);
+
+    // Use local profiles (v0.7) instead of github.com/humanagencyprotocol/hap-profiles@main
+    const localProfiles = localProfilesForAs(PROFILES_DIR);
+    await pm.startSP(SP_PORT, { cwd: localProfiles.cwd, env: localProfiles.env });
+
     const reg = await sp.register('First Contact E2E', `first-contact-${Date.now()}@test.local`);
     await pm.startGateway({ port: GW_PORT, spUrl: SP_URL, spApiKey: reg.apiKey, profilesDir: PROFILES_DIR });
     await gw.configure({ sessionCookie: 'first-contact-e2e', apiKey: reg.apiKey });
@@ -73,7 +78,7 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
     await reconnect();
 
     // Load profile for profile_hash computation
-    const profilePath = join(PROFILES_DIR, 'delegation', '0.1.profile.json');
+    const profilePath = join(PROFILES_DIR, 'delegation', '0.3.profile.json');
     const profileJson = JSON.parse(readFileSync(profilePath, 'utf8')) as Record<string, unknown>;
     const profileHash = computeProfileHash(profileJson);
 
