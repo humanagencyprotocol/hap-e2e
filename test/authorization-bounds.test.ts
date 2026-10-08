@@ -28,13 +28,15 @@ import {
   hashExecutionContext,
   computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const SP_PORT = 15100; // distinct port from main e2e suite
 const SP_URL = `http://localhost:${SP_PORT}`;
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILE_ID = PROFILE_V07.charge;
 
 const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
 
@@ -100,10 +102,11 @@ describe('Authorization Bounds — Attestation', () => {
 
     const result = await sp.submitMandate(agentApiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: groupId,
       bounds: TIGHT_BOUNDS,
       // bounds_hash omitted on purpose — AS computes it from bounds + profile.
-      context_hash: contextHash,
+      scope_hash: contextHash,
       domain: 'owner',
       did: agentDid,
       commitment_mode: 'automatic',
@@ -134,7 +137,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     });
 
     expect(result.status).toBe(201);
-    expect(result.body.receipt).toBeTruthy();
+    expect(result.body.ticket).toBeTruthy();
   });
 
   it('$30 receipt fails — exceeds per-tx amount_max of $25', async () => {
@@ -149,7 +152,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
 
     expect(result.status).toBe(403);
     const err = (result.body.errors as Array<Record<string, unknown>>)[0];
-    expect(err.code).toBe('LIMIT_EXCEEDED');
+    expect(err.code).toBe('BOUND_EXCEEDED');
     expect(String(err.message)).toMatch(/per-transaction|amount/i);
     expect(err.expected).toBe(25);
     expect(err.actual).toBe(30);
@@ -166,9 +169,9 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     });
 
     expect(result.status).toBe(201);
-    expect(result.body.receipt).toBeTruthy();
+    expect(result.body.ticket).toBeTruthy();
 
-    const receipt = result.body.receipt as Record<string, unknown>;
+    const receipt = result.body.ticket as Record<string, unknown>;
     const cumState = receipt.cumulativeState as Record<string, unknown> | undefined;
     if (cumState) {
       const daily = cumState.daily as Record<string, unknown>;
@@ -189,7 +192,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
 
     expect(result.status).toBe(403);
     const err = (result.body.errors as Array<Record<string, unknown>>)[0];
-    expect(err.code).toBe('LIMIT_EXCEEDED');
+    expect(err.code).toBe('CUMULATIVE_LIMIT_EXCEEDED');
     expect(String(err.message)).toMatch(/daily.*amount|amount.*daily|cumulative/i);
     expect(err.expected).toBe(50);
   });
@@ -207,7 +210,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     });
 
     if (result.status === 201) {
-      const receipt = result.body.receipt as Record<string, unknown>;
+      const receipt = result.body.ticket as Record<string, unknown>;
       expect(receipt).toBeTruthy();
       expect(typeof receipt.id).toBe('string');
       expect(typeof receipt.timestamp).toBe('number');
@@ -218,7 +221,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     } else {
       expect(result.status).toBe(403);
       const err = (result.body.errors as Array<Record<string, unknown>>)[0];
-      expect(err.code).toBe('LIMIT_EXCEEDED');
+      expect(err.code).toBe('CUMULATIVE_LIMIT_EXCEEDED');
     }
   });
 
