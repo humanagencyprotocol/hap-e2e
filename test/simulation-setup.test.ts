@@ -34,6 +34,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17460;
 const GW_PORT = 17492;
@@ -50,26 +51,27 @@ const PKG = { erp: 'erp-mcp', crm: 'crm-mcp', mail: 'email-mcp' } as const;
 const P = 'github.com/humanagencyprotocol/hap-profiles';
 const PROFILES = {
   sales: {
-    id: `${P}/sales@0.2`, short: 'sales',
+    id: `${P}/sales@0.4`, short: 'sales',
     keyOrder: ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max', 'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'],
     ctxOrder: ['currency'], ctx: { currency: 'EUR' },
     setup: { read_access: 'none', value_max: 0, discount_max: 0, order_value_daily_max: 0, quote_daily_max: 0, send_daily_max: 0, order_daily_max: 0, setup_daily_max: 5 },
     work: { read_access: 'unlimited', value_max: 1000, discount_max: 10, order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10, setup_daily_max: 0 },
   },
   customers: {
-    id: `${P}/customers@0.8`, short: 'customers',
+    id: `${P}/customers@0.9`, short: 'customers',
     keyOrder: ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'],
     ctxOrder: ['contact_type'], ctx: { contact_type: 'customer' },
     setup: { read_access: 'none', export_access: 'none', write_daily_max: 0, delete_daily_max: 0, setup_daily_max: 1 },
     work: { read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
   },
   email: {
-    id: `${P}/email@0.7`, short: 'email',
-    keyOrder: ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max', 'setup_daily_max'],
+    id: `${P}/email@0.8`, short: 'email',
+    // v0.7: read_daily_max is gone (replaced by read_access; never enforced, CONFORMANCE.md).
+    keyOrder: ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'],
     ctxOrder: ['allowed_recipients', 'allowed_domains'],
     ctx: { allowed_recipients: 'einkauf@huber.example,office@steiner.example', allowed_domains: 'huber.example,steiner.example' },
-    setup: { read_access: 'none', recipient_max: 0, send_daily_max: 0, read_max_age_days: 0, read_daily_max: 0, setup_daily_max: 1 },
-    work: { read_access: 'unlimited', recipient_max: 1, send_daily_max: 10, read_max_age_days: 3650, read_daily_max: 1000, setup_daily_max: 0 },
+    setup: { read_access: 'none', recipient_max: 0, send_daily_max: 0, read_max_age_days: 0, setup_daily_max: 1 },
+    work: { read_access: 'unlimited', recipient_max: 1, send_daily_max: 10, read_max_age_days: 3650, setup_daily_max: 0 },
   },
 } as const;
 type ProfileKey = keyof typeof PROFILES;
@@ -92,7 +94,7 @@ async function grant(key: ProfileKey, kind: 'setup' | 'work'): Promise<string> {
   const contextHash = computeScopeHash(p.ctx, [...p.ctxOrder]);
   const gate = { intent: `E2E ${kind} mandate for ${p.short}` };
   const att = await sp.submitMandate(apiKey, {
-    profile_id: p.id, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+    profile_id: p.id, profile_hash: profileHashFor(p.id, PROFILES_DIR), group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
     domain: 'owner', did, commitment_mode: 'automatic',
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ kind }),
   });
