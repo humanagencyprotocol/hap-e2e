@@ -36,8 +36,9 @@ import {
   computeBoundsHash,
   computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
+const PROFILE_ID = PROFILE_V07.records;
 const PROFILE_SHORT = 'records';
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
@@ -105,10 +106,11 @@ async function boot(spPort: number, gwPort: number, readAccess: 'unlimited' | 'n
 
   const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: groupId,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'owner',
     did: user.user.did,
     commitment_mode: 'automatic',
