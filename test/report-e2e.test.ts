@@ -479,7 +479,9 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
       });
     }
     // A real browser is part of this suite (layout + UI). Fails loudly without one.
-    browser = await chromium.launch({ headless: true });
+    // A person's browser: Playwright's default announces automation (navigator.webdriver),
+    // which the gateway refuses at sign-in and approval (defense in depth, by design).
+    browser = await chromium.launch({ headless: true, args: ['--disable-blink-features=AutomationControlled'] });
 
     // The AS serves the local hap-profiles and starts on a clock three days back.
     clock = shiftedClock(-OLD_AGE_SECONDS);

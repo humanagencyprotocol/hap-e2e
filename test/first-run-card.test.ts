@@ -84,7 +84,9 @@ async function connectAgent(name: string): Promise<Client> {
 describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation mode + browser)', () => {
   beforeAll(async () => {
     pm.buildGateway();
-    browser = await chromium.launch({ headless: true });
+    // A person's browser: Playwright's default announces automation (navigator.webdriver),
+    // which the gateway refuses at sign-in and approval (defense in depth, by design).
+    browser = await chromium.launch({ headless: true, args: ['--disable-blink-features=AutomationControlled'] });
     const profiles = localProfilesForAs(PROFILES_DIR);
     await pm.startSP(AS_PORT, { cwd: profiles.cwd, env: profiles.env });
     user = await sp.register('First Run E2E', `first-run-${Date.now()}@test.local`);
@@ -105,6 +107,19 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
     await pm.killAll();
     rmSync(dataDir, { recursive: true, force: true });
   }, 30_000);
+
+  it('0. a browser that announces automation cannot sign in; the page says only a person may', async () => {
+    const bot = await chromium.launch({ headless: true });
+    try {
+      const p = await bot.newPage();
+      await p.goto(`${CP_URL}/login`, { waitUntil: 'networkidle' });
+      await p.locator('text=This browser is controlled by automation').waitFor({ timeout: 10_000 });
+      expect(await p.locator('button:has-text("Sign In")').first().isDisabled()).toBe(true);
+      expect(await p.locator('.human-only-note').innerText()).toMatch(/Only you\. Never let an AI or a browser it controls sign in here/);
+    } finally { await bot.close(); }
+    // The person's own browser (no automation marker) is not refused.
+    expect(await page.locator('text=This browser is controlled by automation').count()).toBe(0);
+  });
 
   it('1. nothing done: step 1 open, with the MCP server\'s real address in the sentence to copy', async () => {
     await dashboard();
