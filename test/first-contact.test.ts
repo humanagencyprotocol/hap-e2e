@@ -14,13 +14,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { localProfilesForAs } from '../src/helpers/local-profiles.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash, computeProfileHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18620;
 const GW_PORT = 18621;
@@ -50,15 +49,6 @@ function gettingStarted(): string {
   const i = agent.getInstructions() ?? '';
   const at = i.indexOf('=== GETTING STARTED ===');
   return at < 0 ? '' : i.slice(at, i.indexOf('When you receive a task', at));
-}
-
-/**
- * Compute profile_hash over the profile JSON (v0.7).
- */
-function computeProfileHash(profile: Record<string, unknown>): string {
-  const jcs = JSON.stringify(profile, Object.keys(profile).sort());
-  const hex = createHash('sha256').update(jcs, 'utf8').digest('hex');
-  return `sha256:${hex}`;
 }
 
 describe.skipIf(!available)('first contact (real AS + gateway in simulation mode)', () => {
