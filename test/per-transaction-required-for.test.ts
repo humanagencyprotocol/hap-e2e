@@ -51,6 +51,7 @@ import {
   hashExecutionContext,
   computeBoundsHash,
   computeScopeHash,
+  computeProfileHash,
 } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18200;
@@ -212,10 +213,11 @@ beforeAll(async () => {
   const contextHash = computeScopeHash({}, []);
   const att = await sp.submitMandate(apiKey, {
     profile_id: profileId,
+    profile_hash: computeProfileHash({ ...testProfile(profileId), id: profileId }),
     group_id: groupId,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'owner',
     did,
     commitment_mode: 'automatic',
@@ -325,7 +327,7 @@ describe('Authority Server — per_transaction requiredFor, direct (bypassing th
       executionContext: { action_type: 'write', amount: 4000 },
     });
     expect(result.status).toBe(201);
-    expect(result.body.receipt).toBeTruthy();
+    expect(result.body.ticket).toBeTruthy();
   });
 
   it('permits a delete receipt with no amount — delete is not in requiredFor', async () => {
@@ -338,6 +340,6 @@ describe('Authority Server — per_transaction requiredFor, direct (bypassing th
       executionContext: { action_type: 'delete' },
     });
     expect(result.status).toBe(201);
-    expect(result.body.receipt).toBeTruthy();
+    expect(result.body.ticket).toBeTruthy();
   });
 });
