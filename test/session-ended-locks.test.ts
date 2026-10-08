@@ -25,11 +25,13 @@ import { ProcessManager } from '../src/helpers/process-manager';
 import { SPClient } from '../src/helpers/sp-client';
 import { GatewayClient } from '../src/helpers/gateway-client';
 import { computeBoundsHash, hashGateContent, hashExecutionContext } from '../src/helpers/crypto';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles';
 
 const SP_PORT = 16800;
 const GW_PORT = 16830;
 const SP_URL = `http://localhost:${SP_PORT}`;
-const PROFILE = 'github.com/humanagencyprotocol/hap-profiles/customers@0.5';
+const PROFILE = PROFILE_V07.customers;
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
 const pm = new ProcessManager();
 let sp: SPClient;
@@ -90,17 +92,21 @@ beforeAll(async () => {
   sessionToken = (await gatewaySignIn(apiKey)).token;
   await gw.configure({ sessionCookie: `hap-session=${sessionToken}` });
 
-  const bounds = { profile: PROFILE, read_access: 'unlimited', write_daily_max: 50, delete_daily_max: 5 };
-  const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_daily_max']);
+  const bounds = {
+    profile: PROFILE, read_access: 'unlimited', export_access: 'none',
+    write_daily_max: 50, delete_daily_max: 5, setup_daily_max: 0,
+  };
+  const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max']);
   const contextHash = computeBoundsHash({}, []);
   const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE,
+    profile_hash: profileHashFor(PROFILE, PROFILES_DIR),
     group_id: groupId,
     domain: 'owner',
     did: user.user.did,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     gate_content_hashes: hashGateContent({ intent: 'session test' }),
     execution_context_hash: hashExecutionContext({ profile: PROFILE, domain: 'owner' }),
     commitment_mode: 'automatic',

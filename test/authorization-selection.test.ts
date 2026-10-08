@@ -44,21 +44,25 @@ import {
   computeBoundsHash,
   computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
+const PROFILE_ID = PROFILE_V07.customers;
 const PROFILE_SHORT = 'customers';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'write_daily_max', 'delete_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['contact_type'];
 
 // Bounds are identical across grants — scope (contact_type) and commitment mode
 // are the only variables, so selection, not bounds, decides the outcome.
-const BOUNDS = { profile: PROFILE_ID, write_daily_max: 10, delete_daily_max: 5 };
+const BOUNDS = {
+  profile: PROFILE_ID, read_access: 'unlimited', export_access: 'none',
+  write_daily_max: 10, delete_daily_max: 5, setup_daily_max: 0,
+};
 
 // crm-mcp toolGating: create_contact maps arg `type` → context field
 // `contact_type`, so the gateway enforces the subset scope on it.
@@ -134,10 +138,11 @@ async function bootScenario(spPort: number, gwPort: number, grants: Grant[]): Pr
 
     const att = await sp.submitMandate(apiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: groupId,
       bounds: BOUNDS,
       bounds_hash: boundsHash,
-      context_hash: contextHash,
+      scope_hash: contextHash,
       domain: 'owner',
       did,
       commitment_mode: grant.mode,
