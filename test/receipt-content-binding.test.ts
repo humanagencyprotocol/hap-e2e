@@ -30,6 +30,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ const GW_PORT = 17052;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
+const PROFILE_ID = PROFILE_V07.records;
 const PROFILE_SHORT = 'records';
 const EXEC_PATH = PROFILE_ID;
 
@@ -147,10 +148,11 @@ describe('Setup', () => {
 
     const result = await sp.submitMandate(user.apiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: personalGroupId,
       bounds: BOUNDS,
       bounds_hash: boundsHash,
-      context_hash: contextHash,
+      scope_hash: contextHash,
       domain: 'owner',
       did: user.did,
       commitment_mode: 'automatic',
