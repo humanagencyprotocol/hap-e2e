@@ -202,6 +202,7 @@ export class SPClient {
       commitment_mode: 'automatic' | 'review' | 'review_above_cap';
       gate_content_hashes: Record<string, string>;
       execution_context_hash: string;
+      supported_versions?: string[];
     },
   ): Promise<{
     authorization_id: string;
@@ -214,8 +215,13 @@ export class SPClient {
     required_domains: string[];
     version: number;
   }> {
-    const withId = { authorization_id: mintAuthorizationId(), ...body };
-    const res = await this.request('POST', '/api/as/mandate', withId, apiKey);
+    // Add version negotiation if not provided
+    const withDefaults = {
+      supported_versions: ['0.7'],
+      authorization_id: mintAuthorizationId(),
+      ...body,
+    };
+    const res = await this.request('POST', '/api/as/mandate', withDefaults, apiKey);
     if (!res.ok) {
       const respBody = await res.json().catch(() => ({}));
       throw new Error(`submitMandate failed (${res.status}): ${JSON.stringify(respBody)}`);
@@ -232,7 +238,11 @@ export class SPClient {
     apiKey: string,
     body: Record<string, unknown>,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const res = await this.request('POST', '/api/as/mandate', body, apiKey);
+    const withDefaults = {
+      supported_versions: ['0.7'],
+      ...body,
+    };
+    const res = await this.request('POST', '/api/as/mandate', withDefaults, apiKey);
     const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { status: res.status, body: responseBody };
   }
