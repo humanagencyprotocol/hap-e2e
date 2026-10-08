@@ -41,6 +41,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17860;
 const GW_PORT = 17892;
@@ -53,18 +54,18 @@ const MANIFEST = join(GATEWAY_DIR, 'content', 'integrations', 'erp.json');
 const available = existsSync(MANIFEST);
 
 // Running simulator — erp personal default, profile `sales`.
-const SALES_ID = 'github.com/humanagencyprotocol/hap-profiles/sales@0.1';
+const SALES_ID = PROFILE_V07.sales;
 const SALES_KEY_ORDER = ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max',
-  'quote_daily_max', 'send_daily_max', 'order_daily_max'];
+  'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'];
 const SALES_CONTEXT = { currency: 'EUR' };
 const SALES_BOUNDS = {
   profile: SALES_ID, read_access: 'unlimited', value_max: 1000, discount_max: 10,
-  order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10,
+  order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10, setup_daily_max: 0,
 };
 
 // Paused real connector — records personal default has no `simulation`
 // manifest marker, so it never starts under SUVEREN_SIMULATION=1.
-const RECORDS_ID = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
+const RECORDS_ID = PROFILE_V07.records;
 const RECORDS_KEY_ORDER = ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access'];
 const RECORDS_BOUNDS = {
   profile: RECORDS_ID, read_access: 'unlimited', write_daily_max: 5, delete_access: 'none', archive_access: 'none',
@@ -84,7 +85,7 @@ async function grant(profileId: string, keyOrder: string[], bounds: Record<strin
   const contextHash = computeScopeHash(context, Object.keys(context));
   const gate = { intent: `E2E simulation-visibility mandate for ${profileId}` };
   const att = await sp.submitMandate(apiKey, {
-    profile_id: profileId, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+    profile_id: profileId, profile_hash: profileHashFor(profileId, PROFILES_DIR), group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
     domain: 'owner', did, commitment_mode: 'automatic',
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ profile_id: profileId }),
   });
@@ -156,8 +157,8 @@ describe.skipIf(!available)('simulation mode hides a paused-connector mandate fr
   it('list-authorizations compact overview shows sales, omits records', async () => {
     const r = await callTool('list-authorizations', {});
     expect(r.denied).toBe(false);
-    expect(r.text).toContain('sales@0.1');
-    expect(r.text).not.toContain('records@0.4');
+    expect(r.text).toContain('sales@0.4');
+    expect(r.text).not.toContain('records@0.6');
   });
 
   it('list-authorizations(domain: "records") reads exactly like no mandate exists at all', async () => {
@@ -167,7 +168,7 @@ describe.skipIf(!available)('simulation mode hides a paused-connector mandate fr
     expect(hidden.text).toContain('No authorizations found for domain "records"');
     // Nothing about the actual hidden mandate may leak: no bounds, no
     // profile id, no intent.
-    expect(hidden.text).not.toContain('records@0.4');
+    expect(hidden.text).not.toContain('records@0.6');
     expect(hidden.text).not.toContain('write_daily_max');
     // The "Active domains:" hint must list only what is actually reachable.
     expect(hidden.text).toContain('Active domains: sales');
@@ -177,14 +178,14 @@ describe.skipIf(!available)('simulation mode hides a paused-connector mandate fr
   it('list-authorizations(domain: "sales") still shows full detail', async () => {
     const r = await callTool('list-authorizations', { domain: 'sales' });
     expect(r.denied).toBe(false);
-    expect(r.text).toContain('sales@0.1');
+    expect(r.text).toContain('sales@0.4');
     expect(r.text).toContain('Bounds:');
   });
 
   it('the MCP session instructions (mandate brief) omit the records mandate', () => {
     const instructions = mcpClient.getInstructions();
     expect(instructions).toBeTruthy();
-    expect(instructions).toContain('sales@0.1');
-    expect(instructions).not.toContain('records@0.4');
+    expect(instructions).toContain('sales@0.4');
+    expect(instructions).not.toContain('records@0.6');
   });
 });
