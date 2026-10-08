@@ -191,6 +191,7 @@ export class SPClient {
       renew?: boolean;
       profile_id: string;
       /** v0.7 requires group_id on every mandate (use personal group for individual flows). */
+      profile_hash?: string;
       group_id: string;
       /** v0.7 bounds */
       bounds?: Record<string, unknown>;
