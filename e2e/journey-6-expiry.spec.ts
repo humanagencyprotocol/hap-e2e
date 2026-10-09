@@ -6,11 +6,12 @@
  * 2. After TTL expires, status changes to expired
  * 3. Receipts are rejected after expiry
  */
-import { test, expect, ensureUsersRegistered, ALICE, spApiAttest, spApiReceipt, SP_URL } from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, spApiAttest, spApiReceipt, SP_URL, latestProfileId } from './fixtures';
 
 test.describe.serial('Journey 6: Expiry & Extension', () => {
   let apiKey: string;
   let authorizationId: string;
+  const recordsProfile = latestProfileId('records');
 
   test('6.1 Register user', async () => {
     // Reuse the stable ALICE account: signing into the gateway as a brand-new
@@ -28,11 +29,11 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
     const user = (await sessionRes.json()).user;
 
     const data = await spApiAttest(request, apiKey, {
-      profile_id: 'github.com/humanagencyprotocol/hap-profiles/records@0.4',
+      profile_id: recordsProfile,
       domain: 'owner',
       did: user.did,
-      bounds: { profile: 'records', read_access: 'all', write_daily_max: 10, delete_access: 'own_24h', archive_access: 'all' },
-      context_hash: 'sha256:' + '0'.repeat(64),
+      bounds: { profile: recordsProfile, read_access: 'unlimited', write_daily_max: 10, delete_access: 'none', archive_access: 'none' },
+      scope_hash: 'sha256:' + '0'.repeat(64),
       gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
       execution_context_hash: 'sha256:' + 'b'.repeat(64),
       ttl: 60,
@@ -48,11 +49,11 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
     // shared test gateway forces an account-switch wipe of the prior spec's
     // running integrations (slow/hangs under load). API check is reliable and
     // tests the same thing — the authority is active before its TTL elapses.
-    const res = await request.get(`${SP_URL}/api/attestations/mine`, {
+    const res = await request.get(`${SP_URL}/api/mandates/mine`, {
       headers: { 'x-api-key': apiKey },
     });
     expect(res.ok()).toBe(true);
-    const { attestations } = await res.json();
+    const { mandates: attestations } = await res.json();
     const our = attestations.find((a: { authorization_id?: string }) =>
       a.authorization_id === authorizationId);
     expect(our).toBeDefined();
@@ -71,7 +72,7 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
   test('6.5 Receipt rejected after expiry', async ({ request }) => {
     const receipt = await spApiReceipt(request, apiKey, {
       authorizationId,
-      profileId: 'github.com/humanagencyprotocol/hap-profiles/records@0.4',
+      profileId: recordsProfile,
       action: 'create_record',
       // Required: without it the AS answers 400 INVALID_ACTION_TYPE before it
       // ever reaches the expiry check this test is about.

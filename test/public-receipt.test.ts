@@ -9,17 +9,19 @@
  *   2. Signature is re-verified server-side (signatureValid:true for a genuine
  *      receipt); unknown ids 404.
  *
- * Only the AS is needed (no gateway) — a receipt is minted via postReceipt, so
+ * Only the AS is needed (no gateway) — a ticket is minted via postTicket, so
  * this runs without any OAuth integration.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
-import { hashGateContent, hashExecutionContext, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 15410;
 const SP_URL = `http://localhost:${SP_PORT}`;
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
+const PROFILE_ID = PROFILE_V07.charge;
 
 const PUBLIC_FIELDS = [
   'id', 'profileId', 'actionType', 'action', 'timestamp', 'boundsHashShort', 'issuer', 'signatureValid',
@@ -49,11 +51,12 @@ beforeAll(async () => {
   did = user.user.did;
   groupId = await sp.getPersonalGroupId(user.apiKey);
 
-  const att = await sp.submitAttestation(user.apiKey, {
+  const att = await sp.submitMandate(user.apiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: groupId,
     bounds: { profile: PROFILE_ID, amount_max: 100, amount_daily_max: 500, amount_monthly_max: 5000, transaction_count_daily_max: 20 },
-    context_hash: computeContextHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
+    scope_hash: computeScopeHash({ currency: 'USD', action_type: 'charge' }, ['currency', 'action_type']),
     domain: 'owner',
     did,
     commitment_mode: 'automatic',
@@ -61,7 +64,7 @@ beforeAll(async () => {
     execution_context_hash: hashExecutionContext({ action_type: 'charge', amount: 20, currency: 'USD' }),
   });
 
-  const r = await sp.postReceipt(user.apiKey, {
+  const r = await sp.postTicket(user.apiKey, {
     authorizationId: att.authorization_id,
     profileId: PROFILE_ID,
     action: 'charge',
@@ -70,7 +73,7 @@ beforeAll(async () => {
     executionContext: { amount: 20, currency: 'USD', action_type: 'charge' },
   });
   expect(r.status).toBe(201);
-  receiptId = (r.body.receipt as { id: string }).id;
+  receiptId = (r.body.ticket as { id: string }).id;
   expect(receiptId).toBeTruthy();
 }, 60_000);
 

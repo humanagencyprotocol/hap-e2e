@@ -10,6 +10,9 @@ import { ProcessManager } from '../src/helpers/process-manager';
 import { SPClient } from '../src/helpers/sp-client';
 import { GatewayClient } from '../src/helpers/gateway-client';
 import { computeBoundsHash, hashGateContent, hashExecutionContext } from '../src/helpers/crypto';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles';
+
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
 const SP_PORT = 16300;
 const GW_PORT = 16330;
@@ -43,24 +46,26 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: `api-key=${apiKey}`, apiKey });
 
   // Create authorization with write_daily_max = 3, delete_daily_max = 1
-  const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.5';
+  const profile = PROFILE_V07.customers;
   const path = profile;
-  // read_access is required for the CRM read gate; it exists only from
-  // customers@0.5 onward.
-  const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/customers@0.5', read_access: 'unlimited', write_daily_max: 3, delete_daily_max: 1 };
-  const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_daily_max']);
+  const bounds = {
+    profile, read_access: 'unlimited', export_access: 'none',
+    write_daily_max: 3, delete_daily_max: 1, setup_daily_max: 0,
+  };
+  const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max']);
   const contextHash = computeBoundsHash({}, []);
   const gateHashes = hashGateContent({ intent: 'test' });
   const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: profile,
+    profile_hash: profileHashFor(profile, PROFILES_DIR),
     group_id: groupId,
     domain: 'owner',
     did: userDid,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     gate_content_hashes: gateHashes,
     execution_context_hash: ecHash,
     commitment_mode: 'automatic',

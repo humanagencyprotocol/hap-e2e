@@ -10,6 +10,9 @@ import { ProcessManager } from '../src/helpers/process-manager';
 import { SPClient } from '../src/helpers/sp-client';
 import { GatewayClient } from '../src/helpers/gateway-client';
 import { computeBoundsHash, hashGateContent, hashExecutionContext } from '../src/helpers/crypto';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles';
+
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
 const SP_PORT = 16400;
 const GW_PORT = 16430;
@@ -42,22 +45,26 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: `api-key=${apiKey}`, apiKey });
 
   // Create authorization with deferred commitment
-  const profile = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
+  const profile = PROFILE_V07.customers;
   const path = profile;
-  const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4', write_daily_max: 10, delete_daily_max: 5 };
-  boundsHash = computeBoundsHash(bounds, ['profile', 'write_daily_max', 'delete_daily_max']);
+  const bounds = {
+    profile, read_access: 'unlimited', export_access: 'none',
+    write_daily_max: 10, delete_daily_max: 5, setup_daily_max: 0,
+  };
+  boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max']);
   const contextHash = computeBoundsHash({}, []);
-  const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses v0.4 intent gate
+  const gateHashes = hashGateContent({ intent: 'test' }); // customers profile uses the intent gate
   const ecHash = hashExecutionContext({ profile, domain: 'owner' });
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: profile,
+    profile_hash: profileHashFor(profile, PROFILES_DIR),
     group_id: groupId,
     domain: 'owner',
     did: userDid,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     gate_content_hashes: gateHashes,
     execution_context_hash: ecHash,
     commitment_mode: 'review',
@@ -140,22 +147,23 @@ describe('Deferred Commitment', () => {
 
   it('immediate commitment tool call executes directly', async () => {
     // Create a new authorization WITHOUT deferred commitment for records
-    const profile = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
-    const path = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
-    const bounds = { profile: 'github.com/humanagencyprotocol/hap-profiles/records@0.4', read_access: 'unlimited', write_daily_max: 10, delete_access: 'allowed', archive_access: 'allowed' };
+    const profile = PROFILE_V07.records;
+    const path = profile;
+    const bounds = { profile, read_access: 'unlimited', write_daily_max: 10, delete_access: 'allowed', archive_access: 'allowed' };
     const bh = computeBoundsHash(bounds, ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access']);
     const ch = computeBoundsHash({}, []);
     const gh = hashGateContent({ intent: 'test' });
     const eh = hashExecutionContext({ profile, domain: 'owner' });
 
-    const att2 = await sp.submitAttestation(apiKey, {
+    const att2 = await sp.submitMandate(apiKey, {
       profile_id: profile,
+      profile_hash: profileHashFor(profile, PROFILES_DIR),
       group_id: groupId,
       domain: 'owner',
       did: userDid,
       bounds,
       bounds_hash: bh,
-      context_hash: ch,
+      scope_hash: ch,
       gate_content_hashes: gh,
       execution_context_hash: eh,
       commitment_mode: 'automatic', // immediate

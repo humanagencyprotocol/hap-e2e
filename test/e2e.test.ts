@@ -6,8 +6,9 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 import { ctx } from '../src/helpers/context.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ─────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ const GW_PORT = 13030;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILE_ID = PROFILE_V07.charge;
 const PROFILE_SHORT = 'charge';
 const EXEC_PATH = 'charge-routine';
 
@@ -156,15 +157,16 @@ describe('Attestation', () => {
     });
 
     const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-    const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+    const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
-    const result = await sp.submitAttestation(ctx.agentUser!.apiKey, {
+    const result = await sp.submitMandate(ctx.agentUser!.apiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: ctx.groupId!,
       bounds: BOUNDS,
       bounds_hash: boundsHash,
-      context_hash: contextHash,
-      // v0.4 team group: the AS resolves the member's domain to their userId.
+      scope_hash: contextHash,
+      // team group: the AS resolves the member's domain to their userId.
       domain: ctx.agentUser!.id,
       did: ctx.agentUser!.did,
       commitment_mode: 'automatic',
@@ -195,7 +197,7 @@ describe('Gateway Configuration', () => {
 
   it('pushes gate content for the attestation', async () => {
     const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-    const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+    const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
     await gw.pushGateContent(
       { authorizationId, boundsHash, contextHash, context: CONTEXT },
       EXEC_PATH,
@@ -308,7 +310,7 @@ describe.skipIf(!STRIPE_TEST_KEY)('MCP Tool Calls — Stripe', () => {
   });
 
   it('verifies receipt was recorded in SP', async () => {
-    const { receipts } = await sp.getGroupReceipts(ctx.adminUser!.apiKey, ctx.groupId!);
+    const { tickets: receipts } = await sp.getGroupTickets(ctx.adminUser!.apiKey, ctx.groupId!);
     expect(receipts.length).toBeGreaterThanOrEqual(1);
 
     const latest = receipts[receipts.length - 1];

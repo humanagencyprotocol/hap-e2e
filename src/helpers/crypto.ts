@@ -46,10 +46,10 @@ export function hashExecutionContext(ctx: Record<string, unknown>): string {
  * protocol error code.
  */
 export class CanonicalValueError extends Error {
-  readonly code: 'BOUNDS_INVALID_VALUE' | 'CONTEXT_INVALID_VALUE';
+  readonly code: 'BOUNDS_INVALID_VALUE' | 'SCOPE_INVALID_VALUE';
   readonly field: string;
 
-  constructor(code: 'BOUNDS_INVALID_VALUE' | 'CONTEXT_INVALID_VALUE', field: string, message: string) {
+  constructor(code: 'BOUNDS_INVALID_VALUE' | 'SCOPE_INVALID_VALUE', field: string, message: string) {
     super(message);
     this.name = 'CanonicalValueError';
     this.code = code;
@@ -89,7 +89,7 @@ function percentEncodeCanonicalValue(raw: string): string {
 export function canonicalRecords(
   params: Record<string, unknown>,
   keyOrder: string[],
-  code: 'BOUNDS_INVALID_VALUE' | 'CONTEXT_INVALID_VALUE',
+  code: 'BOUNDS_INVALID_VALUE' | 'SCOPE_INVALID_VALUE',
 ): string {
   const lines: string[] = [];
 
@@ -124,11 +124,55 @@ export function computeBoundsHash(bounds: Record<string, unknown>, keyOrder: str
 }
 
 /**
- * Compute the v0.4+ context (v0.7: scope) hash. An empty keyOrder hashes the
- * empty string — which is still a hash the mandate must carry.
+ * Compute the v0.7 scope hash (was "context hash" before v0.7 — same
+ * algorithm, protocol.md renamed the concept, not the bytes). An empty
+ * keyOrder hashes the empty string — which is still a hash the mandate must
+ * carry.
  *
- * @throws CanonicalValueError (CONTEXT_INVALID_VALUE) if a value carries a raw LF/CR
+ * @throws CanonicalValueError (SCOPE_INVALID_VALUE) if a value carries a raw LF/CR
  */
-export function computeContextHash(context: Record<string, unknown>, keyOrder: string[]): string {
-  return sha256Hash(canonicalRecords(context, keyOrder, 'CONTEXT_INVALID_VALUE'));
+export function computeScopeHash(scope: Record<string, unknown>, keyOrder: string[]): string {
+  return sha256Hash(canonicalRecords(scope, keyOrder, 'SCOPE_INVALID_VALUE'));
+}
+
+// ─── Profile hash (v0.7) ──────────────────────────────────────────────────────
+//
+// Another DUPLICATE CANONICALIZER, same rationale as above: this mirrors
+// hap-core's `canonicalize` (src/canonicalize.ts, RFC 8785/JCS-style: sorted
+// object keys, recursive, array order preserved) and `computeProfileHash`
+// (src/profile.ts) byte-for-byte, over the PARSED profile document — not file
+// bytes — so this suite can send a `profile_hash` the AS actually agrees with
+// without importing hap-core's own implementation and proving nothing.
+
+function canonicalizeJCS(value: unknown): string {
+  if (value === undefined) {
+    throw new Error('canonicalizeJCS: undefined is not serializable');
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(`canonicalizeJCS: ${value} is not a valid JSON number`);
+  }
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    const items = value.map((el) => (el === undefined ? 'null' : canonicalizeJCS(el)));
+    return '[' + items.join(',') + ']';
+  }
+  const obj = value as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const key of Object.keys(obj).sort()) {
+    const v = obj[key];
+    if (v === undefined) continue;
+    parts.push(JSON.stringify(key) + ':' + canonicalizeJCS(v));
+  }
+  return '{' + parts.join(',') + '}';
+}
+
+/**
+ * `profile_hash` — `"sha256:" + sha256(JCS(parsed))` over the PARSED profile
+ * document (protocol.md → *Profile hash*). Pass the already-`JSON.parse`d
+ * profile object, not raw file text.
+ */
+export function computeProfileHash(parsedProfile: unknown): string {
+  return sha256Hash(canonicalizeJCS(parsedProfile));
 }

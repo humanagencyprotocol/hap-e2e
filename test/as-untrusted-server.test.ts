@@ -102,8 +102,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     if (req.method === 'GET' && url.startsWith('/api/proposals?') && url.includes('status=committed')) {
       return json(res, 200, { proposals: untrusted.committed });
     }
-    if (req.method === 'POST' && url.startsWith('/api/as/receipt') && untrusted.tickets.length > 0) {
-      return json(res, 200, { approved: true, receipt: untrusted.tickets.shift(), idempotent: false });
+    if (req.method === 'POST' && url.startsWith('/api/as/ticket') && untrusted.tickets.length > 0) {
+      return json(res, 200, { approved: true, ticket: untrusted.tickets.shift(), idempotent: false });
     }
   }
   // Everything else (incl. /api/as/pubkey — the public key IS public) is relayed.
@@ -137,7 +137,7 @@ async function createRecord(title: string) {
 
 /** A genuine ticket from the REAL AS, minted with the operator's API key. */
 async function mintGenuineTicket(): Promise<Record<string, unknown>> {
-  const r = await sp.postReceipt(SEED_API_KEY, {
+  const r = await sp.postTicket(SEED_API_KEY, {
     authorizationId,
     boundsHash,
     profileId: RECORDS_PROFILE_ID,
@@ -150,9 +150,9 @@ async function mintGenuineTicket(): Promise<Record<string, unknown>> {
     ...(requestShape.contentHash
       ? { contentHash: requestShape.contentHash, contentBinding: requestShape.contentBinding }
       : {}),
-  } as Parameters<SPClient['postReceipt']>[1]);
+  } as Parameters<SPClient['postTicket']>[1]);
   expect(r.status, JSON.stringify(r.body)).toBeLessThan(300);
-  return r.body.receipt as Record<string, unknown>;
+  return r.body.ticket as Record<string, unknown>;
 }
 
 beforeAll(async () => {
@@ -177,7 +177,7 @@ beforeAll(async () => {
   authorizationId = m.authorizationId;
   boundsHash = m.boundsHash;
   await mcpInternal.pushGateContent(
-    { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.contextHash, context: {} },
+    { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.scopeHash, context: {} },
     RECORDS_PROFILE_ID,
     m.gateContent,
   );
@@ -200,7 +200,7 @@ describe('Through an honest relay', () => {
     expect(result.isError, textOf(result)).toBeFalsy();
     expect(await recordTitles(dataDir)).toContain('untrusted-positive-control');
 
-    const [ticket] = (await sp.getMyReceiptsPage(SEED_API_KEY)).receipts;
+    const [ticket] = (await sp.getMyTicketsPage(SEED_API_KEY)).tickets;
     requestShape = {
       action: String(ticket.action),
       actionType: typeof ticket.actionType === 'string' ? ticket.actionType : undefined,
@@ -221,7 +221,7 @@ describe('A server at the configured URL without the pinned signing key', () => 
     spareTicket = await mintGenuineTicket();
     spareTicket2 = await mintGenuineTicket();
     // Control: the real AS now refuses further writes.
-    const refused = await sp.postReceipt(SEED_API_KEY, {
+    const refused = await sp.postTicket(SEED_API_KEY, {
       authorizationId, boundsHash, profileId: RECORDS_PROFILE_ID,
       action: requestShape.action, actionType: requestShape.actionType, executionContext: requestShape.executionContext,
     });

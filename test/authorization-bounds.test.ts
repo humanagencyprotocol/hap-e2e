@@ -26,15 +26,17 @@ import { SPClient } from '../src/helpers/sp-client.js';
 import {
   hashGateContent,
   hashExecutionContext,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const SP_PORT = 15100; // distinct port from main e2e suite
 const SP_URL = `http://localhost:${SP_PORT}`;
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILE_ID = PROFILE_V07.charge;
 
 const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
 
@@ -96,14 +98,15 @@ describe('Authorization Bounds — Attestation', () => {
       amount: TIGHT_BOUNDS.amount_max,
       currency: CONTEXT.currency,
     });
-    const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+    const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
-    const result = await sp.submitAttestation(agentApiKey, {
+    const result = await sp.submitMandate(agentApiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: groupId,
       bounds: TIGHT_BOUNDS,
       // bounds_hash omitted on purpose — AS computes it from bounds + profile.
-      context_hash: contextHash,
+      scope_hash: contextHash,
       domain: 'owner',
       did: agentDid,
       commitment_mode: 'automatic',
@@ -124,7 +127,7 @@ describe('Authorization Bounds — Attestation', () => {
 
 describe('Authorization Bounds — Receipt Enforcement', () => {
   it('$20 receipt succeeds (under per-tx max of $25)', async () => {
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -134,11 +137,11 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     });
 
     expect(result.status).toBe(201);
-    expect(result.body.receipt).toBeTruthy();
+    expect(result.body.ticket).toBeTruthy();
   });
 
   it('$30 receipt fails — exceeds per-tx amount_max of $25', async () => {
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -149,14 +152,14 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
 
     expect(result.status).toBe(403);
     const err = (result.body.errors as Array<Record<string, unknown>>)[0];
-    expect(err.code).toBe('LIMIT_EXCEEDED');
+    expect(err.code).toBe('BOUND_EXCEEDED');
     expect(String(err.message)).toMatch(/per-transaction|amount/i);
     expect(err.expected).toBe(25);
     expect(err.actual).toBe(30);
   });
 
   it('second $20 receipt succeeds (cumulative: $40, under daily max $50)', async () => {
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -166,9 +169,9 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     });
 
     expect(result.status).toBe(201);
-    expect(result.body.receipt).toBeTruthy();
+    expect(result.body.ticket).toBeTruthy();
 
-    const receipt = result.body.receipt as Record<string, unknown>;
+    const receipt = result.body.ticket as Record<string, unknown>;
     const cumState = receipt.cumulativeState as Record<string, unknown> | undefined;
     if (cumState) {
       const daily = cumState.daily as Record<string, unknown>;
@@ -178,7 +181,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
   });
 
   it('third $20 receipt fails — cumulative $60 exceeds daily amount_max of $50', async () => {
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -189,7 +192,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
 
     expect(result.status).toBe(403);
     const err = (result.body.errors as Array<Record<string, unknown>>)[0];
-    expect(err.code).toBe('LIMIT_EXCEEDED');
+    expect(err.code).toBe('CUMULATIVE_LIMIT_EXCEEDED');
     expect(String(err.message)).toMatch(/daily.*amount|amount.*daily|cumulative/i);
     expect(err.expected).toBe(50);
   });
@@ -197,7 +200,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
   it('receipt response includes cumulative state values', async () => {
     // Daily amount is $40 (from two $20 successes). A $5 transaction stays under
     // the $50 daily ceiling but may hit the daily count limit (3) — both valid.
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',
@@ -207,7 +210,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     });
 
     if (result.status === 201) {
-      const receipt = result.body.receipt as Record<string, unknown>;
+      const receipt = result.body.ticket as Record<string, unknown>;
       expect(receipt).toBeTruthy();
       expect(typeof receipt.id).toBe('string');
       expect(typeof receipt.timestamp).toBe('number');
@@ -218,7 +221,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     } else {
       expect(result.status).toBe(403);
       const err = (result.body.errors as Array<Record<string, unknown>>)[0];
-      expect(err.code).toBe('LIMIT_EXCEEDED');
+      expect(err.code).toBe('CUMULATIVE_LIMIT_EXCEEDED');
     }
   });
 
@@ -226,7 +229,7 @@ describe('Authorization Bounds — Receipt Enforcement', () => {
     // actionType is the cumulative-bucket key. The AS used to derive a missing
     // one from the tool name (forbidden by protocol.md → Receipt Request rules);
     // it now fails closed. A rejected request consumes no bounds.
-    const result = await sp.postReceipt(agentApiKey, {
+    const result = await sp.postTicket(agentApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'charge',

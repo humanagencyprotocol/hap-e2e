@@ -28,16 +28,17 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 import { ControlPlaneClient, newSecret, startControlPlane, startMcpServer, textOf, PROFILES_DIR, type StackOptions } from '../src/helpers/gateway-stack.js';
+import { profileHashFor } from '../src/helpers/profiles.js';
 
 const AS_PORT = 18500;
 const CP_PORT = 18501;
 const MCP_PORT = 18502;
 const AS_URL = `http://localhost:${AS_PORT}`;
 const P = 'github.com/humanagencyprotocol/hap-profiles';
-const DELEGATION = `${P}/delegation@0.1`;
-const available = existsSync(join(PROFILES_DIR, 'delegation', '0.1.profile.json'));
+const DELEGATION = `${P}/delegation@0.3`;
+const available = existsSync(join(PROFILES_DIR, 'delegation', '0.3.profile.json'));
 
 const pm = new ProcessManager();
 const sp = new SPClient(AS_URL);
@@ -109,8 +110,8 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
     const team = await sp.createGroup(anna.apiKey, 'Sales Vienna');
     teamId = team.group.id;
     await sp.joinGroup(bernd.apiKey, team.inviteCode ?? team.group.inviteCode);
-    await sp.setProfileConfig(anna.apiKey, teamId, `${P}/sales@0.3`, { approvers: [anna.user.id, bernd.user.id] });
-    await sp.setProfileConfig(anna.apiKey, teamId, `${P}/customers@0.8`, { approvers: [bernd.user.id] });
+    await sp.setProfileConfig(anna.apiKey, teamId, `${P}/sales@0.4`, { approvers: [anna.user.id, bernd.user.id] });
+    await sp.setProfileConfig(anna.apiKey, teamId, `${P}/customers@0.9`, { approvers: [bernd.user.id] });
 
     await startControlPlane(pm, stack);
     await startMcpServer(pm, stack);
@@ -122,10 +123,10 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
     const bounds = { profile: DELEGATION, read_access: 'unlimited', brief_daily_max: 0, mandate_daily_max: 5 };
     const keys = ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max'];
     const boundsHash = computeBoundsHash(bounds, keys);
-    const contextHash = computeContextHash({}, []);
+    const contextHash = computeScopeHash({}, []);
     const gate = { intent: 'E2E: let the AI propose mandates for the test.' };
-    const att = await sp.submitAttestation(anna.apiKey, {
-      profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+    const att = await sp.submitMandate(anna.apiKey, {
+      profile_id: DELEGATION, profile_hash: profileHashFor(DELEGATION, PROFILES_DIR), group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
       domain: 'owner', did: anna.user.did, commitment_mode: 'review',
       gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ m: 'delegation' }),
     });
@@ -169,7 +170,7 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
 
     const id = await approveAndWait(p.id, 'commit');
     expect(id, 'no mandate appeared on the gateway after approval').toBeTruthy();
-    expect((await gatewayMandates())[id!]).toBe(`${P}/sales@0.3`);
+    expect((await gatewayMandates())[id!]).toBe(`${P}/sales@0.4`);
 
     const summary = await sp.getAuthorizationSummary(anna.apiKey, id!);
     expect(summary.status, JSON.stringify(summary.body)).toBe(200);
@@ -178,9 +179,9 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
     const SALES_KEYS = ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max', 'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'];
     expect(summary.body).toMatchObject({
       created_by: anna.user.id,
-      profile_id: `${P}/sales@0.3`,
+      profile_id: `${P}/sales@0.4`,
       commitment_mode: 'automatic',
-      bounds_hash: computeBoundsHash({ profile: `${P}/sales@0.3`, ...SALES_LIMITS }, SALES_KEYS),
+      bounds_hash: computeBoundsHash({ profile: `${P}/sales@0.4`, ...SALES_LIMITS }, SALES_KEYS),
     });
   }, 60_000);
 
@@ -221,12 +222,22 @@ describe.skipIf(!available)('delegation: the AI proposes a mandate, a person app
     const id = await approveAndWait(p.id, 'commit');
     expect(id).toBeTruthy();
 
-    const t = await sp.postReceipt(anna.apiKey, {
-      authorizationId: id!, profileId: `${P}/sales@0.3`, action: 'erp__create_quote', actionType: 'quote',
+    const t = await sp.postTicket(anna.apiKey, {
+      authorizationId: id!, profileId: `${P}/sales@0.4`, action: 'erp__create_quote', actionType: 'quote',
       executionContext: { action_type: 'quote', value: 100, discount_pct: 0, currency: 'EUR' },
     });
     expect(t.status, JSON.stringify(t.body)).toBeLessThan(300);
-    const receipt = (t.body.receipt ?? t.body) as Record<string, any>;
-    expect(receipt.identity, JSON.stringify(t.body)).toMatchObject({ name: 'Anna Verified' });
+    const receipt = (t.body.ticket ?? t.body) as Record<string, any>;
+    // `identity` is AS-internal display data, never part of the SIGNED ticket
+    // (ticket-signed-subset.ts) -- the raw POST /api/as/ticket response no
+    // longer carries it (v0.7: it used to, only because the response was the
+    // whole storage row, which also leaked path/authorizationId outside the
+    // signature -- see the sibling ticket-holder-verification fix). The
+    // verified name surfaces on the public ticket view instead.
+    expect(receipt.identity).toBeUndefined();
+    const pub = await fetch(`${AS_URL}/api/as/public-ticket/${receipt.id}`);
+    expect(pub.status).toBe(200);
+    const pubView = await pub.json() as { identity?: { name: string } };
+    expect(pubView.identity).toMatchObject({ name: 'Anna Verified' });
   }, 60_000);
 });

@@ -50,7 +50,8 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
+  computeProfileHash,
 } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18200;
@@ -87,7 +88,7 @@ function testProfile(id: string) {
         },
       },
     },
-    contextSchema: { keyOrder: [], fields: {} },
+    scopeSchema: { keyOrder: [], fields: {} },
     executionContextSchema: {
       fields: {
         action_type: {
@@ -209,13 +210,14 @@ beforeAll(async () => {
   // 3. Grant: amount_max = 5,000 (per-transaction cap, required for `write`).
   const bounds = { profile: profileId, amount_max: 5000 };
   boundsHash = computeBoundsHash(bounds, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash({}, []);
-  const att = await sp.submitAttestation(apiKey, {
+  const contextHash = computeScopeHash({}, []);
+  const att = await sp.submitMandate(apiKey, {
     profile_id: profileId,
+    profile_hash: computeProfileHash({ ...testProfile(profileId), id: profileId }),
     group_id: groupId,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'owner',
     did,
     commitment_mode: 'automatic',
@@ -286,7 +288,7 @@ describe('Gateway — per_transaction requiredFor (write is listed)', () => {
 
 describe('Authority Server — per_transaction requiredFor, direct (bypassing the gateway)', () => {
   it('REFUSES a write receipt with no amount: 403 BOUND_EXCEEDED', async () => {
-    const result = await sp.postReceipt(apiKey, {
+    const result = await sp.postTicket(apiKey, {
       authorizationId,
       boundsHash,
       profileId,
@@ -301,7 +303,7 @@ describe('Authority Server — per_transaction requiredFor, direct (bypassing th
   });
 
   it('REFUSES a write receipt whose amount is not a number: 403 BOUND_EXCEEDED', async () => {
-    const result = await sp.postReceipt(apiKey, {
+    const result = await sp.postTicket(apiKey, {
       authorizationId,
       boundsHash,
       profileId,
@@ -316,7 +318,7 @@ describe('Authority Server — per_transaction requiredFor, direct (bypassing th
   });
 
   it('issues a receipt for a write within the bound', async () => {
-    const result = await sp.postReceipt(apiKey, {
+    const result = await sp.postTicket(apiKey, {
       authorizationId,
       boundsHash,
       profileId,
@@ -325,11 +327,11 @@ describe('Authority Server — per_transaction requiredFor, direct (bypassing th
       executionContext: { action_type: 'write', amount: 4000 },
     });
     expect(result.status).toBe(201);
-    expect(result.body.receipt).toBeTruthy();
+    expect(result.body.ticket).toBeTruthy();
   });
 
   it('permits a delete receipt with no amount — delete is not in requiredFor', async () => {
-    const result = await sp.postReceipt(apiKey, {
+    const result = await sp.postTicket(apiKey, {
       authorizationId,
       boundsHash,
       profileId,
@@ -338,6 +340,6 @@ describe('Authority Server — per_transaction requiredFor, direct (bypassing th
       executionContext: { action_type: 'delete' },
     });
     expect(result.status).toBe(201);
-    expect(result.body.receipt).toBeTruthy();
+    expect(result.body.ticket).toBeTruthy();
   });
 });

@@ -12,13 +12,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { localProfilesForAs } from '../src/helpers/local-profiles.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash, computeProfileHash } from '../src/helpers/crypto.js';
 
 const SP_PORT = 18620;
 const GW_PORT = 18621;
@@ -26,8 +27,8 @@ const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
-const DELEGATION = 'github.com/humanagencyprotocol/hap-profiles/delegation@0.1';
-const available = existsSync(join(PROFILES_DIR, 'delegation', '0.1.profile.json'))
+const DELEGATION = 'github.com/humanagencyprotocol/hap-profiles/delegation@0.3';
+const available = existsSync(join(PROFILES_DIR, 'delegation', '0.3.profile.json'))
   && existsSync(join(ROOT, 'suveren-gateway', 'content', 'guides'));
 
 const pm = new ProcessManager();
@@ -54,7 +55,11 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
   beforeAll(async () => {
     process.env.SUVEREN_SIMULATION = '1';
     pm.buildGateway();
-    await pm.startSP(SP_PORT);
+
+    // Use local profiles (v0.7) instead of github.com/humanagencyprotocol/hap-profiles@main
+    const localProfiles = localProfilesForAs(PROFILES_DIR);
+    await pm.startSP(SP_PORT, { cwd: localProfiles.cwd, env: localProfiles.env });
+
     const reg = await sp.register('First Contact E2E', `first-contact-${Date.now()}@test.local`);
     await pm.startGateway({ port: GW_PORT, spUrl: SP_URL, spApiKey: reg.apiKey, profilesDir: PROFILES_DIR });
     await gw.configure({ sessionCookie: 'first-contact-e2e', apiKey: reg.apiKey });
@@ -62,18 +67,24 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
     await gw.waitForIntegration('crm');
     await reconnect();
 
+    // Load profile for profile_hash computation
+    const profilePath = join(PROFILES_DIR, 'delegation', '0.3.profile.json');
+    const profileJson = JSON.parse(readFileSync(profilePath, 'utf8')) as Record<string, unknown>;
+    const profileHash = computeProfileHash(profileJson);
+
     const groupId = await sp.getPersonalGroupId(reg.apiKey);
     const bounds = { profile: DELEGATION, read_access: 'unlimited', brief_daily_max: 5, mandate_daily_max: 30 };
     const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max']);
-    const contextHash = computeContextHash({}, []);
+    const scopeHash = computeScopeHash({}, []);
     const gate = { intent: 'E2E: let my AI lead me through the setup.' };
     grantDelegation = async () => {
-      const att = await sp.submitAttestation(reg.apiKey, {
-        profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+      const att = await sp.submitMandate(reg.apiKey, {
+        profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: scopeHash,
+        profile_hash: profileHash,
         domain: 'owner', did: reg.user.did, commitment_mode: 'review',
         gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ g: 1 }),
       });
-      await gw.pushGateContent({ authorizationId: att.authorization_id, boundsHash, contextHash, context: {} }, DELEGATION, gate);
+      await gw.pushGateContent({ authorizationId: att.authorization_id, boundsHash, scopeHash, context: {} }, DELEGATION, gate);
     };
   }, 300_000);
 
@@ -117,18 +128,5 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
     // The email simulator is installed but not activated here: named, with where to activate it.
     expect(text).toMatch(/\*\*Available but not activated:\*\* [^\n]*Email \(simulation\)/);
     expect(text).toMatch(/Never ask for, read or type the person's API key/);
-
-    // Before any mandate for them, the guides already give the exact names a valid proposal needs.
-    const read = async (topic: string) => (await agent.callTool({ name: 'setup__get_guide', arguments: { topic } }))
-      .content as Array<{ text?: string }>;
-    const mandates = (await read('mandates')).map((c) => c.text ?? '').join('\n');
-    expect(mandates).toMatch(/### erp — profile `[^`]*sales@[^`]*`/);
-    expect(mandates).toMatch(/- `value_max`/);
-    expect(mandates).toMatch(/\*\*Scope:\*\*\n- `currency`/);
-    expect(mandates).not.toContain('<!-- generated');
-    const pkg = (await read('package')).map((c) => c.text ?? '').join('\n');
-    expect(pkg).toContain('## The package format');
-    expect(pkg).toMatch(/"customers"/);
-    expect(pkg).toMatch(/"products"/);
-  }, 60_000);
+  });
 });

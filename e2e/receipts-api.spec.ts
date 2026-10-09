@@ -13,7 +13,7 @@ test.describe('Profile-config (group caps) API', () => {
   let groupId: string;
   let adminKey: string;
   let memberKey: string;
-  const profileId = PROFILE_IDS[0]; // charge@0.4
+  const profileId = PROFILE_IDS[0]; // charge (newest published version)
   const pcUrl = () => `${SP_URL}/api/groups/${groupId}/profile-config/${encodeURIComponent(profileId)}`;
 
   test.beforeAll(async ({ request }) => {

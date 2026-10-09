@@ -57,11 +57,11 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     userDid = sessionData.user?.did ?? 'did:hap:agentuser';
 
     const data = await spApiAttest(request, apiKey, {
-      profile_id: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
+      profile_id: CUSTOMERS_PROFILE,
       domain: 'owner',
       did: userDid,
-      bounds: { profile: 'customers', write_daily_max: 5, delete_daily_max: 2 },
-      context_hash: 'sha256:' + '0'.repeat(64),
+      bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 5, delete_daily_max: 2, setup_daily_max: 0 },
+      scope_hash: 'sha256:' + '0'.repeat(64),
       gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
       execution_context_hash: 'sha256:' + 'd'.repeat(64),
       defer_commitment: true,
@@ -77,7 +77,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
       headers: { 'x-api-key': apiKey },
       data: {
         authorization_id: authorizationId,
-        profile_id: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
+        profile_id: CUSTOMERS_PROFILE,
         pending_domains: ['owner'],
         tool: 'crm__create_contact',
         tool_args: { name: 'Jane Smith', email: 'jane@example.com', type: 'customer' },
@@ -123,11 +123,11 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     expect(revokeRes.ok()).toBe(true);
 
     // Receipt should be rejected
-    const receiptRes = await request.post(`${SP_URL}/api/as/receipt`, {
+    const receiptRes = await request.post(`${SP_URL}/api/as/ticket`, {
       headers: { 'x-api-key': apiKey },
       data: {
         authorizationId,
-        profileId: 'github.com/humanagencyprotocol/hap-profiles/customers@0.4',
+        profileId: CUSTOMERS_PROFILE,
         action: 'create_contact',
         // Required: without it the AS answers 400 INVALID_ACTION_TYPE before
         // it ever reaches the revocation check this test is about.

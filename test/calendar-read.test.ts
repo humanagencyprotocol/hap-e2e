@@ -28,7 +28,8 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? '';
@@ -40,7 +41,7 @@ const GW_PORT = 17281;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/calendar@0.4';
+const PROFILE_ID = PROFILE_V07.calendar;
 const PROFILE_SHORT = 'calendar';
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
@@ -98,15 +99,16 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: 'cal-read-e2e', apiKey });
 
   const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+  const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
   const gateContent = { intent: 'Read the primary calendar only for E2E.' };
 
-  const att = await sp.submitAttestation(apiKey, {
+  const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: groupId,
     bounds: BOUNDS,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'owner', // personal grant — matches the crm-lifecycle pattern; adjust if the deployment maps calendar to another governance domain
     did: user.user.did,
     commitment_mode: 'automatic',

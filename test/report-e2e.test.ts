@@ -51,14 +51,13 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-// The hap-core the gateway and AS ship (the suite's own @humanagencyp/hap-core is
-// pinned older and predates verifyReceiptSignature).
-import { verifyReceiptSignature } from 'hap-core-current';
+import { verifyTicketSignature, encodeDidKey } from '@humanagencyp/hap-core';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash, computeProfileHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 import {
   ControlPlaneClient, GW_DIR, MANIFESTS_DIR, PROFILES_DIR, RECORDS_DIST, RECORDS_INTEGRATION, RECORDS_PROFILE_ID,
   newSecret, startControlPlane, startMcpServer, textOf, type StackOptions,
@@ -80,11 +79,55 @@ const WINDOW_DAYS = 1;
 const OLD_AGE_SECONDS = 3 * DAY;
 
 const P = 'github.com/humanagencyprotocol/hap-profiles';
-const REPORTING = `${P}/reporting@0.2`;
-const REPORTING_OLD = `${P}/reporting@0.1`;
-const DELEGATION = `${P}/delegation@0.1`;
+const REPORTING = PROFILE_V07.reporting;
+// v0.7: a pre-0.7 reporting mandate (e.g. the old reporting@0.1, which has
+// no window bound at all) can no longer be ISSUED post-switch -- any
+// profile still naming the retired decision_owner gate fails PROFILE_INVALID
+// at the AS before a mandate could ever exist to test the "every report
+// tool refuses it" behaviour. That behaviour itself is NOT version-specific
+// (window.ts's resolveAgeBoundField reads the bounds SCHEMA, never a profile
+// id) so it is reproduced here with a throwaway, v0.7-valid community
+// profile that simply declares no reporting-window bound — see
+// REPORTING_OLD_DOC below, registered in beforeAll.
+let REPORTING_OLD = '';
+let REPORTING_OLD_DOC: Record<string, unknown>;
+function reportingOldFixtureDoc(id: string): Record<string, unknown> {
+  return {
+    id,
+    name: 'E2E reporting-without-window fixture',
+    version: '0.0',
+    description: 'Throwaway community profile: a reporting profile with no reporting-window bound (mirrors reporting@0.1, which cannot be issued post-v0.7-switch).',
+    boundsSchema: {
+      actionTypes: ['report'],
+      keyOrder: ['profile', 'read_access', 'report_daily_max'],
+      fields: {
+        profile: { type: 'string', required: true },
+        read_access: {
+          type: 'string', required: true, displayName: 'Read evidence',
+          boundType: { kind: 'enum', values: ['unlimited', 'none'] }, default: 'unlimited',
+        },
+        report_daily_max: {
+          type: 'number', required: true, displayName: 'Report updates per day',
+          boundType: { kind: 'cumulative_count', window: 'daily' }, appliesTo: ['report'],
+        },
+      },
+    },
+    executionContextSchema: {
+      fields: {
+        report_count_daily: {
+          source: 'cumulative', cumulativeField: '_count', window: 'daily',
+          description: 'Running daily count of report writes', required: true,
+          constraint: { type: 'number', enforceable: ['max'] },
+        },
+      },
+    },
+    requiredGates: ['bounds', 'intent', 'commitment', 'mandate_owner'],
+    ttl: { default: 86400, max: 86400 },
+  };
+}
+const DELEGATION = PROFILE_V07.delegation;
 const available =
-  existsSync(join(PROFILES_DIR, 'reporting', '0.2.profile.json')) &&
+  existsSync(join(PROFILES_DIR, 'reporting', '0.3.profile.json')) &&
   existsSync(join(MANIFESTS_DIR, 'mail.json')) &&
   existsSync(RECORDS_DIST);
 
@@ -104,10 +147,11 @@ interface MandateSpec {
   bounds: Record<string, string | number>;
 }
 
-const SALES = { id: `${P}/sales@0.2`, keyOrder: ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max', 'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'], ctxOrder: ['currency'], ctx: { currency: 'EUR' } };
-const CUSTOMERS = { id: `${P}/customers@0.8`, keyOrder: ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'], ctxOrder: ['contact_type'], ctx: { contact_type: 'customer' } };
+const SALES = { id: PROFILE_V07.sales, keyOrder: ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max', 'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'], ctxOrder: ['currency'], ctx: { currency: 'EUR' } };
+const CUSTOMERS = { id: PROFILE_V07.customers, keyOrder: ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'], ctxOrder: ['contact_type'], ctx: { contact_type: 'customer' } };
 const EMAIL = {
-  id: `${P}/email@0.7`, keyOrder: ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max', 'setup_daily_max'],
+  // v0.7: read_daily_max is gone (replaced by read_access; never enforced, CONFORMANCE.md).
+  id: PROFILE_V07.email, keyOrder: ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'],
   ctxOrder: ['allowed_recipients', 'allowed_domains'], ctx: { allowed_recipients: 'einkauf@huber.example,office@steiner.example', allowed_domains: 'huber.example,steiner.example' },
 };
 
@@ -116,8 +160,8 @@ const SPECS: Record<string, MandateSpec> = {
   'sales:work': { ...SALES, bounds: { read_access: 'unlimited', value_max: 1000, discount_max: 10, order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10, setup_daily_max: 0 } },
   'customers:setup': { ...CUSTOMERS, bounds: { read_access: 'none', export_access: 'none', write_daily_max: 0, delete_daily_max: 0, setup_daily_max: 1 } },
   'customers:work': { ...CUSTOMERS, bounds: { read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 } },
-  'email:setup': { ...EMAIL, bounds: { read_access: 'none', recipient_max: 0, send_daily_max: 0, read_max_age_days: 0, read_daily_max: 0, setup_daily_max: 1 } },
-  'email:work': { ...EMAIL, bounds: { read_access: 'unlimited', recipient_max: 1, send_daily_max: 10, read_max_age_days: 3650, read_daily_max: 1000, setup_daily_max: 0 } },
+  'email:setup': { ...EMAIL, bounds: { read_access: 'none', recipient_max: 0, send_daily_max: 0, read_max_age_days: 0, setup_daily_max: 1 } },
+  'email:work': { ...EMAIL, bounds: { read_access: 'unlimited', recipient_max: 1, send_daily_max: 10, read_max_age_days: 3650, setup_daily_max: 0 } },
   'records:old': { id: RECORDS_PROFILE_ID, keyOrder: ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access'], ctxOrder: [], ctx: {}, bounds: { read_access: 'unlimited', write_daily_max: 20, delete_access: 'allowed', archive_access: 'allowed' } },
   'delegation': { id: DELEGATION, keyOrder: ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max'], ctxOrder: [], ctx: {}, bounds: { read_access: 'unlimited', brief_daily_max: 0, mandate_daily_max: 5 } },
   'reporting:0.1': { id: REPORTING_OLD, keyOrder: ['profile', 'read_access', 'report_daily_max'], ctxOrder: [], ctx: {}, bounds: { read_access: 'unlimited', report_daily_max: 5 } },
@@ -165,10 +209,13 @@ async function grant(name: string, mode: 'automatic' | 'review' = 'automatic'): 
   const s = SPECS[name];
   const bounds = { profile: s.id, ...s.bounds };
   const boundsHash = computeBoundsHash(bounds, s.keyOrder);
-  const contextHash = computeContextHash(s.ctx, s.ctxOrder);
+  const contextHash = computeScopeHash(s.ctx, s.ctxOrder);
   const gate = { intent: intentOf(name) };
-  const att = await sp.submitAttestation(user.apiKey, {
-    profile_id: s.id, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+  const profileHash = s.id === REPORTING_OLD
+    ? computeProfileHash({ ...REPORTING_OLD_DOC, id: REPORTING_OLD })
+    : profileHashFor(s.id, PROFILES_DIR);
+  const att = await sp.submitMandate(user.apiKey, {
+    profile_id: s.id, profile_hash: profileHash, group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
     domain: 'owner', did: user.user.did, commitment_mode: mode,
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ name }),
   });
@@ -203,7 +250,7 @@ type AsTicket = Record<string, any> & { id: string; action: string; timestamp: n
 
 /** The caller's tickets as the Authority Server itself lists them — the source of truth. */
 async function asTickets(): Promise<AsTicket[]> {
-  const { receipts } = await sp.getMyReceiptsPage(user.apiKey, { limit: 200 });
+  const { tickets: receipts } = await sp.getMyTicketsPage(user.apiKey, { limit: 200 });
   return receipts as AsTicket[];
 }
 
@@ -492,6 +539,21 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
     asPublicKey = ((await (await fetch(`${AS_URL}/api/as/pubkey`)).json()) as { publicKey: string }).publicKey;
     expect(asPublicKey).toMatch(/^[0-9a-f]{64}$/);
 
+    // The "reporting mandate with no window bound" fixture (see the const's
+    // own comment) -- author it on the AS and point SPECS['reporting:0.1']
+    // at the id the community-profile store actually assigned.
+    // Must end "/reporting@<version>" -- the gateway's report builtin
+    // recognizes the reporting authority by profileMatches(id, 'reporting')
+    // (tool-proxy.ts), which checks the id's last path segment, not a
+    // registry lookup. The version must sort BELOW the real reporting
+    // profile's newest (0.3) -- the gateway's own "which version is
+    // current" picker compares the number after '@', and a fixture that
+    // outranked the real one would shadow it for setup__create_mandate too.
+    const createdOld = await sp.createProfile(user.apiKey, reportingOldFixtureDoc('reporting@0.0'));
+    REPORTING_OLD = createdOld.profile_id;
+    REPORTING_OLD_DOC = reportingOldFixtureDoc(REPORTING_OLD);
+    SPECS['reporting:0.1'].id = REPORTING_OLD;
+
     // ── 0. real, non-simulation work in this gateway's archive ──
     // Three days ago: the gateway on the same shifted clock, NOT in simulation mode.
     await startControlPlane(pm, liveStack(clock.env), 'cp-live-old');
@@ -654,26 +716,27 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
   }, 30_000);
 
   it('3b. a 367-day window: the real AS refuses it (422 BOUNDS_INVALID_VALUE) and signs nothing', async () => {
-    const mine = async () => ((await asApi('GET', '/api/attestations/mine')).body.attestations as any[]);
+    const mine = async () => ((await asApi('GET', '/api/mandates/mine')).body.mandates as any[]);
     const before = await mine();
     const s = SPECS.reporting;
     const bounds = { profile: s.id, ...s.bounds, read_max_age_days: 367 };
     const authorizationId = `authz_${randomUUID()}`;
-    const r = await sp.submitAttestationRaw(user.apiKey, {
-      authorization_id: authorizationId, profile_id: s.id, group_id: groupId, bounds,
-      bounds_hash: computeBoundsHash(bounds, s.keyOrder), context_hash: computeContextHash({}, []),
+    const r = await sp.submitMandateRaw(user.apiKey, {
+      authorization_id: authorizationId, profile_id: s.id, profile_hash: profileHashFor(s.id, PROFILES_DIR), group_id: groupId, bounds,
+      bounds_hash: computeBoundsHash(bounds, s.keyOrder), scope_hash: computeScopeHash({}, []),
       domain: 'owner', did: user.user.did, commitment_mode: 'automatic',
       gate_content_hashes: hashGateContent({ intent: 'too wide' }), execution_context_hash: hashExecutionContext({ m: 367 }),
     });
     expect(r.status, JSON.stringify(r.body)).toBe(422);
-    expect(r.body).toMatchObject({ error: 'BOUNDS_INVALID_VALUE', field: 'read_max_age_days', maximum: 366 });
+    const err = (r.body.errors as Array<Record<string, unknown>>)[0];
+    expect(err).toMatchObject({ code: 'BOUNDS_INVALID_VALUE', field: 'read_max_age_days', maximum: 366 });
     expect(r.body).not.toHaveProperty('blob');
-    expect(r.body).not.toHaveProperty('attestation_id');
+    expect(r.body).not.toHaveProperty('mandate_id');
     const after = await mine();
     expect(after.map((a) => a.authorization_id).sort()).toEqual(before.map((a) => a.authorization_id).sort());
     expect(after.some((a) => a.authorization_id === authorizationId)).toBe(false);
-    const status = await asApi('GET', `/api/attestations?authorization_id=${authorizationId}`);
-    expect(status.body.blob ?? status.body.attestations?.[0]?.blob).toBeUndefined();
+    const status = await asApi('GET', `/api/mandates?authorization_id=${authorizationId}`);
+    expect(status.body.blob ?? status.body.mandates?.[0]?.blob).toBeUndefined();
   }, 30_000);
 
   it('3c. a 367-day window: the create_mandate ceremony refuses it at the call — no proposal; 366 becomes one (rejected)', async () => {
@@ -698,7 +761,7 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
     expect(await pending()).toHaveLength(0);
   }, 60_000);
 
-  it('3d. a reporting@0.1 mandate: every report tool refuses it, and a refused write consumes no ticket', async () => {
+  it('3d. a reporting mandate whose profile declares no window bound: every report tool refuses it, and a refused write consumes no ticket', async () => {
     await grant('reporting:0.1');
     await reconnect();
     const tools = ['report__get_records', 'report__get_ticket', 'report__list_cases', 'report__list_tickets', 'report__write_report'];
@@ -711,18 +774,20 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
     for (const tool of tools) {
       const r = await call(tool, args[tool]);
       expect(r.denied, `${tool}: ${r.text}`).toBe(true);
-      expect(r.text, tool).toMatch(/older profile version — create a new reporting mandate \(reporting@0\.2\)/);
+      // v0.7: the refusal no longer names a hardcoded version (see window.ts).
+      expect(r.text, tool).toMatch(/older profile version — create a new reporting mandate/);
+      expect(r.text, tool).not.toMatch(/@\d+\.\d+/);
       expect(r.text, tool).not.toContain(t.c1Quote.action);
     }
     expect((await asTickets()).length).toBe(before);
   }, 60_000);
 
-  it('3e. reporting@0.2 with a one-day window: issued by the real AS with read_max_age_days, and the tools use it', async () => {
+  it('3e. reporting with a one-day window: issued by the real AS with read_max_age_days, and the tools use it', async () => {
     const m = await grant('reporting');
     const summary = await sp.getAuthorizationSummary(user.apiKey, m.id);
     expect(summary.status).toBe(200);
     expect(summary.body).toMatchObject({ profile_id: REPORTING, commitment_mode: 'automatic', bounds_hash: m.boundsHash });
-    const mine = ((await asApi('GET', '/api/attestations/mine')).body.attestations as any[]).find((a) => a.authorization_id === m.id);
+    const mine = ((await asApi('GET', '/api/mandates/mine')).body.mandates as any[]).find((a) => a.authorization_id === m.id);
     expect(mine.bounds).toMatchObject({ read_max_age_days: WINDOW_DAYS });
     await reconnect();
     const listed = await call('report__list_tickets', {});
@@ -1269,7 +1334,10 @@ loose text
     const all = new Map((await asTickets()).map((x) => [x.id, x]));
     const ids = (bundle.tickets as any[]).map((x) => x.id);
     for (const ticket of bundle.tickets as any[]) {
-      await expect(verifyReceiptSignature(ticket, asPublicKey), ticket.id).resolves.toBeUndefined();
+      await expect(
+        verifyTicketSignature(ticket, { trustedIssuers: [encodeDidKey(Buffer.from(asPublicKey, 'hex'))] }),
+        ticket.id,
+      ).resolves.toBeUndefined();
       const src = all.get(ticket.id)!;
       expect(src, ticket.id).toBeTruthy();
       expect(ticket.signature).toBe(src.signature);
@@ -1279,7 +1347,9 @@ loose text
     const expected = new Set([...bundle.proof.ticketsReferenced, ...bundle.coverage.ticketsInPeriod].filter((id) => all.has(id) && id !== tOld.id));
     expect([...ids].sort()).toEqual([...expected].sort());
     for (const k of Object.keys(t)) expect(ids).toContain(t[k].id);
-    await expect(verifyReceiptSignature(bundle.tickets[0], randomBytes(32).toString('hex'))).rejects.toThrow();
+    await expect(
+      verifyTicketSignature(bundle.tickets[0], { trustedIssuers: [encodeDidKey(randomBytes(32))] }),
+    ).rejects.toThrow();
   }, 60_000);
 
   it('8c. the verify-report CLI: unconfirmed key → 2, --key → 0, --online → 0; the not-verifiable references are listed', () => {

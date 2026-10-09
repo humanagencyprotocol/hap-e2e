@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { fetchResilient } from './http.js';
 
 /** Monotonic counter so auto-defaulted idempotency keys are unique per call. */
-let receiptKeySeq = 0;
+let ticketKeySeq = 0;
 
 /**
  * Mint a per-ceremony authorization identity, exactly as the gateway UI does
@@ -15,7 +15,7 @@ export function mintAuthorizationId(): string {
 }
 
 /**
- * Thin HTTP client for the Suveren Authority Server's REST API.
+ * Thin HTTP client for the Suveren Authority Server's REST API (v0.7).
  *
  * This is the seam that makes the live suite Suveren-specific. HAP fixes
  * payloads, canonicalisation and refusals but deliberately defines no
@@ -147,12 +147,11 @@ export class SPClient {
   }
 
   /**
-   * v0.4 profile config — replaces the removed `setLimits` and `setPathDomains`
-   * (both 410 in v0.4). `caps` are the per-bound thresholds above which approval
+   * v0.7 profile config — `caps` are the per-bound thresholds above which approval
    * is required; `approvers` are the userIds who can approve above-cap requests.
    * PUT /api/groups/:id/profile-config/:profileId — body { approvers, caps? }.
    * For personal-group bound-enforcement flows this is usually NOT needed: the
-   * attestation's own bounds are enforced directly.
+   * mandate's own bounds are enforced directly.
    */
   async setProfileConfig(
     apiKey: string,
@@ -173,17 +172,17 @@ export class SPClient {
     return res.json();
   }
 
-  // ── Attestation ─────────────────────────────────────────
+  // ── Mandate (v0.7) ──────────────────────────────────────
 
   /**
-   * POST /api/as/attest — per-ceremony identity wire (v0.6).
+   * POST /api/as/mandate — issue a signed mandate (v0.7).
    *
    * The caller (the ceremony) mints the `authorization_id` (`authz_<uuid>`);
    * when omitted the helper mints one, mirroring the gateway UI. The AS
    * creates the identity NX — replaying the same id with the same content is
    * an idempotent retry; different content is a 409 AUTHZ_MISMATCH.
    */
-  async submitAttestation(
+  async submitMandate(
     apiKey: string,
     body: {
       /** Per-ceremony identity (authz_<uuid>). Auto-minted when omitted. */
@@ -191,48 +190,60 @@ export class SPClient {
       /** Renew (extend expiry of) an existing authorization — content must match. */
       renew?: boolean;
       profile_id: string;
-      /** v0.4 requires group_id on every attestation (use personal group for individual flows). */
+      /** v0.7 requires group_id on every mandate (use personal group for individual flows). */
+      profile_hash?: string;
       group_id: string;
-      /** v0.4 bounds */
+      /** v0.7 bounds */
       bounds?: Record<string, unknown>;
       bounds_hash?: string;
-      context_hash: string;
+      scope_hash: string;
       domain: string;
       did: string;
-      /** v0.4: 'automatic' (receipt issued at call time) or 'review' (agent submits proposal, human commits) */
-      commitment_mode: 'automatic' | 'review';
+      /** v0.7: 'automatic' (ticket issued at call time) or 'review' (human commits proposal) */
+      commitment_mode: 'automatic' | 'review' | 'review_above_cap';
       gate_content_hashes: Record<string, string>;
       execution_context_hash: string;
+      supported_versions?: string[];
     },
   ): Promise<{
     authorization_id: string;
-    attestation_id: string;
+    mandate_id: string;
     bounds_hash?: string;
+    scope_hash: string;
     blob: string;
     status: string;
     attested_domains: string[];
     required_domains: string[];
     version: number;
   }> {
-    const withId = { authorization_id: mintAuthorizationId(), ...body };
-    const res = await this.request('POST', '/api/as/attest', withId, apiKey);
+    // Add version negotiation if not provided
+    const withDefaults = {
+      supported_versions: ['0.7'],
+      authorization_id: mintAuthorizationId(),
+      ...body,
+    };
+    const res = await this.request('POST', '/api/as/mandate', withDefaults, apiKey);
     if (!res.ok) {
       const respBody = await res.json().catch(() => ({}));
-      throw new Error(`submitAttestation failed (${res.status}): ${JSON.stringify(respBody)}`);
+      throw new Error(`submitMandate failed (${res.status}): ${JSON.stringify(respBody)}`);
     }
     return res.json();
   }
 
   /**
-   * Like submitAttestation but never throws — returns { status, body } so
+   * Like submitMandate but never throws — returns { status, body } so
    * tests can assert on rejection paths (409 AUTHZ_MISMATCH / AUTHZ_REVOKED,
    * 403 foreign group) without try/catch gymnastics.
    */
-  async submitAttestationRaw(
+  async submitMandateRaw(
     apiKey: string,
     body: Record<string, unknown>,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const res = await this.request('POST', '/api/as/attest', body, apiKey);
+    const withDefaults = {
+      supported_versions: ['0.7'],
+      ...body,
+    };
+    const res = await this.request('POST', '/api/as/mandate', withDefaults, apiKey);
     const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { status: res.status, body: responseBody };
   }
@@ -286,16 +297,21 @@ export class SPClient {
     return { status: res.status, body };
   }
 
-  // ── Receipts ────────────────────────────────────────────
+  // ── Tickets (v0.7) ──────────────────────────────────────
 
   /**
-   * POST /api/as/receipt — request the signed receipt pre-flight.
-   * Returns status and response body; does NOT throw on 403.
+   * POST /api/as/ticket — request the signed ticket pre-flight (v0.7;
+   * moved from POST /api/as/receipt, which now answers 410).
+   * Returns status and response body; does NOT throw on errors.
    *
-   * Wire (v0.6): the request names the governing grant by `authorizationId`;
+   * Wire (v0.7, protocol.md → *Ticket Request Schema*): fields are camelCase
+   * — unlike the Mandate Request Schema (snake_case) — and this is
+   * unchanged from v0.6: only the path (`/receipt` → `/ticket`) and the
+   * success envelope's key (`receipt` → `ticket`) moved. The request names
+   * the governing grant by `authorizationId` (Authorization Identity);
    * `boundsHash` is an optional integrity cross-check (409 on disagreement).
    */
-  async postReceipt(
+  async postTicket(
     apiKey: string,
     body: {
       authorizationId: string;
@@ -306,55 +322,74 @@ export class SPClient {
       actionType?: string;
       amount?: number;
       executionContext?: Record<string, unknown>;
-      /** v0.4 M3 — replay protection. Same key → same receipt, no double-count. */
+      /** v0.7 M3 — replay protection. Same key → same ticket, no double-count. */
       idempotencyKey?: string;
+      /** Review-mode: the committed proposal this ticket settles. */
+      proposalId?: string;
+      toolArgs?: Record<string, unknown>;
+      /** v0.5 Content Provenance (optional). */
+      contentHash?: string;
+      contentBinding?: Record<string, unknown>;
     },
   ): Promise<{ status: number; body: Record<string, unknown> }> {
-    // Synchronous (automatic-mode) receipts REQUIRE an idempotencyKey. Default a
+    // Synchronous (automatic-mode) tickets REQUIRE an idempotency key. Default a
     // unique one when the caller didn't set its own — mirrors the real gateway.
     // An explicit `idempotencyKey` in `body` overrides this.
-    const withKey = { idempotencyKey: `e2e-${Date.now()}-${++receiptKeySeq}`, ...body };
-    const res = await this.request('POST', '/api/as/receipt', withKey, apiKey);
+    const withKey = { idempotencyKey: `e2e-${Date.now()}-${++ticketKeySeq}`, ...body };
+    const res = await this.request('POST', '/api/as/ticket', withKey, apiKey);
     const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { status: res.status, body: responseBody };
   }
 
-  async getGroupReceipts(
+  /**
+   * Test that the old /api/as/receipt endpoint returns 410 with VERSION_UNSUPPORTED.
+   */
+  async postReceiptRetired(
+    apiKey: string,
+    body: Record<string, unknown>,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await this.request('POST', '/api/as/receipt', body, apiKey);
+    const responseBody = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return { status: res.status, body: responseBody };
+  }
+
+  async getGroupTickets(
     apiKey: string,
     groupId: string,
-  ): Promise<{ receipts: Array<Record<string, unknown>> }> {
+  ): Promise<{ tickets: Array<Record<string, unknown>> }> {
     const res = await this.request(
       'GET',
-      `/api/groups/${groupId}/receipts`,
+      `/api/groups/${groupId}/tickets`,
       undefined,
       apiKey,
     );
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(`getGroupReceipts failed (${res.status}): ${JSON.stringify(body)}`);
+      throw new Error(`getGroupTickets failed (${res.status}): ${JSON.stringify(body)}`);
     }
     return res.json();
   }
 
   /**
-   * A page of the caller's own receipts. With no `before` the AS returns the
+   * A page of the caller's own tickets. With no `before` the AS returns the
    * most recent window; `nextBefore` is the cursor for the next (older) window
    * (null at the history floor). Mirrors the gateway UI's "Load older".
    */
-  async getMyReceiptsPage(
+  async getMyTicketsPage(
     apiKey: string,
     options?: { before?: string; limit?: number },
-  ): Promise<{ receipts: Array<Record<string, unknown>>; nextBefore: string | null }> {
+  ): Promise<{ tickets: Array<Record<string, unknown>>; nextBefore: string | null }> {
     const params = new URLSearchParams();
     if (options?.before) params.set('before', options.before);
     if (options?.limit) params.set('limit', String(options.limit));
     const qs = params.toString();
-    const res = await this.request('GET', `/api/receipts/mine${qs ? '?' + qs : ''}`, undefined, apiKey);
+    const res = await this.request('GET', `/api/tickets/mine${qs ? '?' + qs : ''}`, undefined, apiKey);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(`getMyReceiptsPage failed (${res.status}): ${JSON.stringify(body)}`);
+      throw new Error(`getMyTicketsPage failed (${res.status}): ${JSON.stringify(body)}`);
     }
-    const data = await res.json() as { receipts?: Array<Record<string, unknown>>; nextBefore?: string | null };
-    return { receipts: data.receipts ?? [], nextBefore: data.nextBefore ?? null };
+    const data = await res.json() as { tickets?: Array<Record<string, unknown>>; nextBefore?: string | null };
+    return { tickets: data.tickets ?? [], nextBefore: data.nextBefore ?? null };
   }
+
 }

@@ -29,8 +29,9 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Credentials ─────────────────────────────────────────────────────────────
 
@@ -46,14 +47,16 @@ const GW_PORT = 16030;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/email@0.4';
+const PROFILE_ID = PROFILE_V07.email;
 const PROFILE_SHORT = 'email';
 const EXEC_PATH = 'email-send';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max'];
+// v0.7: read_daily_max is gone (replaced by read_access; never enforced,
+// CONFORMANCE.md); read_access and setup_daily_max are new and required:true.
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['allowed_recipients', 'allowed_domains'];
 
 const TEST_RECIPIENT = 'andreas@sublin.app';
@@ -61,8 +64,10 @@ const TEST_DOMAIN = 'sublin.app';
 
 const BOUNDS = {
   profile: PROFILE_ID,
+  read_access: 'unlimited',
   recipient_max: 5,
   send_daily_max: 10,
+  setup_daily_max: 0,
 };
 
 const CONTEXT = {
@@ -104,14 +109,15 @@ async function submitEmailAttestation(bounds: Record<string, unknown>): Promise<
   });
 
   const boundsHash = computeBoundsHash(bounds, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+  const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
-  const result = await sp.submitAttestation(userApiKey, {
+  const result = await sp.submitMandate(userApiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: personalGroupId,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'communications',
     did: userDid,
     commitment_mode: 'automatic',
@@ -256,7 +262,7 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Send (authorized)', () => {
 
   it('receipt was recorded in SP', async () => {
     // Verify via direct SP API — the receipt should exist
-    const result = await sp.postReceipt(userApiKey, {
+    const result = await sp.postTicket(userApiKey, {
       authorizationId,
       profileId: PROFILE_ID,
       action: 'send',
@@ -334,7 +340,7 @@ describe.skipIf(!HAS_GMAIL)('Email Lifecycle — Re-authorize', () => {
 
     const newId = await submitEmailAttestation(tighterBounds);
     expect(newId).toBeTruthy();
-    // Each submitAttestation mints a fresh authorization_id — the new grant is independent.
+    // Each submitMandate mints a fresh authorization_id — the new grant is independent.
     expect(newId).not.toBe(authorizationId);
     authorizationId = newId;
     console.error(`[E2E-Email] New authorization id: ${authorizationId}`);

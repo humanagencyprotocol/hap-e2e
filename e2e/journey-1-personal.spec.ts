@@ -9,7 +9,8 @@
  */
 import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups, latestProfileId} from './fixtures';
 
-const RECORDS_PROFILE = 'github.com/humanagencyprotocol/hap-profiles/records@0.5';
+// The version the gateway's Records wizard grants under (newest) — see latestProfileId.
+const RECORDS_PROFILE = latestProfileId('records');
 // The version the gateway's CRM wizard grants under (newest) — see latestProfileId.
 const CUSTOMERS_PROFILE = latestProfileId('customers');
 

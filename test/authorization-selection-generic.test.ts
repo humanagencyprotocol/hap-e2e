@@ -3,11 +3,11 @@
  * doc/read-bounds-enforcement-plan.md).
  *
  * The selection logic must be PROFILE-AGNOSTIC: driven by each profile's
- * declared contextSchema, with no hardcoded field names. authorization-
+ * declared scopeSchema, with no hardcoded field names. authorization-
  * selection.test.ts proves most-specific-wins on the customers profile
  * (scope field: contact_type). This file proves the SAME engine behaves
  * correctly on a SECOND, structurally different profile — records@0.4 — which
- * has a different bounds schema and, crucially, NO contextSchema at all.
+ * has a different bounds schema and, crucially, NO scopeSchema at all.
  *
  * With no scope dimension, no grant can ever be "more specific" than another,
  * so every overlap is incomparable → the fail-safe branch (§7.2) must fire:
@@ -38,8 +38,9 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -48,14 +49,14 @@ const GW_PORT = 17241;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/records@0.4';
+const PROFILE_ID = PROFILE_V07.records;
 const PROFILE_SHORT = 'records';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
 // records@0.4 bounds schema — deliberately different shape from customers, and
-// there is NO contextSchema (empty context), which is the whole point.
+// there is NO scopeSchema (empty scope), which is the whole point.
 const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'write_daily_max', 'delete_access', 'archive_access'];
 const BOUNDS = {
   profile: PROFILE_ID,
@@ -110,7 +111,7 @@ beforeAll(async () => {
   await gw.configure({ sessionCookie: 'generic-selection-e2e', apiKey });
 
   const boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash({}, []); // records has no context schema
+  const contextHash = computeScopeHash({}, []); // records has no context schema
   const executionContextHash = hashExecutionContext({ profile: PROFILE_ID, domain: 'owner' });
 
   // Two grants under records@0.4. No scope → neither can be "more specific".
@@ -123,12 +124,13 @@ beforeAll(async () => {
   ];
 
   for (const g of grants) {
-    const att = await sp.submitAttestation(apiKey, {
+    const att = await sp.submitMandate(apiKey, {
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: groupId,
       bounds: BOUNDS,
       bounds_hash: boundsHash,
-      context_hash: contextHash,
+      scope_hash: contextHash,
       domain: 'owner',
       did,
       commitment_mode: g.mode,

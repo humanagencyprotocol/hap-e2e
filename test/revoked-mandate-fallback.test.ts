@@ -11,8 +11,8 @@
  * revoked → work mandates): see the comment on its "switching to work
  * mandates" case.
  *
- * THE FIX: on a stale-mandate refusal (ATTESTATION_REVOKED / ATTESTATION_EXPIRED
- * / ATTESTATION_NOT_FOUND — never a bound/approval refusal), the gateway
+ * THE FIX: on a stale-mandate refusal (MANDATE_REVOKED / MANDATE_EXPIRED
+ * / MANDATE_NOT_FOUND — never a bound/approval refusal), the gateway
  * purges the dead mandate and reruns selection ONCE, in the SAME call, over
  * the remaining locally-passing candidates.
  *
@@ -44,21 +44,25 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
+const PROFILE_ID = PROFILE_V07.customers;
 const PROFILE_SHORT = 'customers';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'write_daily_max', 'delete_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['contact_type'];
 
 // Bounds are identical on both grants — only scope (contact_type) differs, so
 // specificity (not bounds) decides which mandate is tried first.
-const BOUNDS = { profile: PROFILE_ID, write_daily_max: 10, delete_daily_max: 5 };
+const BOUNDS = {
+  profile: PROFILE_ID, read_access: 'unlimited', export_access: 'none',
+  write_daily_max: 10, delete_daily_max: 5, setup_daily_max: 0,
+};
 
 const SP_PORT = 17300;
 const GW_PORT = 17301;
@@ -122,14 +126,15 @@ describe('Revoked-mandate fallback — the very next call succeeds via the remai
 
     async function grant(contactType: string, intent: string): Promise<string> {
       const context = { contact_type: contactType };
-      const contextHash = computeContextHash(context, CONTEXT_KEY_ORDER);
+      const contextHash = computeScopeHash(context, CONTEXT_KEY_ORDER);
       const gateContent = { intent };
-      const att = await sp.submitAttestation(apiKey, {
+      const att = await sp.submitMandate(apiKey, {
         profile_id: PROFILE_ID,
+        profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
         group_id: groupId,
         bounds: BOUNDS,
         bounds_hash: boundsHash,
-        context_hash: contextHash,
+        scope_hash: contextHash,
         domain: 'owner',
         did,
         commitment_mode: 'automatic',
@@ -173,8 +178,8 @@ describe('Revoked-mandate fallback — the very next call succeeds via the remai
   it('after NARROW is revoked, the very next call succeeds via BROAD with exactly one new receipt', async () => {
     await sp.revokeAuthorization(apiKey, narrowId);
 
-    const before = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
-    const beforeIds = new Set(before.receipts.map((r) => String(r.id)));
+    const before = await sp.getMyTicketsPage(apiKey, { limit: 50 });
+    const beforeIds = new Set(before.tickets.map((r) => String(r.id)));
 
     const result = await client.callTool({
       name: 'crm__create_contact',
@@ -192,8 +197,8 @@ describe('Revoked-mandate fallback — the very next call succeeds via the remai
     // EXACTLY ONE new ticket — issued against BROAD, never NARROW (dead), and
     // never two (one per candidate tried) — the downstream tool executes once,
     // only after a ticket was actually issued.
-    const after = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
-    const newReceipts = after.receipts.filter((r) => !beforeIds.has(String(r.id)));
+    const after = await sp.getMyTicketsPage(apiKey, { limit: 50 });
+    const newReceipts = after.tickets.filter((r) => !beforeIds.has(String(r.id)));
     expect(newReceipts).toHaveLength(1);
     expect(newReceipts[0].authorizationId).toBe(broadId);
     expect(newReceipts[0].authorizationId).not.toBe(narrowId);

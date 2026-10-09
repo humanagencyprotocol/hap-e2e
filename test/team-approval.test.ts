@@ -19,11 +19,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient, mintAuthorizationId } from '../src/helpers/sp-client.js';
-import { hashGateContent, hashExecutionContext, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 15300;
 const SP_URL = `http://localhost:${SP_PORT}`;
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.4';
+const PROFILE_ID = PROFILE_V07.customers;
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
 const pm = new ProcessManager();
 const sp = new SPClient(SP_URL);
@@ -38,7 +40,10 @@ let groupId = '';
 let authorizationId = '';
 
 // Above the cap (write_daily_max cap is 1) so the authority is flagged above_cap.
-const BOUNDS = { profile: PROFILE_ID, write_daily_max: 2, delete_daily_max: 1 };
+const BOUNDS = {
+  profile: PROFILE_ID, read_access: 'unlimited', export_access: 'none',
+  write_daily_max: 2, delete_daily_max: 1, setup_daily_max: 0,
+};
 const INTENT = {
   intent_ciphertext: 'BASE64_CIPHERTEXT_e2e==',
   // encrypted_keys is keyed by approver userId — filled in once admin is registered.
@@ -57,7 +62,7 @@ async function api(method: string, path: string, apiKey: string, body?: unknown)
 }
 
 const writeReceipt = () =>
-  sp.postReceipt(agentKey, {
+  sp.postTicket(agentKey, {
     authorizationId,
     profileId: PROFILE_ID,
     action: 'crm__create_contact',
@@ -113,14 +118,16 @@ afterAll(async () => {
 
 describe('Above-cap authorization with shared intent', () => {
   it('accepts an above-cap team authorization and flags it above_cap', async () => {
-    const res = await api('POST', '/api/as/attest', agentKey, {
+    const res = await api('POST', '/api/as/mandate', agentKey, {
       authorization_id: mintAuthorizationId(),
+      supported_versions: ['0.7'],
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: groupId,
       bounds: BOUNDS,
       // bounds_hash omitted → AS computes it
-      context_hash: computeContextHash({}, []),
-      domain: agentId, // v0.4 team: resolved domain is the member's userId
+      scope_hash: computeScopeHash({}, []),
+      domain: agentId, // team: resolved domain is the member's userId
       did: agentDid,
       commitment_mode: 'automatic',
       gate_content_hashes: hashGateContent({ intent: "Manage customer records on the team's behalf." }),
@@ -155,12 +162,14 @@ describe('Intent sharing', () => {
 
 describe('Intent disclosure — C2 binding', () => {
   const attestWithIntent = (overrides: Record<string, unknown>) =>
-    api('POST', '/api/as/attest', agentKey, {
+    api('POST', '/api/as/mandate', agentKey, {
       authorization_id: mintAuthorizationId(),
+      supported_versions: ['0.7'],
       profile_id: PROFILE_ID,
+      profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
       group_id: groupId,
       bounds: BOUNDS,
-      context_hash: computeContextHash({}, []),
+      scope_hash: computeScopeHash({}, []),
       domain: agentId,
       did: agentDid,
       commitment_mode: 'automatic',
@@ -197,12 +206,13 @@ describe('Team approval (above-cap escalation)', () => {
     // profile has approvers, it escalates to 409 (not a hard 403).
     const escalated = await writeReceipt();
     expect(escalated.status).toBe(409);
-    expect(escalated.body.error).toBe('approval_required');
-    expect(escalated.body.field).toBe('write_daily_max');
+    const errors = escalated.body.errors as Array<Record<string, unknown>>;
+    expect(errors[0].code).toBe('APPROVAL_REQUIRED');
+    expect(errors[0].field).toBe('write_daily_max');
     // The escalation routes to EXACTLY the configured approver set — both
     // entries, in configured order. (It was [adminId] before the agent had to
     // be a configured approver in order to grant at all.)
-    expect(escalated.body.approvers).toEqual([adminId, agentId]);
+    expect(errors[0].approvers).toEqual([adminId, agentId]);
   });
 
   it('routes a proposal to the approver, who approves it → committed', async () => {

@@ -24,19 +24,20 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17260;
 const GW_PORT = 17292;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.7';
+const PROFILE_ID = PROFILE_V07.customers;
 const EXEC_PATH = PROFILE_ID;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max'];
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['contact_type'];
 const CONTEXT = { contact_type: 'customer' };
 const GATE_CONTENT = { intent: 'E2E: each cumulative limit counts only its own action type.' };
@@ -82,16 +83,17 @@ beforeAll(async () => {
   // number of writes that precede it, which is exactly what the combined total broke.
   const bounds = {
     profile: PROFILE_ID, read_access: 'unlimited', export_access: 'none',
-    write_daily_max: 3, delete_daily_max: 1,
+    write_daily_max: 3, delete_daily_max: 1, setup_daily_max: 0,
   };
   const boundsHash = computeBoundsHash(bounds, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
-  const att = await sp.submitAttestation(user.apiKey, {
+  const contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
+  const att = await sp.submitMandate(user.apiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: personalGroupId,
     bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'owner',
     did: user.did,
     commitment_mode: 'automatic',

@@ -28,7 +28,8 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17660;
 const GW_PORT = 17692;
@@ -46,26 +47,27 @@ const SYSTEMS = ['erp', 'crm', 'mail'] as const;
 const P = 'github.com/humanagencyprotocol/hap-profiles';
 const PROFILES = {
   sales: {
-    id: `${P}/sales@0.2`,
+    id: `${P}/sales@0.4`,
     keyOrder: ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max', 'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'],
     ctxOrder: ['currency'], ctx: { currency: 'EUR' },
     setup: { read_access: 'none', value_max: 0, discount_max: 0, order_value_daily_max: 0, quote_daily_max: 0, send_daily_max: 0, order_daily_max: 0, setup_daily_max: 5 },
     work: { read_access: 'unlimited', value_max: 1000, discount_max: 10, order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 10, setup_daily_max: 0 },
   },
   customers: {
-    id: `${P}/customers@0.8`,
+    id: `${P}/customers@0.9`,
     keyOrder: ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'],
     ctxOrder: ['contact_type'], ctx: { contact_type: 'customer' },
     setup: { read_access: 'none', export_access: 'none', write_daily_max: 0, delete_daily_max: 0, setup_daily_max: 5 },
     work: { read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
   },
   email: {
-    id: `${P}/email@0.7`,
-    keyOrder: ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max', 'setup_daily_max'],
+    id: `${P}/email@0.8`,
+    // v0.7: read_daily_max is gone (replaced by read_access; never enforced, CONFORMANCE.md).
+    keyOrder: ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'],
     ctxOrder: ['allowed_recipients', 'allowed_domains'],
     ctx: { allowed_recipients: 'einkauf@huber.example,office@steiner.example', allowed_domains: 'huber.example,steiner.example' },
-    setup: { read_access: 'none', recipient_max: 0, send_daily_max: 0, read_max_age_days: 0, read_daily_max: 0, setup_daily_max: 5 },
-    work: { read_access: 'unlimited', recipient_max: 1, send_daily_max: 10, read_max_age_days: 3650, read_daily_max: 1000, setup_daily_max: 0 },
+    setup: { read_access: 'none', recipient_max: 0, send_daily_max: 0, read_max_age_days: 0, setup_daily_max: 5 },
+    work: { read_access: 'unlimited', recipient_max: 1, send_daily_max: 10, read_max_age_days: 3650, setup_daily_max: 0 },
   },
 } as const;
 type ProfileKey = keyof typeof PROFILES;
@@ -83,10 +85,10 @@ async function grant(key: ProfileKey, kind: 'setup' | 'work'): Promise<string> {
   const p = PROFILES[key];
   const bounds = { profile: p.id, ...p[kind] };
   const boundsHash = computeBoundsHash(bounds, [...p.keyOrder]);
-  const contextHash = computeContextHash(p.ctx, [...p.ctxOrder]);
+  const contextHash = computeScopeHash(p.ctx, [...p.ctxOrder]);
   const gate = { intent: `E2E ${kind} mandate for ${key}` };
-  const att = await sp.submitAttestation(apiKey, {
-    profile_id: p.id, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+  const att = await sp.submitMandate(apiKey, {
+    profile_id: p.id, profile_hash: profileHashFor(p.id, PROFILES_DIR), group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
     domain: 'owner', did, commitment_mode: 'automatic',
     gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ kind }),
   });
@@ -159,7 +161,7 @@ describe.skipIf(!available)('simulation re-run: clear, then load again (real AS 
     expect(names).toContain('erp__create_quote');
     for (const c of SYSTEMS) expect(names).not.toContain(`${c}__clear_simulation`);
     for (const c of SYSTEMS) expect((await call(`${c}__clear_simulation`, {})).denied).toBe(true);
-    const { receipts } = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
+    const { tickets: receipts } = await sp.getMyTicketsPage(apiKey, { limit: 50 });
     expect(receipts).toHaveLength(0);
   });
 
@@ -215,7 +217,7 @@ describe.skipIf(!available)('simulation re-run: clear, then load again (real AS 
     // Per simulator: the clear + the second load.
     expect(traces).toHaveLength(6);
     // Tickets: 3 loads + the connector-refused second load + 3 clears + 3 loads = 10.
-    const { receipts } = await sp.getMyReceiptsPage(apiKey, { limit: 50 });
+    const { tickets: receipts } = await sp.getMyTicketsPage(apiKey, { limit: 50 });
     const tickets = new Set(receipts.map((t) => String(t.id)));
     expect(tickets.size).toBe(10);
     for (const id of traces) expect(tickets.has(id)).toBe(true);

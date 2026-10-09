@@ -32,8 +32,9 @@ import {
   hashGateContent,
   hashExecutionContext,
   computeBoundsHash,
-  computeContextHash,
+  computeScopeHash,
 } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -42,22 +43,24 @@ const GW_PORT = 16240;
 const SP_URL = `http://localhost:${SP_PORT}`;
 const GW_URL = `http://localhost:${GW_PORT}`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/email@0.4';
+const PROFILE_ID = PROFILE_V07.email;
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const BOUNDS_KEY_ORDER = ['profile', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'read_daily_max'];
+// v0.7: read_daily_max is gone (replaced by read_access; never enforced,
+// CONFORMANCE.md); read_access and setup_daily_max are new and required:true.
+const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'];
 const CONTEXT_KEY_ORDER = ['allowed_recipients', 'allowed_domains'];
 
 // Two grants under the SAME profile, distinct on bounds, scope, and intent.
 const GRANT_A = {
-  bounds: { profile: PROFILE_ID, recipient_max: 5, send_daily_max: 20 },
+  bounds: { profile: PROFILE_ID, read_access: 'unlimited', recipient_max: 5, send_daily_max: 20, setup_daily_max: 0 },
   context: { allowed_recipients: 'alpha@sublin.app' },
   gateContent: { intent: 'AUTHORITY-ALPHA: send team updates within bounds.' },
 };
 const GRANT_B = {
-  bounds: { profile: PROFILE_ID, recipient_max: 1, send_daily_max: 5 },
+  bounds: { profile: PROFILE_ID, read_access: 'unlimited', recipient_max: 1, send_daily_max: 5, setup_daily_max: 0 },
   context: { allowed_recipients: 'bravo@sublin.app' },
   gateContent: { intent: 'AUTHORITY-BRAVO: read-only inbox digest.' },
 };
@@ -87,14 +90,15 @@ async function submitGrant(grant: {
   const gateContentHashes = hashGateContent(grant.gateContent);
   const executionContextHash = hashExecutionContext({ recipient_count: 1, ...grant.context });
   const boundsHash = computeBoundsHash(grant.bounds, BOUNDS_KEY_ORDER);
-  const contextHash = computeContextHash(grant.context, CONTEXT_KEY_ORDER);
+  const contextHash = computeScopeHash(grant.context, CONTEXT_KEY_ORDER);
 
-  const result = await sp.submitAttestation(userApiKey, {
+  const result = await sp.submitMandate(userApiKey, {
     profile_id: PROFILE_ID,
+    profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
     group_id: personalGroupId,
     bounds: grant.bounds,
     bounds_hash: boundsHash,
-    context_hash: contextHash,
+    scope_hash: contextHash,
     domain: 'communications',
     did: userDid,
     commitment_mode: 'automatic',
@@ -182,13 +186,13 @@ describe('Multiple authorizations per profile', () => {
     expect(text).toContain('recipient_max: 1');
 
     // Two separate grant blocks for the same profile (pre-fix: only one).
-    const emailBlocks = (text.match(/email@0\.4/g) ?? []).length;
+    const emailBlocks = (text.match(/email@0\.8/g) ?? []).length;
     expect(emailBlocks).toBeGreaterThanOrEqual(2);
   });
 
   it('the compact overview also lists both grants', async () => {
     const text = await listAuthorizations();
-    const emailBlocks = (text.match(/email@0\.4/g) ?? []).length;
+    const emailBlocks = (text.match(/email@0\.8/g) ?? []).length;
     expect(emailBlocks).toBeGreaterThanOrEqual(2);
   });
 });

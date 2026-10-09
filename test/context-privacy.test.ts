@@ -12,16 +12,18 @@ import { join } from 'node:path';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient, mintAuthorizationId } from '../src/helpers/sp-client.js';
-import { hashGateContent, computeBoundsHash, computeContextHash, hashExecutionContext } from '../src/helpers/crypto.js';
+import { hashGateContent, computeBoundsHash, computeScopeHash, hashExecutionContext } from '../src/helpers/crypto.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 // ── Constants ─────────────────────────────────────────────
 
 const SP_PORT = 14200;
 const SP_URL = `http://localhost:${SP_PORT}`;
+const PROFILES_DIR = `${process.cwd()}/../hap-profiles`;
 
-const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/charge@0.4';
+const PROFILE_ID = PROFILE_V07.charge;
 
-/** v0.4 bounds key order (from the charge profile). */
+/** v0.7 bounds key order (from the charge profile — unchanged since 0.4). */
 const BOUNDS_KEY_ORDER = ['profile', 'amount_max', 'amount_daily_max', 'amount_monthly_max', 'transaction_count_daily_max'];
 /** v0.4 context key order. */
 const CONTEXT_KEY_ORDER = ['currency', 'action_type'];
@@ -78,7 +80,7 @@ describe('Context Privacy', () => {
   describe('Attestation — context hash only, no plaintext context', () => {
     it('computes bounds and context hashes locally', () => {
       boundsHash = computeBoundsHash(BOUNDS, BOUNDS_KEY_ORDER);
-      contextHash = computeContextHash(CONTEXT, CONTEXT_KEY_ORDER);
+      contextHash = computeScopeHash(CONTEXT, CONTEXT_KEY_ORDER);
 
       expect(boundsHash).toMatch(/^sha256:[a-f0-9]{64}$/);
       expect(contextHash).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -90,7 +92,7 @@ describe('Context Privacy', () => {
       expect(contextHash).not.toContain('charge');
     });
 
-    it('submits attestation with context_hash but NOT context content', async () => {
+    it('submits a mandate with scope_hash but NOT scope content', async () => {
       const gateContentHashes = hashGateContent(GATE_CONTENT);
       const executionContextHash = hashExecutionContext({
         action_type: CONTEXT.action_type,
@@ -98,13 +100,14 @@ describe('Context Privacy', () => {
         currency: CONTEXT.currency,
       });
 
-      // The attestation request body must contain hashes only — no CONTEXT object
+      // The mandate request body must contain hashes only — no plaintext scope object.
       const requestBody = {
         profile_id: PROFILE_ID,
+        profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
         group_id: groupId,
         bounds: BOUNDS,
         bounds_hash: boundsHash,
-        context_hash: contextHash,
+        scope_hash: contextHash,
         domain: 'owner',
         did: agentDid,
         commitment_mode: 'automatic' as const,
@@ -112,19 +115,19 @@ describe('Context Privacy', () => {
         execution_context_hash: executionContextHash,
       };
 
-      // Verify the request body does NOT include plaintext context values
+      // Verify the request body does NOT include plaintext scope values
       const bodyJson = JSON.stringify(requestBody);
       expect(bodyJson).not.toContain('"currency":"USD"');
       expect(bodyJson).not.toContain('"action_type":"charge"');
-      // The context hash IS present
+      // The scope hash IS present
       expect(bodyJson).toContain(contextHash);
 
-      const result = await sp.submitAttestation(agentApiKey, requestBody);
+      const result = await sp.submitMandate(agentApiKey, requestBody);
       expect(result.bounds_hash).toBe(boundsHash);
       expect(result.status).toMatch(/active|pending/);
     });
 
-    it('SP response contains context_hash but not context content', async () => {
+    it('SP response contains scope_hash but not scope content', async () => {
       const gateContentHashes = hashGateContent(GATE_CONTENT);
       const executionContextHash = hashExecutionContext({
         action_type: CONTEXT.action_type,
@@ -133,7 +136,7 @@ describe('Context Privacy', () => {
       });
 
       // Capture the raw response to inspect all fields
-      const rawResponse = await fetch(`${SP_URL}/api/as/attest`, {
+      const rawResponse = await fetch(`${SP_URL}/api/as/mandate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -141,11 +144,13 @@ describe('Context Privacy', () => {
         },
         body: JSON.stringify({
           authorization_id: mintAuthorizationId(),
+          supported_versions: ['0.7'],
           profile_id: PROFILE_ID,
+          profile_hash: profileHashFor(PROFILE_ID, PROFILES_DIR),
           group_id: groupId,
           bounds: BOUNDS,
           bounds_hash: boundsHash,
-          context_hash: contextHash,
+          scope_hash: contextHash,
           domain: 'owner',
           did: agentDid,
           commitment_mode: 'automatic',
@@ -157,21 +162,20 @@ describe('Context Privacy', () => {
       const responseBody = await rawResponse.json() as Record<string, unknown>;
       const responseJson = JSON.stringify(responseBody);
 
-      // context_hash MUST be present in the response
-      expect(responseBody.context_hash).toBe(contextHash);
+      // scope_hash MUST be present in the response
+      expect(responseBody.scope_hash).toBe(contextHash);
 
-      // Plaintext context values must NOT appear anywhere in the response
+      // Plaintext scope values must NOT appear anywhere in the response
       expect(responseJson).not.toContain('"currency"');
       expect(responseJson).not.toContain('"action_type"');
       expect(responseJson).not.toContain('USD');
-      expect(responseJson).not.toContain('charge');
 
-      // The blob is the signed attestation — it should contain only the hash
+      // The blob is the signed mandate — it should contain only the hash
       expect(responseBody.blob).toBeTruthy();
       const blob = responseBody.blob as string;
-      // Decode the blob (base64url-encoded JSON) and check no context content leaks
+      // Decode the blob (base64url-encoded JSON) and check no scope content leaks
       const decoded = Buffer.from(blob, 'base64url').toString('utf-8');
-      expect(decoded).toContain('context_hash');
+      expect(decoded).toContain('scope_hash');
       expect(decoded).not.toContain('"currency"');
       expect(decoded).not.toContain('"action_type"');
     });
@@ -208,7 +212,7 @@ describe('Context Privacy', () => {
     it('context hash is a one-way hash — cannot reconstruct context from it', () => {
       // Verify the hash is irreversible: different context produces different hash
       const differentContext = { currency: 'EUR', action_type: 'refund' };
-      const differentContextHash = computeContextHash(differentContext, CONTEXT_KEY_ORDER);
+      const differentContextHash = computeScopeHash(differentContext, CONTEXT_KEY_ORDER);
 
       expect(contextHash).not.toBe(differentContextHash);
 

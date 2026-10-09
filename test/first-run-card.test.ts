@@ -22,17 +22,18 @@ import { join } from 'node:path';
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeContextHash } from '../src/helpers/crypto.js';
+import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 import { ControlPlaneClient, PROFILES_DIR, newSecret, startControlPlane, startMcpServer, type StackOptions } from '../src/helpers/gateway-stack.js';
 import { localProfilesForAs } from '../src/helpers/local-profiles.js';
+import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
 
 const AS_PORT = 19700;
 const CP_PORT = 19701;
 const MCP_PORT = 19702;
 const AS_URL = `http://localhost:${AS_PORT}`;
 const CP_URL = `http://localhost:${CP_PORT}`;
-const DELEGATION = 'github.com/humanagencyprotocol/hap-profiles/delegation@0.1';
-const available = existsSync(join(PROFILES_DIR, 'delegation', '0.1.profile.json'));
+const DELEGATION = PROFILE_V07.delegation;
+const available = existsSync(join(PROFILES_DIR, 'delegation', '0.3.profile.json'));
 /** Screenshots for a person to look at; set HAP_E2E_SHOTS to a folder to keep them. */
 const SHOTS = process.env.HAP_E2E_SHOTS;
 
@@ -161,7 +162,7 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
     await page.locator('text=Delegation').first().waitFor({ timeout: 15_000 });
     // Straight into the Delegation mandate, not the grid of every connector.
     expect(await page.locator('body').innerText()).not.toMatch(/Choose what to authorize|Pick a system/i);
-    // The limits start at the profile's own defaults (delegation@0.2), not "Select…" and 0.
+    // The limits start at the profile's own defaults (delegation@0.3), not "Select…" and 0.
     await page.locator('select').first().waitFor({ timeout: 10_000 });
     expect(await page.locator('select').first().inputValue()).toBe('unlimited');
     const counts = await page.locator('input[type="number"], input[inputmode="numeric"]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
@@ -184,10 +185,10 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
   it('3. Delegation given: step 3 open with the sentence to say to the AI', async () => {
     const bounds = { profile: DELEGATION, read_access: 'unlimited', brief_daily_max: 5, mandate_daily_max: 30 };
     const boundsHash = computeBoundsHash(bounds, ['profile', 'read_access', 'brief_daily_max', 'mandate_daily_max']);
-    const contextHash = computeContextHash({}, []);
+    const contextHash = computeScopeHash({}, []);
     const gate = { intent: 'E2E: let my AI set itself up.' };
-    const att = await sp.submitAttestation(user.apiKey, {
-      profile_id: DELEGATION, group_id: groupId, bounds, bounds_hash: boundsHash, context_hash: contextHash,
+    const att = await sp.submitMandate(user.apiKey, {
+      profile_id: DELEGATION, profile_hash: profileHashFor(DELEGATION, PROFILES_DIR), group_id: groupId, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
       domain: 'owner', did: user.user.did, commitment_mode: 'review',
       gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ g: 1 }),
     });

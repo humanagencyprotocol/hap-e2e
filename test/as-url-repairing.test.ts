@@ -99,7 +99,7 @@ describe.each(ORDERS)('Re-pairing on an AS URL change ($label)', ({ label, cpFir
   }
   async function pushMandate(m: Awaited<ReturnType<typeof grantRecordsMandate>>) {
     await mcpInternal.pushGateContent(
-      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.contextHash, context: {} },
+      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.scopeHash, context: {} },
       RECORDS_PROFILE_ID,
       m.gateContent,
     );
@@ -132,7 +132,7 @@ describe.each(ORDERS)('Re-pairing on an AS URL change ($label)', ({ label, cpFir
       await ensureRecordsIntegration();
       agent = await connectAgent();
 
-      const ticketIds = async () => (await sp1.getMyReceiptsPage(SEED_API_KEY)).receipts.map((r) => String(r.id));
+      const ticketIds = async () => (await sp1.getMyTicketsPage(SEED_API_KEY)).tickets.map((r) => String(r.id));
       const before = new Set(await ticketIds());
       const result = await createRecord(`repair-${tag}-as1`);
       expect(result.isError, textOf(result)).toBeFalsy();
@@ -248,7 +248,7 @@ describe('Upgrade from a gateway with no pairing record, switching AS in the sam
     expect((await cp.login(SEED_API_KEY)).status).toBe(200);
     const m = await grantRecordsMandate(sp1, { apiKey: SEED_API_KEY, did: SEED_DID, intent: INTENT, mode: 'automatic', groupId: group1 });
     await mcpInternal.pushGateContent(
-      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.contextHash, context: {} },
+      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.scopeHash, context: {} },
       RECORDS_PROFILE_ID,
       m.gateContent,
     );
@@ -319,7 +319,7 @@ describe('Upgrade from a gateway with no pairing record, SAME Authority Server',
     expect((await cp.login(SEED_API_KEY)).status).toBe(200);
     const m = await grantRecordsMandate(sp1, { apiKey: SEED_API_KEY, did: SEED_DID, intent: INTENT, mode: 'automatic', groupId: group1 });
     await mcpInternal.pushGateContent(
-      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.contextHash, context: {} },
+      { authorizationId: m.authorizationId, boundsHash: m.boundsHash, contextHash: m.scopeHash, context: {} },
       RECORDS_PROFILE_ID,
       m.gateContent,
     );
