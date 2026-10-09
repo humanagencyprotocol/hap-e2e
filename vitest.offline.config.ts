@@ -20,6 +20,7 @@ export default defineConfig({
   test: {
     include: [
       'test/canonical-vectors.test.ts',
+      'test/profile-and-signature-vectors.test.ts',
       'test/profile-conformance.test.ts',
       'test/conformance-map.test.ts',
       'test/as-dir.test.ts',
