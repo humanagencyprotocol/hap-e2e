@@ -21,6 +21,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { chromium, type Browser } from '@playwright/test';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -81,6 +82,29 @@ const mcpInternal = new GatewayClient(MCP_URL, secret);
 let user: { apiKey: string; user: { id: string; did: string } };
 let groupId: string;
 let agent: Client;
+let browser: Browser;
+let quoteNumber: string;
+
+/** The approvals page in a real browser, signed in as the person — the card the human actually sees. */
+async function approvalPreviewText(): Promise<{ status: string | null; text: string }> {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.goto(`${CP_URL}/login`, { waitUntil: 'networkidle' });
+    await page.locator('input[type="password"]').fill(user.apiKey);
+    await page.locator('button:has-text("Sign In")').click();
+    await page.waitForURL((u) => !u.toString().includes('/login'), { timeout: 45_000 });
+    await page.goto(`${CP_URL}/approvals`, { waitUntil: 'networkidle' });
+    const box = page.locator('[data-testid="approval-preview"]').first();
+    await box.waitFor({ timeout: 20_000 });
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[data-testid="approval-preview"]');
+      return !!el && el.getAttribute('data-preview-status') !== 'loading';
+    }, null, { timeout: 20_000 });
+    return { status: await box.getAttribute('data-preview-status'), text: await box.innerText() };
+  } finally {
+    await page.close();
+  }
+}
 
 function erpCli(extraEnv: Record<string, string>, ...args: string[]): string {
   const bin = join(dataDir, 'integrations', 'node_modules', '@humanagencyp', 'erp-mcp', 'dist', 'index.js');
@@ -117,6 +141,8 @@ async function preview(proposalId: string) {
 describe.skipIf(!available)('AU3/AU4: the approval preview is read from the system, bound to a revision (real AS + gateway CP + MCP + erp-mcp)', () => {
   beforeAll(async () => {
     pm.buildGateway();
+    // A person's browser: the gateway refuses automation-flagged browsers at sign-in.
+    browser = await chromium.launch({ headless: true, args: ['--disable-blink-features=AutomationControlled'] });
     await pm.startSP(AS_PORT);
     user = await sp.register('AU3 Preview Test', `au3-preview-${Date.now()}@test.local`);
     groupId = await sp.getPersonalGroupId(user.apiKey);
@@ -151,6 +177,7 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
 
   afterAll(async () => {
     if (agent) { try { await agent.close(); } catch { /* ignore */ } }
+    if (browser) await browser.close().catch(() => {});
     await pm.killAll();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(work, { recursive: true, force: true });
@@ -166,6 +193,7 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
     expect(q.denied, q.text).toBe(false);
     expect(q.json.revision).toBe(1);
     quoteId = q.json.id;
+    quoteNumber = q.json.number;
 
     const s = await call('erp__send_quote', { id: quoteId, revision: 1, value: 25, discount_pct: 0, currency: 'EUR' });
     expect(s.denied, s.text).toBeFalsy();
@@ -190,6 +218,15 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
     expect(body.version.currentBody).toBeUndefined();
   }, 30_000);
 
+  it('in the browser, the review card the person sees shows the ERP preview of revision 1', async () => {
+    const { status, text } = await approvalPreviewText();
+    expect(status).toBe('ok');
+    expect(text).toContain('Quote number');
+    expect(text).toContain(quoteNumber);
+    expect(text).toMatch(/Revision/);
+    expect(text).toMatch(/AI is not involved/);
+  }, 120_000);
+
   it('the quote changes while the card waits — the preview says a newer revision exists and shows both', async () => {
     const u = await call('erp__update_quote', {
       id: quoteId, lines: [{ item_id: 'item-2', qty: 1 }], discount_pct: REV2_DISCOUNT, value: 25, currency: 'EUR',
@@ -206,6 +243,12 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
     expect(body.version.currentBody.structured.revision).toBe(2);
     expect(JSON.stringify(body.version.currentBody.structured)).toContain('item-2');
   }, 60_000);
+
+  it('in the browser, the card now warns that a newer revision exists', async () => {
+    const { status, text } = await approvalPreviewText();
+    expect(status).toBe('stale');
+    expect(text).toMatch(/newer/i);
+  }, 120_000);
 
   it('approved anyway: the ERP refuses the stale revision, nothing is sent, and the outcome says so', async () => {
     const r = await fetch(`${AS_URL}/api/proposals/${proposalId}/resolve`, {
