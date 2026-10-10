@@ -105,7 +105,7 @@ beforeAll(async () => {
     id: 'crm',
     name: 'CRM',
     command: 'npx',
-    args: ['-y', '@humanagencyp/crm-mcp@latest'],
+    args: ['-y', '@humanagencyp/crm-mcp@1.4.0'],
     envKeys: {},
     profile: 'customers',
     enabled: true,
