@@ -703,7 +703,7 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
     });
     t.c2Quote = q.ticket;
     quote2Id = q.json.id;
-    t.c2Send = (await ticketed('erp__send_quote', { id: q.json.id, value, discount_pct: 0, currency: 'EUR' })).ticket;
+    t.c2Send = (await ticketed('erp__send_quote', { id: q.json.id, revision: q.json.revision, value, discount_pct: 0, currency: 'EUR' })).ticket;
     expect(exportOf('mail').sent.every((m: any) => m.in_reply_to !== start.c3.id)).toBe(true);
   }, 60_000);
 
