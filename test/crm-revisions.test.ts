@@ -21,7 +21,7 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient } from '../src/helpers/sp-client.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
-import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
+import { profileHashFor } from '../src/helpers/profiles.js';
 
 const SP_PORT = 17300;
 const GW_PORT = 17330;
@@ -30,7 +30,9 @@ const GW_URL = `http://localhost:${GW_PORT}`;
 const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
-const PROFILE_ID = PROFILE_V07.customers;
+// customers@0.10: contact_type is requiredFor write + delete — a call that does not say which
+// contact type it acts on is refused by the gatekeeper before any ticket.
+const PROFILE_ID = 'github.com/humanagencyprotocol/hap-profiles/customers@0.10';
 const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
 const SCOPE_KEY_ORDER = ['contact_type'];
 const SCOPE = { contact_type: 'customer' };
@@ -46,10 +48,10 @@ let agent: Client;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function grant(mode: 'automatic' | 'review', bounds: Record<string, string | number>, intent: string) {
+async function grant(mode: 'automatic' | 'review', bounds: Record<string, string | number>, intent: string, scope: Record<string, string> = SCOPE): Promise<string> {
   const full = { profile: PROFILE_ID, ...bounds };
   const boundsHash = computeBoundsHash(full, BOUNDS_KEY_ORDER);
-  const scopeHash = computeScopeHash(SCOPE, SCOPE_KEY_ORDER);
+  const scopeHash = computeScopeHash(scope, SCOPE_KEY_ORDER);
   const gate = { intent };
   const att = await sp.submitMandate(apiKey, {
     profile_id: PROFILE_ID,
@@ -64,7 +66,8 @@ async function grant(mode: 'automatic' | 'review', bounds: Record<string, string
     gate_content_hashes: hashGateContent(gate),
     execution_context_hash: hashExecutionContext({ mode }),
   });
-  await gw.pushGateContent({ authorizationId: att.authorization_id, boundsHash, contextHash: scopeHash, context: SCOPE }, PROFILE_ID, gate);
+  await gw.pushGateContent({ authorizationId: att.authorization_id, boundsHash, contextHash: scopeHash, context: scope }, PROFILE_ID, gate);
+  return att.authorization_id;
 }
 
 async function call(name: string, args: Record<string, unknown>) {
@@ -143,21 +146,48 @@ describe('CRM revisions on the real stack', () => {
     expect(lead.error, lead.text).toBe(true);
   });
 
-  it('"customers only" holds for a change: a declared customer that is really a lead is refused by the CRM', async () => {
-    // A lead exists in the CRM (loaded without the gateway's mandate check: created directly as data
-    // is not possible here, so use convert on a second customer to make one).
+  it('"customers only" cannot turn a customer into a lead: convert declares both types, the gate refuses the new one', async () => {
     const c2 = await call('crm__create_contact', { name: 'Steiner Hof', type: 'customer' });
     leadId = c2.json?.id ?? c2.text.match(/"id":\s*"([^"]+)"/)?.[1];
-    // convert is a write under this mandate; declaring the CURRENT type (customer) passes the gate.
-    const conv = await call('crm__convert_contact', { id: leadId, revision: 1, to_type: 'lead', contact_type: 'customer' });
+    const conv = await call('crm__convert_contact', { id: leadId, revision: 1, to_type: 'lead', contact_type: 'customer,lead' });
+    expect(conv.error, conv.text).toBe(true);
+    expect(conv.text).toMatch(/lead/);
+    const got = await call('crm__get_contact', { id: leadId });
+    expect(got.text).toMatch(/"type":\s*"customer"/);
+  });
+
+  it('"customers only" holds for a change: a declared customer that is really a lead is refused by the CRM', async () => {
+    // Make a lead: a temporary mandate that covers customers AND leads, revoked right after.
+    const broad = await grant('automatic', { read_access: 'unlimited', export_access: 'none', write_daily_max: 5, delete_daily_max: 0, setup_daily_max: 0 }, 'E2E: one conversion customer → lead.', { contact_type: 'customer,lead' });
+    await sleep(1_500);
+    const conv = await call('crm__convert_contact', { id: leadId, revision: 1, to_type: 'lead', contact_type: 'customer,lead' });
     expect(conv.error, conv.text).toBe(false);
+    await sp.revokeAuthorization(apiKey, broad, 'E2E: conversion done');
+    await sleep(1_500);
     // Now the record is a lead: claiming "customer" passes the gate but the CRM checks the real type.
     const upd = await call('crm__update_contact', { id: leadId, revision: 2, contact_type: 'customer', notes: 'x' });
     expect(upd.error, upd.text).toBe(true);
     expect(upd.json?.error ?? upd.text).toMatch(/is type "lead"; this request declares "customer"/);
-    // Declaring the truth ("lead") is outside the mandate's scope: the gatekeeper refuses before any ticket.
+    // Declaring the truth ("lead") is outside the customers-only scope: refused before anything runs.
     const upd2 = await call('crm__update_contact', { id: leadId, revision: 2, contact_type: 'lead', notes: 'x' });
     expect(upd2.error, upd2.text).toBe(true);
+    const got = await call('crm__get_contact', { id: leadId });
+    expect(got.text).toMatch(/"revision":\s*2/);
+  });
+
+  it('a change or an archive that does not say which contact type it acts on is refused by the gateway', async () => {
+    // Refused before anything runs, by whichever layer comes first: the tool's input schema
+    // (crm-mcp 1.4.1 requires contact_type) or the profile's requiredFor (customers@0.10:
+    // "exposes no contact_type"). Either way: no ticket, no proposal, nothing changed.
+    const upd = await call('crm__update_contact', { id: customerId, revision: 1, notes: 'no type declared' });
+    expect(upd.error, upd.text).toBe(true);
+    expect(upd.text).toMatch(/exposes no contact_type|Required at contact_type|contact_type is required/);
+    const del = await call('crm__delete_contact', { id: customerId, revision: 1 });
+    expect(del.error, del.text).toBe(true);
+    expect(del.text).not.toMatch(/Proposal ID/);
+    expect(del.text).toMatch(/exposes no contact_type|Required at contact_type|contact_type is required/);
+    const got = await call('crm__get_contact', { id: customerId });
+    expect(got.text).toMatch(/"revision":\s*1/);
   });
 
   it('update_contact cannot change the type — that is convert_contact', async () => {

@@ -239,7 +239,7 @@ describe.skipIf(!available)('simulation setup + first case (real AS + gateway + 
     const found = await call('crm__find_contacts', { query: 'Huber' });
     expect(found.denied).toBe(false);
     contactId = found.json[0].id;
-    const note = await call('crm__log_activity', { contact_id: contactId, type: 'note', summary: 'Quote request: 10 x SP-100' });
+    const note = await call('crm__log_activity', { contact_id: contactId, contact_type: 'customer', type: 'note', summary: 'Quote request: 10 x SP-100' });
     if (note.denied) console.error('[SIM E2E] log_activity denied:', note.text.slice(0, 300));
     expect(note.denied).toBe(false);
   });
