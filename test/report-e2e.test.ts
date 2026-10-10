@@ -637,7 +637,7 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
   it('2b. case c1 (Huber, quote request): CRM note, ERP quote — each with its own AS ticket', async () => {
     const contact = await call('crm__find_contacts', { query: 'Huber' });
     expect(contact.denied).toBe(false);
-    t.c1Note = (await ticketed('crm__log_activity', { contact_id: contact.json[0].id, type: 'note', summary: 'c1: quote request 10 x SP-100' })).ticket;
+    t.c1Note = (await ticketed('crm__log_activity', { contact_id: contact.json[0].id, contact_type: 'customer', type: 'note', summary: 'c1: quote request 10 x SP-100' })).ticket;
     const items = await call('erp__list_items', { query: 'SP-100' });
     const customers = await call('erp__find_customers', { query: 'Huber' });
     const item = items.json[0];
@@ -693,7 +693,7 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
 
   it('2d. case c2 (Steiner, order): CRM note, ERP quote, quote sent — automatic, no approval', async () => {
     const contact = await call('crm__find_contacts', { query: 'Steiner' });
-    t.c2Note = (await ticketed('crm__log_activity', { contact_id: contact.json[0].id, type: 'note', summary: 'c2: order 15 x SP-200, 10 in stock' })).ticket;
+    t.c2Note = (await ticketed('crm__log_activity', { contact_id: contact.json[0].id, contact_type: 'customer', type: 'note', summary: 'c2: order 15 x SP-200, 10 in stock' })).ticket;
     const items = await call('erp__list_items', { query: 'SP-200' });
     const customers = await call('erp__find_customers', { query: 'Steiner' });
     const item = items.json[0];
