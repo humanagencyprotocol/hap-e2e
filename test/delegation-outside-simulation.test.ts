@@ -84,9 +84,9 @@ async function call(tool: string, args: Record<string, unknown>) {
   return { denied: r.isError === true, text: textOf(r) };
 }
 
-async function denials(): Promise<Array<{ tool: string; kind?: string; detail: string }>> {
+async function denials(): Promise<Array<{ tool: string; kind?: string; detail: string; field?: string; value?: unknown; limit?: unknown }>> {
   const res = await cp.authed(anna.apiKey, 'GET', '/denials');
-  return ((await res.json()) as { records?: Array<{ tool: string; kind?: string; detail: string }> }).records ?? [];
+  return ((await res.json()) as { records?: Array<{ tool: string; kind?: string; detail: string; field?: string; value?: unknown; limit?: unknown }> }).records ?? [];
 }
 
 async function previewOf(proposalId: string) {
@@ -168,11 +168,16 @@ describe.skipIf(!available)('delegation outside simulation mode: bounded by the 
 
   it('a Charge mandate is outside the Delegation scope: refused, no proposal, recorded under Blocked', async () => {
     const r = await call('setup__create_mandate', {
-      profile: 'charge', limits: { read_access: 'none' }, intent: 'Why — test.', mode: 'review',
+      // A COMPLETE, valid Charge mandate — so the only reason to refuse is the Delegation scope.
+      profile: 'charge', limits: { amount_max: 100, amount_daily_max: 500, amount_monthly_max: 2000, transaction_count_daily_max: 5 },
+      scope: { currency: 'EUR', action_type: 'charge' }, intent: 'Why — test.', mode: 'review',
     });
+    if (process.env.HAP_E2E_SHOW_CARD) console.error('[DL E2E] charge refusal: ' + r.text);
     expect(r.denied, r.text).toBe(true);
     expect(await pending()).toHaveLength(0);
-    expect((await denials()).some((d) => d.tool === 'setup__create_mandate')).toBe(true);
+    // The denial log names the tool without its integration prefix, like every other entry.
+    const rec = (await denials()).find((d: any) => d.tool === 'create_mandate' && d.field === 'allowed_profiles');
+    expect(rec, JSON.stringify(await denials())).toMatchObject({ kind: 'scope', value: 'charge', limit: 'sales' });
   });
 
   it('an automatic Sales mandate is outside the allowed modes: refused, no proposal', async () => {
