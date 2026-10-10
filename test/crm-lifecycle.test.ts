@@ -157,7 +157,7 @@ describe('Gateway Configuration', () => {
       id: 'crm',
       name: 'CRM',
       command: 'npx',
-      args: ['-y', '@humanagencyp/crm-mcp@1.4.0'],
+      args: ['-y', '@humanagencyp/crm-mcp@1.4.1'],
       envKeys: {},
       profile: PROFILE_SHORT,
       enabled: true,
@@ -302,6 +302,7 @@ describe('CRM Operations — Within Bounds', () => {
       name: 'crm__log_activity',
       arguments: {
         contact_id: contactId,
+        contact_type: 'customer',
         type: 'call',
         summary: 'Discussed renewal terms',
       },
@@ -332,6 +333,7 @@ describe('CRM Operations — Within Bounds', () => {
       name: 'crm__create_deal',
       arguments: {
         contact_id: contactId,
+        contact_type: 'customer',
         title: 'Acme Annual Renewal',
         value: 12000,
         currency: 'EUR',
@@ -369,6 +371,7 @@ describe('CRM Operations — Within Bounds', () => {
       arguments: {
         title: 'Send renewal proposal to Maria',
         contact_id: contactId,
+        contact_type: 'customer',
         deal_id: dealId,
         due_date: '2026-04-01',
       },

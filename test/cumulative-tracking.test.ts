@@ -82,7 +82,7 @@ beforeAll(async () => {
     id: 'crm',
     name: 'CRM',
     command: 'npx',
-    args: ['-y', '@humanagencyp/crm-mcp@1.4.0'],
+    args: ['-y', '@humanagencyp/crm-mcp@1.4.1'],
     envKeys: {},
     profile: 'customers',
     enabled: true,
