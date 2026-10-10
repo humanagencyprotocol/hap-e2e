@@ -150,6 +150,7 @@ describe.skipIf(!available)('ERP simulation: request → ticket → effect (real
   }, 30_000);
 
   let quoteId: string;
+  let quoteRevision: number;
 
   it('the request is handed over and its time recorded', () => {
     expect(erpCli('scenario', 'next', SCENARIO)).toMatch(/\[r1\] handed over/);
@@ -164,6 +165,8 @@ describe.skipIf(!available)('ERP simulation: request → ticket → effect (real
     expect(r.denied).toBe(false);
     expect(r.json.receipt_id).toEqual(expect.any(String));
     quoteId = r.json.id;
+    quoteRevision = r.json.revision;
+    expect(quoteRevision, 'a new quote is at revision 1').toBe(1);
   });
 
   it('the gateway refuses a quote over value_max — no ticket, no ERP trace', async () => {
@@ -183,8 +186,8 @@ describe.skipIf(!available)('ERP simulation: request → ticket → effect (real
   });
 
   it('send and convert run', async () => {
-    expect((await call('erp__send_quote', { id: quoteId, value: 37, discount_pct: 0, currency: 'EUR' })).denied).toBe(false);
-    const o = await call('erp__convert_quote_to_order', { id: quoteId, value: 37, discount_pct: 0, currency: 'EUR' });
+    expect((await call('erp__send_quote', { id: quoteId, revision: quoteRevision, value: 37, discount_pct: 0, currency: 'EUR' })).denied).toBe(false);
+    const o = await call('erp__convert_quote_to_order', { id: quoteId, revision: quoteRevision, value: 37, discount_pct: 0, currency: 'EUR' });
     expect(o.denied).toBe(false);
     expect(o.json.receipt_id).toEqual(expect.any(String));
   });
