@@ -345,6 +345,11 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
       const quote = states.find((st) => st.text.includes('cust-4') && st.text.includes('item-1'));
       expect(quote, JSON.stringify(states)).toBeTruthy();
       expect(quote!.text).toMatch(/bound by hash/);
+      // The Ed25519 signature check on each ticket card (issuer key archived at issuance).
+      const feet = await page.locator('.receipt-foot').evaluateAll((els) => els.map((el) => (el as HTMLElement).innerText));
+      if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU6 E2E] feet:\n' + JSON.stringify(feet, null, 1));
+      expect(feet.length).toBeGreaterThan(0);
+      for (const f of feet) expect(f, f).toContain('Verified on this device');
     } finally {
       await page.close();
     }
