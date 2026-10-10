@@ -105,7 +105,7 @@ function crmIntegration(profileShortName: string) {
     id: 'crm',
     name: 'CRM',
     command: 'npx',
-    args: ['-y', '@humanagencyp/crm-mcp@1.4.0'],
+    args: ['-y', '@humanagencyp/crm-mcp@1.4.1'],
     envKeys: {},
     profile: profileShortName,
     enabled: true,
@@ -210,7 +210,7 @@ beforeAll(async () => {
   mcpClient = new Client({ name: 'hap-au2-blocked-e2e', version: '0.1.0' }, { capabilities: {} });
   await mcpClient.connect(new SSEClientTransport(new URL(`${GW_URL}/sse`)));
 
-  const contactResult = await call('crm__create_contact', { name: 'AU2 Test Contact' });
+  const contactResult = await call('crm__create_contact', { name: 'AU2 Test Contact', type: 'customer' });
   expect(contactResult.denied).toBe(false);
   contactId = contactResult.json.id;
 }, 180_000);
@@ -223,7 +223,7 @@ afterAll(async () => {
 
 describe('AU2 — a local bound refusal is recorded by the real gateway process', () => {
   it('REFUSES a deal over the per-transaction bound, and records it (kind "bound")', async () => {
-    const r = await call('crm__create_deal', { contact_id: contactId, title: 'Over bound', value: 6000 });
+    const r = await call('crm__create_deal', { contact_id: contactId, contact_type: 'customer', title: 'Over bound', value: 6000 });
     expect(r.denied).toBe(true);
     expect(r.text).toMatch(/exceeds|amount_max/i);
 
@@ -244,10 +244,10 @@ describe('AU2 — a local bound refusal is recorded by the real gateway process'
 
 describe('AU2 — a cumulative refusal from the real Authority Server is recorded by the real gateway process', () => {
   it('admits the first write of the day, then REFUSES the second and records it (kind "cumulative")', async () => {
-    const first = await call('crm__create_deal', { contact_id: contactId, title: 'Within bound 1', value: 1000 });
+    const first = await call('crm__create_deal', { contact_id: contactId, contact_type: 'customer', title: 'Within bound 1', value: 1000 });
     expect(first.denied).toBe(false);
 
-    const second = await call('crm__create_deal', { contact_id: contactId, title: 'Within bound 2', value: 1000 });
+    const second = await call('crm__create_deal', { contact_id: contactId, contact_type: 'customer', title: 'Within bound 2', value: 1000 });
     expect(second.denied).toBe(true);
     expect(second.text).toMatch(/exceeds|write_daily_max|blocked/i);
 

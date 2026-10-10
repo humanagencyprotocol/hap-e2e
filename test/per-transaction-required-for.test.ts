@@ -123,7 +123,7 @@ function crmIntegration(profileShortName: string) {
     name: 'CRM',
     command: 'npx',
     // Pinned, not @latest: a connector release must not change this suite silently.
-    args: ['-y', '@humanagencyp/crm-mcp@1.4.0'],
+    args: ['-y', '@humanagencyp/crm-mcp@1.4.1'],
     envKeys: {},
     profile: profileShortName,
     enabled: true,
@@ -256,7 +256,7 @@ afterAll(async () => {
 
 describe('Gateway — per_transaction requiredFor (write is listed)', () => {
   it('REFUSES a deal with no value at all — value is a real, optional, numeric arg', async () => {
-    const r = await call('crm__create_deal', { contact_id: contactId, title: 'No value' });
+    const r = await call('crm__create_deal', { contact_id: contactId, contact_type: 'customer', title: 'No value' });
     expect(r.denied).toBe(true);
     expect(r.text).toMatch(/exposes no amount|amount_max/i);
   });
@@ -268,13 +268,13 @@ describe('Gateway — per_transaction requiredFor (write is listed)', () => {
   });
 
   it('approves a deal within the bound — a real ticket is issued', async () => {
-    const r = await call('crm__create_deal', { contact_id: contactId, title: 'Within bound', value: 4000 });
+    const r = await call('crm__create_deal', { contact_id: contactId, contact_type: 'customer', title: 'Within bound', value: 4000 });
     expect(r.denied).toBe(false);
     expect(r.json?.id).toEqual(expect.any(String));
   });
 
   it('still refuses a deal over the bound (control: ordinary enforcement unaffected)', async () => {
-    const r = await call('crm__create_deal', { contact_id: contactId, title: 'Over bound', value: 6000 });
+    const r = await call('crm__create_deal', { contact_id: contactId, contact_type: 'customer', title: 'Over bound', value: 6000 });
     expect(r.denied).toBe(true);
     expect(r.text).toMatch(/exceeds|amount_max/i);
   });

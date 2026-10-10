@@ -126,13 +126,13 @@ describe('cumulative limits are partitioned by action type (real AS + gateway + 
   });
 
   it('a delete after two writes passes — writes do not use up delete_daily_max=1', async () => {
-    const r = await call('crm__delete_contact', { id: contactIds[0] });
+    const r = await call('crm__delete_contact', { id: contactIds[0], contact_type: 'customer', revision: 1 });
     if (r.denied) console.error('[PARTITION E2E] delete denied:', r.text.slice(0, 300));
     expect(r.denied).toBe(false);
   });
 
   it('the second delete is refused — delete_daily_max still stops deletes at 1', async () => {
-    const r = await call('crm__delete_contact', { id: contactIds[1] });
+    const r = await call('crm__delete_contact', { id: contactIds[1], contact_type: 'customer', revision: 1 });
     expect(r.denied).toBe(true);
     expect(r.text).toMatch(/delete_daily_max|limit|exceed/i);
   });
