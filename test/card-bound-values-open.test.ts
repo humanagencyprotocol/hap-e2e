@@ -7,7 +7,7 @@
  * preview declared) under a review mandate, a real browser on /approvals.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -27,8 +27,9 @@ const CP_PORT = 19841;
 const MCP_PORT = 19842;
 const CP_URL = `http://localhost:${CP_PORT}`;
 /** Only meaningful against a gateway that has the fix. */
-const available = existsSync(RECORDS_DIST)
-  && existsSync(join(GW_DIR, 'apps', 'ui', 'src', 'lib', 'approval-preview-view.ts'));
+const VIEW = join(GW_DIR, 'apps', 'ui', 'src', 'lib', 'approval-preview-view.ts');
+const available = existsSync(RECORDS_DIST) && existsSync(VIEW)
+  && readFileSync(VIEW, 'utf8').includes('boundValuesOpen');
 
 const pm = new ProcessManager();
 const sp = new SPClient(`http://localhost:${AS_PORT}`);
