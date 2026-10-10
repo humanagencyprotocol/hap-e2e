@@ -93,14 +93,26 @@ async function approvalPreviewText(): Promise<{ status: string | null; text: str
     await page.locator('input[type="password"]').fill(user.apiKey);
     await page.locator('button:has-text("Sign In")').click();
     await page.waitForURL((u) => !u.toString().includes('/login'), { timeout: 45_000 });
-    await page.goto(`${CP_URL}/approvals`, { waitUntil: 'networkidle' });
+    // In-app navigation: the API key lives in the page's memory, a full page load drops it.
+    await page.locator('.sidebar a[href="/approvals"]').click();
+    await page.waitForURL('**/approvals');
     const box = page.locator('[data-testid="approval-preview"]').first();
-    await box.waitFor({ timeout: 20_000 });
+    try {
+      await box.waitFor({ timeout: 20_000 });
+    } catch (err) {
+      // Show what the person actually sees, so a missing card is diagnosable.
+      const shot = join(work, 'approvals.png');
+      await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+      console.error(`[AU3 E2E] no preview box on ${page.url()} (screenshot ${shot}):\n`, (await page.locator('body').innerText()).slice(0, 2000));
+      throw err;
+    }
     await page.waitForFunction(() => {
       const el = document.querySelector('[data-testid="approval-preview"]');
       return !!el && el.getAttribute('data-preview-status') !== 'loading';
     }, null, { timeout: 20_000 });
-    return { status: await box.getAttribute('data-preview-status'), text: await box.innerText() };
+    const out = { status: await box.getAttribute('data-preview-status'), text: await box.innerText() };
+    if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU3 E2E] card:\n' + out.text);
+    return out;
   } finally {
     await page.close();
   }
@@ -180,7 +192,7 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
     if (browser) await browser.close().catch(() => {});
     await pm.killAll();
     rmSync(dataDir, { recursive: true, force: true });
-    rmSync(work, { recursive: true, force: true });
+    if (!process.env.HAP_E2E_KEEP_FILES) rmSync(work, { recursive: true, force: true });
   }, 60_000);
 
   let quoteId: string;
@@ -223,7 +235,10 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
     expect(status).toBe('ok');
     expect(text).toContain('Quote number');
     expect(text).toContain(quoteNumber);
-    expect(text).toMatch(/Revision/);
+    expect(text).toMatch(/You approve revision 1/i);
+    expect(text).toContain('Lines');
+    expect(text).toContain('item-1');
+    expect(text).toContain('Net total');
     expect(text).toMatch(/AI is not involved/);
   }, 120_000);
 
@@ -247,7 +262,10 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
   it('in the browser, the card now warns that a newer revision exists', async () => {
     const { status, text } = await approvalPreviewText();
     expect(status).toBe('stale');
-    expect(text).toMatch(/newer/i);
+    expect(text).toMatch(/newer revision exists/i);
+    // The comparison shows what changed: the line item, in both revisions.
+    expect(text).toContain('item-1');
+    expect(text).toContain('item-2');
   }, 120_000);
 
   it('approved anyway: the ERP refuses the stale revision, nothing is sent, and the outcome says so', async () => {
