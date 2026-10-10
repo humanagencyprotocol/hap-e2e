@@ -185,9 +185,10 @@ describe('CRM revisions on the real stack', () => {
     const got = await call('crm__get_contact', { id: customerId });
     expect(got.text).toMatch(/"revision":\s*2/);
     expect(got.text).toMatch(/"archived":\s*(false|0)/);
-    // …and the gateway must report it as refused, not as executed (gateway #88).
+    // …and the gateway reports it as refused, not as executed (gateway #88): asking later
+    // consults the execution journal, not the AS's "executed" set at ticket issuance.
     expect(outcome).not.toMatch(/EXECUTED/);
-    expect(outcome).toMatch(/revision/i);
+    expect(outcome).toMatch(/refused to run it — nothing was done/);
   }, 90_000);
 
   it('archiving with the current revision works — activities and deals survive', async () => {
