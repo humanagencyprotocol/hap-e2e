@@ -49,6 +49,9 @@ const manifest = existsSync(MANIFEST) ? JSON.parse(readFileSync(MANIFEST, 'utf8'
 /** Only meaningful against a gateway whose erp manifest declares the preview. */
 const available = !!manifest?.toolGating?.overrides?.send_quote?.preview;
 
+/** AU6 (ticket view) ships after AU3 — its browser check runs only against a gateway that has it. */
+const hasTicketView = existsSync(join(MANIFESTS_DIR, '..', '..', 'apps', 'ui', 'src', 'components', 'TicketWhatWasDone.tsx'));
+
 const PROFILE_ID = PROFILE_V07.sales;
 const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max',
   'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max'];
@@ -319,4 +322,36 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
     const names = (await agent.listTools()).tools.map((t) => t.name);
     expect(names.some((n) => /preview/i.test(n))).toBe(false);
   }, 30_000);
+
+  it.skipIf(!hasTicketView)('AU6: in the browser, the quote ticket shows what was done — the bound content, verified against the ticket', async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${CP_URL}/login`, { waitUntil: 'networkidle' });
+      await page.locator('input[type="password"]').fill(user.apiKey);
+      await page.locator('button:has-text("Sign In")').click();
+      await page.waitForURL((u) => !u.toString().includes('/login'), { timeout: 45_000 });
+      await page.locator('.sidebar a[href="/tickets"]').click();
+      await page.waitForURL('**/tickets');
+      const boxes = page.locator('[data-testid="ticket-what-was-done"]');
+      await boxes.first().waitFor({ timeout: 20_000 });
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="ticket-what-was-done"]')]
+        .every((el) => el.getAttribute('data-bound') !== 'loading'), null, { timeout: 20_000 });
+      const states = await boxes.evaluateAll((els) => els.map((el) => ({ bound: el.getAttribute('data-bound'), text: (el as HTMLElement).innerText })));
+      if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU6 E2E] tickets:\n' + JSON.stringify(states, null, 1));
+      // Every ticket of this run was issued here, so its content is on this device and must verify.
+      expect(states.length).toBeGreaterThan(0);
+      for (const st of states) expect(st.bound, st.text).toBe('verified');
+      // The create_quote ticket shows what the AI actually sent: customer and line item.
+      const quote = states.find((st) => st.text.includes('cust-4') && st.text.includes('item-1'));
+      expect(quote, JSON.stringify(states)).toBeTruthy();
+      expect(quote!.text).toMatch(/bound by hash/);
+      // The Ed25519 signature check on each ticket card (issuer key archived at issuance).
+      const feet = await page.locator('.receipt-foot').evaluateAll((els) => els.map((el) => (el as HTMLElement).innerText));
+      if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU6 E2E] feet:\n' + JSON.stringify(feet, null, 1));
+      expect(feet.length).toBeGreaterThan(0);
+      for (const f of feet) expect(f, f).toContain('Verified on this device');
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
 });
