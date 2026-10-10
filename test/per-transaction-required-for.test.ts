@@ -122,7 +122,8 @@ function crmIntegration(profileShortName: string) {
     id: 'crm',
     name: 'CRM',
     command: 'npx',
-    args: ['-y', '@humanagencyp/crm-mcp@latest'],
+    // Pinned, not @latest: a connector release must not change this suite silently.
+    args: ['-y', '@humanagencyp/crm-mcp@1.4.0'],
     envKeys: {},
     profile: profileShortName,
     enabled: true,
@@ -240,7 +241,7 @@ beforeAll(async () => {
   await mcpClient.connect(new SSEClientTransport(new URL(`${GW_URL}/sse`)));
 
   // A contact to attach deals to — `setup`, not in requiredFor, never touches amount.
-  const contactResult = await call('crm__create_contact', { name: 'RequiredFor Test Contact' });
+  const contactResult = await call('crm__create_contact', { name: 'RequiredFor Test Contact', type: 'customer' });
   expect(contactResult.denied).toBe(false);
   contactId = contactResult.json.id;
 }, 180_000);
@@ -261,7 +262,7 @@ describe('Gateway — per_transaction requiredFor (write is listed)', () => {
   });
 
   it('REFUSES a deal whose amount is not a number (mistyped manifest mapping: title → amount)', async () => {
-    const r = await call('crm__update_deal', { id: 'does-not-matter', title: 'a lot of money' });
+    const r = await call('crm__update_deal', { id: 'does-not-matter', revision: 1, contact_type: 'customer', title: 'a lot of money' });
     expect(r.denied).toBe(true);
     expect(r.text).toMatch(/not a number|amount_max/i);
   });
@@ -279,7 +280,7 @@ describe('Gateway — per_transaction requiredFor (write is listed)', () => {
   });
 
   it('an unlisted action type (delete) with no amount keeps passing — requiredFor is per action type', async () => {
-    const r = await call('crm__delete_contact', { id: contactId });
+    const r = await call('crm__delete_contact', { id: contactId, revision: 1, contact_type: 'customer' });
     expect(r.denied).toBe(false);
   });
 });
