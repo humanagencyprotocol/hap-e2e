@@ -237,20 +237,13 @@ describe.skipIf(!available)('ERP quote revisions: an approval binds one exact ve
   it('committing the pending send: the Authority Server issues a ticket, the connector refuses it — stale revision', async () => {
     await commitProposal(proposalId);
 
-    // KNOWN GATEWAY GAP (found here, not introduced by this change — see the
-    // ERP1-3 report): commitments.ts's runCommitted() never checks
-    // integrationManager.callTool()'s `isError` on the committed-execution
-    // path. A connector refusal therefore comes back as `isError: false`
-    // under a "committed and executed" headline, with the actual refusal
-    // nested as JSON in "Result:" — not flagged as a failure the way the
-    // AUTOMATIC path's analogous refusal is. The field/value detail required
-    // by this task (naming "revision" and both values) IS present in the
-    // text; the misleading "executed" label is a separate, pre-existing gap
-    // this task does not fix (it is not specific to revisions — any
-    // review-mode refusal reports this way).
+    // The approved action did not happen, and the gateway says so: a connector
+    // refusal on the committed-execution path is an error, never "executed"
+    // (fixed in the same change as this test: commitments.ts checks isError).
     const result = await call('check-pending-commitments', { proposal_id: proposalId });
-    expect(result.denied).toBe(false); // documents the gap above — NOT the desired end state
-    expect(result.text).toContain('committed and executed');
+    expect(result.denied).toBe(true);
+    expect(result.text).not.toContain('committed and executed');
+    expect(result.text).toMatch(/refused to run it — nothing was done/);
     expect(result.text).toMatch(/revision/);
     expect(result.text).toContain('is at revision 2');
     expect(result.text).toContain('this request is for revision 1');
