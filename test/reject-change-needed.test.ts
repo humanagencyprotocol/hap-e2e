@@ -135,12 +135,15 @@ describe.skipIf(!available)('reject or ask for a change — the AI learns which 
     try {
       const card = cardOf(page, id);
       await card.locator('[data-testid="btn-reject"]').click();
+      // Backend truth first: the click must have reached the server before the
+      // All view is opened (in CI the view could load before the rejection was stored).
+      await until(async () => ((await as('GET', `/api/proposals/${id}`)).body.proposal?.status === 'rejected' ? true : undefined), 'rejection stored on the server');
       await showDecided(page);
       // Backend truth: the after-state comes from the server.
       try {
         await until(async () => ((await page.locator('[data-testid="outcome-kind"]').allInnerTexts()).some((t) => /REJECTED/i.test(t)) ? true : undefined), 'rejected shown');
       } catch (err) {
-        if (process.env.HAP_E2E_DEBUG) {
+        {
           console.error('[RJ DEBUG] AS proposal:', JSON.stringify((await as('GET', `/api/proposals/${id}`)).body).slice(0, 600));
           console.error('[RJ DEBUG] page:', (await page.locator('main, body').first().innerText()).slice(0, 2500));
         }
