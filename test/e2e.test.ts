@@ -106,7 +106,7 @@ describe('SP Setup', () => {
   });
 
   it('Bob joins the group', async () => {
-    const result = await sp.joinGroup(ctx.agentUser!.apiKey, ctx.inviteCode!);
+    const result = await sp.joinGroup(ctx.agentUser!.apiKey, ctx.inviteCode!, ctx.adminUser!.apiKey);
     expect(result.member).toBeTruthy();
   });
 

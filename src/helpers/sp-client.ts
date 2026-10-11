@@ -115,16 +115,34 @@ export class SPClient {
     return res.json();
   }
 
+  /**
+   * Join a team with its invite code. Since WS0 (suveren-as, 2026-10-11) the
+   * code only creates a request (202) and the team admin confirms it; pass the
+   * admin's key to confirm in the same step. An older AS still joins at once
+   * (200) — both work.
+   */
   async joinGroup(
     apiKey: string,
     inviteCode: string,
-  ): Promise<{ group: unknown; member: unknown }> {
+    adminKey?: string,
+  ): Promise<{ group?: unknown; member: unknown; ended?: { mandates: number; proposals: number } }> {
     const res = await this.request('POST', '/api/groups/join', { inviteCode }, apiKey);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(`joinGroup failed (${res.status}): ${JSON.stringify(body)}`);
     }
-    return res.json();
+    if (res.status !== 202) return res.json();
+    const { request } = await res.json() as { request: { groupId: string } };
+    if (!adminKey) throw new Error('joinGroup: the AS wants the admin to confirm — pass adminKey');
+    const list = await this.request('GET', `/api/groups/${request.groupId}/requests`, undefined, adminKey);
+    const { requests } = await list.json() as { requests: Array<{ userId: string }> };
+    if (requests.length !== 1) throw new Error(`joinGroup: expected one pending request, got ${requests.length}`);
+    const confirm = await this.request('POST', `/api/groups/${request.groupId}/requests/${requests[0].userId}`, { action: 'confirm' }, adminKey);
+    if (!confirm.ok) {
+      const body = await confirm.json().catch(() => ({}));
+      throw new Error(`joinGroup confirm failed (${confirm.status}): ${JSON.stringify(body)}`);
+    }
+    return confirm.json();
   }
 
   async setMemberDomains(
