@@ -84,6 +84,12 @@ async function approvalsPage(): Promise<Page> {
   return page;
 }
 
+/** Decided proposals leave "Awaiting me"; their stored outcome is listed under All → All. */
+async function showDecided(page: Page): Promise<void> {
+  await page.locator('button.nav-tab', { hasText: /^All$/ }).click();
+  await page.locator('button.filter-chip', { hasText: /^All$/ }).click();
+}
+
 function cardOf(page: Page, proposalId: string) {
   return page.locator('.card', { hasText: proposalId }).first();
 }
@@ -129,8 +135,17 @@ describe.skipIf(!available)('reject or ask for a change — the AI learns which 
     try {
       const card = cardOf(page, id);
       await card.locator('[data-testid="btn-reject"]').click();
+      await showDecided(page);
       // Backend truth: the after-state comes from the server.
-      await until(async () => ((await page.locator('[data-testid="outcome-kind"]').allInnerTexts()).some((t) => /REJECTED/i.test(t)) ? true : undefined), 'rejected shown');
+      try {
+        await until(async () => ((await page.locator('[data-testid="outcome-kind"]').allInnerTexts()).some((t) => /REJECTED/i.test(t)) ? true : undefined), 'rejected shown');
+      } catch (err) {
+        if (process.env.HAP_E2E_DEBUG) {
+          console.error('[RJ DEBUG] AS proposal:', JSON.stringify((await as('GET', `/api/proposals/${id}`)).body).slice(0, 600));
+          console.error('[RJ DEBUG] page:', (await page.locator('main, body').first().innerText()).slice(0, 2500));
+        }
+        throw err;
+      }
     } finally { await page.close(); }
     const r = await call('check-pending-commitments', { proposal_id: id });
     expect(r.text).toMatch(/was REJECTED/);
@@ -147,6 +162,7 @@ describe.skipIf(!available)('reject or ask for a change — the AI learns which 
       await card.locator('[data-testid="btn-change-needed"]').click();
       await card.locator('[data-testid="change-note"]').fill(NOTE);
       await card.locator('[data-testid="btn-send-back"]').click();
+      await showDecided(page);
       const shownNote = await until(async () => {
         const n = await page.locator('[data-testid="outcome-note"]').allInnerTexts();
         return n.find((t) => t.includes('max five words'));
