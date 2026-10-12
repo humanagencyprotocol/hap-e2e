@@ -197,6 +197,19 @@ export class ProcessManager {
     return { SUVEREN_DB_URL: suiteUrl.toString() };
   }
 
+  /**
+   * Connection URL of the most recently started AS's throwaway database — for
+   * tests that must inspect what the AS actually stored (e.g. that a proposal
+   * row holds no readable content). Null when no SUVEREN_DB_URL was given.
+   */
+  asDatabaseUrl(): string | null {
+    const last = this.asDbs[this.asDbs.length - 1];
+    if (!last) return null;
+    const url = new URL(last.adminUrl);
+    url.pathname = `/${last.name}`;
+    return url.toString();
+  }
+
   /** Drops every throwaway AS database provisionAsStorage created. */
   private async dropAsStorage(): Promise<void> {
     const dbs = this.asDbs;
