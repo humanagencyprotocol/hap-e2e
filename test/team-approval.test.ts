@@ -88,7 +88,7 @@ beforeAll(async () => {
   // Admin creates the team; agent joins.
   const grp = await sp.createGroup(adminKey, 'Approval Test Team');
   groupId = grp.group.id;
-  await sp.joinGroup(agentKey, grp.inviteCode);
+  await sp.joinGroup(agentKey, grp.inviteCode, adminKey);
 
   // Admin configures the profile: cap write_daily_max at 1, with the admin AND
   // the agent as approvers.
