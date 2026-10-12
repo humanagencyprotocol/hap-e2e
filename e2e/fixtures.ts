@@ -525,8 +525,8 @@ export async function spApiAttest(
   data: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   // Normalize v0.3 → v0.4: map defer_commitment → commitment_mode, drop the
-  // removed `path` field, and inject the caller's personal group_id (now
-  // required) when not supplied. v0.7: context_hash → scope_hash, and
+  // removed `path` field, and inject the caller's active-workspace group_id
+  // (now required) when not supplied. v0.7: context_hash → scope_hash, and
   // profile_hash (new, required) is computed from the SAME local
   // hap-profiles bytes the spawned AS reads (localProfilesForAs in
   // startServers) when the caller doesn't supply one.
@@ -547,10 +547,20 @@ export async function spApiAttest(
     delete body.context_hash;
   }
   if (body.group_id === undefined) {
-    const gr = await request.get(`${SP_URL}/api/groups`, { headers: { 'x-api-key': apiKey } });
-    const groups = ((await gr.json()).groups ?? []) as Array<{ id: string; allowLazyEnable?: boolean; isPersonal?: boolean }>;
-    const personal = groups.find(g => g.allowLazyEnable || g.isPersonal) ?? groups[0];
-    body.group_id = personal?.id;
+    // The caller's ACTIVE workspace: its team if it has one, else Personal.
+    // Since WS1 an account is Personal OR in one team, and while it is in a
+    // team its Personal workspace is paused (403 PERSONAL_PAUSED), so the
+    // active workspace is the only group a new mandate can target.
+    const me = await request.get(`${SP_URL}/api/groups/me`, { headers: { 'x-api-key': apiKey } });
+    const team = me.ok() ? ((await me.json()).group as { id: string } | null) : null;
+    if (team) {
+      body.group_id = team.id;
+    } else {
+      const gr = await request.get(`${SP_URL}/api/groups`, { headers: { 'x-api-key': apiKey } });
+      const groups = ((await gr.json()).groups ?? []) as Array<{ id: string; allowLazyEnable?: boolean; isPersonal?: boolean }>;
+      const personal = groups.find(g => g.allowLazyEnable || g.isPersonal) ?? groups[0];
+      body.group_id = personal?.id;
+    }
   }
   if (body.profile_hash === undefined && typeof body.profile_id === 'string') {
     body.profile_hash = profileHashFor(body.profile_id, PROFILES_DIR);

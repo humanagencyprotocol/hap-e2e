@@ -6,7 +6,7 @@
  * 2. After TTL expires, status changes to expired
  * 3. Receipts are rejected after expiry
  */
-import { test, expect, ensureUsersRegistered, ALICE, spApiAttest, spApiReceipt, SP_URL, latestProfileId } from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, spApiAttest, spApiReceipt, SP_URL, latestProfileId, ensureProfileEnabledForActiveGroups } from './fixtures';
 
 test.describe.serial('Journey 6: Expiry & Extension', () => {
   let apiKey: string;
@@ -23,6 +23,11 @@ test.describe.serial('Journey 6: Expiry & Extension', () => {
   });
 
   test('6.2 Create authorization with short TTL (60s)', async ({ request }) => {
+    // Since WS1 an account is Personal OR in one team; by now group-journey
+    // has made ALICE a team member, so her Personal workspace is paused and
+    // spApiAttest grants in her active workspace (the team). A team grants a
+    // profile only once its admin configured approvers.
+    await ensureProfileEnabledForActiveGroups(apiKey, recordsProfile, ALICE.id);
     const sessionRes = await request.post(`${SP_URL}/api/auth/session`, {
       headers: { 'x-api-key': apiKey },
     });

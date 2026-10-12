@@ -24,25 +24,47 @@ test.describe('Group Journey', () => {
     const groupId = groupUrl.split('/dashboard/groups/')[1]?.split('?')[0];
     expect(groupId).toBeTruthy();
 
-    // Step 2: Bob joins
+    // Step 2: Bob asks to join. Since WS0 the invite code alone does not make
+    // him a member: enter code → preview → "Ask to join" → a pending request.
     const bob = await authenticatedPage(browser, BOB.apiKey);
 
     await bob.goto(`${SP_URL}/dashboard/groups/join`);
     await bob.fill('input#inviteCode', inviteCode);
-    await bob.click('button:has-text("Join Team")');
-    await bob.waitForURL(new RegExp(`/dashboard/groups/${groupId}`), { timeout: 15_000 });
-    await expect(bob.getByText('Test Operations').first()).toBeVisible({ timeout: 10_000 });
+    await bob.click('button:has-text("Continue")');
+    await expect(bob.getByText('Join team Test Operations?')).toBeVisible({ timeout: 10_000 });
+    await bob.click('button:has-text("Ask to join")');
+    await expect(bob.getByText('Request sent to team Test Operations')).toBeVisible({ timeout: 10_000 });
+    await expect(bob.locator('button:has-text("Withdraw request")')).toBeVisible();
 
-    // Step 3: Alice sees Bob in members
+    // Not a member yet: the team is not in Bob's groups until the admin confirms.
+    const bobBefore = await bob.request.get(`${SP_URL}/api/groups`, {
+      headers: { 'x-api-key': BOB.apiKey },
+    });
+    expect(bobBefore.ok()).toBe(true);
+    expect((await bobBefore.json()).groups.some((g: { id: string }) => g.id === groupId)).toBe(false);
+
+    // Step 3: Alice (the admin) confirms the request on the Members page
+    await alice.goto(`${SP_URL}/dashboard/groups/${groupId}`);
+    const requests = alice.locator('.card', { hasText: 'Requests to join' });
+    await expect(requests).toBeVisible({ timeout: 10_000 });
+    await expect(requests.getByText(BOB.name)).toBeVisible();
+    await requests.locator('button:has-text("Confirm")').click();
+    await expect(requests).toBeHidden({ timeout: 10_000 });
+
+    // Step 4: Alice sees Bob in members
     await alice.goto(`${SP_URL}/dashboard/groups/${groupId}`);
     await expect(alice.locator('table')).toBeVisible();
-    await expect(alice.locator(`text=${BOB.name}`)).toBeVisible();
+    await expect(alice.locator('table').locator(`text=${BOB.name}`)).toBeVisible();
 
-    // Step 4: Activity tab loads
+    // Bob now lands in the team
+    await bob.goto(`${SP_URL}/dashboard/groups/${groupId}`);
+    await expect(bob.getByText('Test Operations').first()).toBeVisible({ timeout: 10_000 });
+
+    // Step 5: Activity tab loads
     await alice.click('a:has-text("Activity")');
     await expect(alice.locator('text=No execution receipts').or(alice.locator('table'))).toBeVisible({ timeout: 10_000 });
 
-    // Step 5: Both see the group via API
+    // Step 6: Both see the group via API
     const aliceGroups = await alice.request.get(`${SP_URL}/api/groups`, {
       headers: { 'x-api-key': ALICE.apiKey },
     });
