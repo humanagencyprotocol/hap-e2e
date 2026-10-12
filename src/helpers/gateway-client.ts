@@ -3,11 +3,32 @@
  * All requests go to loopback — gateway enforces loopback-only access.
  */
 import { fetchResilient } from './http.js';
+
+/**
+ * The CP↔MCP shared secret of every gateway `ProcessManager.startGateway`
+ * started in this test process, by MCP port. startGateway runs the whole
+ * gateway (control plane + MCP server, as every real install does), so the
+ * MCP server's /internal routes demand the secret; suites build their
+ * GatewayClient before the gateway exists, hence the lookup at request time.
+ */
+const startedGatewaySecrets = new Map<string, string>();
+
+export function registerGatewaySecret(mcpPort: number, secret: string): void {
+  startedGatewaySecrets.set(String(mcpPort), secret);
+}
+
+/** The X-Internal-Secret header for a gateway startGateway started, or none. */
+export function internalSecretHeaders(baseUrl: string): Record<string, string> {
+  const secret = startedGatewaySecrets.get(new URL(baseUrl).port);
+  return secret ? { 'X-Internal-Secret': secret } : {};
+}
+
 export class GatewayClient {
   /**
    * @param internalSecret Sent as X-Internal-Secret. Needed only when the
    *   gateway was started with SUVEREN_INTERNAL_SECRET — i.e. paired with a
-   *   real control plane, which is the only way the two can talk.
+   *   real control plane, which is the only way the two can talk. Omitted →
+   *   the secret of the gateway startGateway started on this URL's port.
    */
   constructor(private baseUrl: string, private internalSecret?: string) {}
 
@@ -20,7 +41,7 @@ export class GatewayClient {
       method,
       headers: {
         'Content-Type': 'application/json',
-        ...(this.internalSecret ? { 'X-Internal-Secret': this.internalSecret } : {}),
+        ...(this.internalSecret ? { 'X-Internal-Secret': this.internalSecret } : internalSecretHeaders(this.baseUrl)),
       },
       body: body != null ? JSON.stringify(body) : undefined,
     });

@@ -1,4 +1,5 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +7,8 @@ import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { AS_DIR, resolveNextBin } from './as-dir';
 import { localProfilesForAs } from './local-profiles';
+import { ControlPlaneClient, newSecret, startControlPlane, startMcpServer, type StackOptions } from './gateway-stack';
+import { registerGatewaySecret } from './gateway-client';
 
 // src/helpers/ → src → hap-e2e → HAP repo root
 const ROOT = join(import.meta.dirname, '..', '..', '..');
@@ -197,6 +200,19 @@ export class ProcessManager {
     return { SUVEREN_DB_URL: suiteUrl.toString() };
   }
 
+  /**
+   * Connection URL of the most recently started AS's throwaway database — for
+   * tests that must inspect what the AS actually stored (e.g. that a proposal
+   * row holds no readable content). Null when no SUVEREN_DB_URL was given.
+   */
+  asDatabaseUrl(): string | null {
+    const last = this.asDbs[this.asDbs.length - 1];
+    if (!last) return null;
+    const url = new URL(last.adminUrl);
+    url.pathname = `/${last.name}`;
+    return url.toString();
+  }
+
   /** Drops every throwaway AS database provisionAsStorage created. */
   private async dropAsStorage(): Promise<void> {
     const dbs = this.asDbs;
@@ -218,7 +234,23 @@ export class ProcessManager {
   }
 
   /**
-   * Start the gateway (Express HTTP server).
+   * Start the whole gateway — control plane AND MCP server, sharing one
+   * SUVEREN_INTERNAL_SECRET and one data dir, as bundle/server.js, Docker and
+   * `pnpm dev` always run it — then sign in to the control plane with
+   * `spApiKey`, the way a person does.
+   *
+   * It used to start the MCP server alone. That stopped being a real install
+   * once the gateway began encrypting proposal content: sealing needs the
+   * vault's HPKE key, which only the control plane holds, so the MCP server
+   * alone (correctly) refuses every review proposal.
+   *
+   * Signature kept for the ~40 callers: `port` is the MCP port; the control
+   * plane gets `cpPort`, or an OS-assigned free port (outside the fixed
+   * 16xxx–19xxx range the suites use, so it cannot collide). The MCP
+   * server's /internal routes now require the secret — GatewayClient picks it
+   * up by port (registerGatewaySecret), raw fetches use internalSecretHeaders.
+   * SUVEREN_AS_API_KEY is still passed: the MCP server reads it at boot.
+   * An empty `spApiKey` (a session-only suite) starts both halves signed out.
    */
   async startGateway(opts: {
     port: number;
@@ -226,38 +258,49 @@ export class ProcessManager {
     spApiKey: string;
     profilesDir: string;
     mode?: 'personal' | 'team';
+    /** Control-plane port. Default: a free port the OS assigns. */
+    cpPort?: number;
+    /**
+     * Sign in to the control plane with `spApiKey` (default true). Skipped
+     * anyway when `spApiKey` is empty. Pass false for a suite that reads the
+     * gateway's on-disk stores (denial log, ticket archive) directly: sign-in
+     * unlocks the vault and those stores are then encrypted at rest, as in
+     * any real install. Such a suite configures the MCP server itself and so
+     * cannot make review proposals (sealing them needs the signed-in vault).
+     */
+    signIn?: boolean;
   }): Promise<ChildProcess> {
     const dataDir = this.getDataDir();
-    console.error(`[E2E] Starting gateway on port ${opts.port}...`);
+    const cpPort = opts.cpPort ?? await freePort();
+    const secret = newSecret();
+    console.error(`[E2E] Starting gateway (control plane :${cpPort}, MCP :${opts.port})...`);
 
-    const proc = spawn(
-      'node',
-      ['apps/mcp-server/dist/http.mjs'],
-      {
-        cwd: join(ROOT, 'suveren-gateway'),
-        env: {
-          ...process.env,
-          SUVEREN_MCP_PORT: String(opts.port),
-          SUVEREN_AS_URL: opts.spUrl,
-          SUVEREN_AS_API_KEY: opts.spApiKey,
-          SUVEREN_PROFILES_DIR: opts.profilesDir,
-          // Read-only manifest source. Runtime npm installs go to a SEPARATE
-          // dir (SUVEREN_INTEGRATIONS_DIR) — the two must never be the same.
-          SUVEREN_MANIFESTS_DIR: join(ROOT, 'suveren-gateway', 'content', 'integrations'),
-          SUVEREN_INTEGRATIONS_DIR: join(dataDir, 'integrations'),
-          SUVEREN_DATA_DIR: dataDir,
-          // opts.mode is retained for caller compatibility; the mcp-server no
-          // longer reads a MODE env var (group type is set via the AS).
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
+    const stack: StackOptions = {
+      dataDir,
+      ports: { cp: cpPort, mcp: opts.port },
+      secret,
+      asUrl: opts.spUrl,
+      extraEnv: {
+        SUVEREN_PROFILES_DIR: opts.profilesDir,
+        SUVEREN_AS_API_KEY: opts.spApiKey,
+        // opts.mode is retained for caller compatibility; the gateway no
+        // longer reads a MODE env var (group type is set via the AS).
       },
-    );
+    };
+    registerGatewaySecret(opts.port, secret);
+    await startControlPlane(this, stack, 'gateway-cp');
+    await startMcpServer(this, stack, 'gateway');
+    const proc = [...this.processes].reverse().find((p) => p.name === 'gateway')!.proc;
 
-    this.processes.push({ name: 'gateway', proc });
-    this.pipeOutput(proc, 'GW');
-
-    await this.waitForHealth(`http://localhost:${opts.port}/health`, 30_000);
-    console.error(`[E2E] Gateway ready on port ${opts.port}.`);
+    if (opts.signIn === false || !opts.spApiKey) {
+      console.error(`[E2E] Gateway ready, not signed in (control plane :${cpPort}, MCP :${opts.port}).`);
+      return proc;
+    }
+    const login = await new ControlPlaneClient(`http://localhost:${cpPort}`).login(opts.spApiKey);
+    if (login.status !== 200) {
+      throw new Error(`Gateway sign-in failed (${login.status}): ${JSON.stringify(login.body)}`);
+    }
+    console.error(`[E2E] Gateway ready and signed in (control plane :${cpPort}, MCP :${opts.port}).`);
     return proc;
   }
 
@@ -463,4 +506,16 @@ export class ProcessManager {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** A port nothing listens on right now, assigned by the OS. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address() as { port: number };
+      srv.close(() => resolve(port));
+    });
+  });
 }

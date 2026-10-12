@@ -174,7 +174,20 @@ describe.skipIf(!available)('reject or ask for a change — the AI learns which 
     } finally { await page.close(); }
 
     const stored = await as('GET', `/api/proposals/${id}`);
-    expect(stored.body.proposal.rejectedBy).toMatchObject({ outcome: 'change_needed', note: NOTE });
+    const rejectedBy = stored.body.proposal.rejectedBy;
+    expect(rejectedBy).toMatchObject({ outcome: 'change_needed' });
+    if (rejectedBy.note !== undefined) {
+      // A gateway from before proposal-content encryption sends the note in plain text.
+      expect(rejectedBy.note).toBe(NOTE);
+      expect(rejectedBy.noteEncrypted).toBeUndefined();
+    } else {
+      // An encrypting gateway seals the note for the proposal's readers: the AS
+      // stores it but cannot read it — the plain text is nowhere in its answer.
+      expect(rejectedBy.noteEncrypted).toBeDefined();
+      expect(rejectedBy.noteEncrypted.ciphertext).toEqual(expect.any(String));
+      expect(JSON.stringify(stored.body)).not.toContain(NOTE);
+      expect(JSON.stringify(stored.body)).not.toContain('max five words');
+    }
 
     // The AI learns it on its next call to ANY tool — here an unrelated one.
     const first = await until(async () => {

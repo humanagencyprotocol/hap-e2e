@@ -24,7 +24,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ProcessManager } from '../src/helpers/process-manager';
 import { SPClient } from '../src/helpers/sp-client';
-import { GatewayClient } from '../src/helpers/gateway-client';
+import { GatewayClient, internalSecretHeaders } from '../src/helpers/gateway-client';
 import { computeBoundsHash, hashGateContent, hashExecutionContext } from '../src/helpers/crypto';
 import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles';
 
@@ -157,7 +157,7 @@ describe('Exactly-once execution under concurrent triggers', () => {
     // The collision, on purpose: the control-plane's nudge (three of them),
     // the agent asking twice, and the poll loop ticking underneath.
     const nudge = () =>
-      fetch(`http://localhost:${GW_PORT}/internal/run-committed`, { method: 'POST' }).then(r => r.status);
+      fetch(`http://localhost:${GW_PORT}/internal/run-committed`, { method: 'POST', headers: internalSecretHeaders(`http://localhost:${GW_PORT}`) }).then(r => r.status);
     const results = await Promise.all([
       nudge(),
       nudge(),
