@@ -39,6 +39,14 @@ const PROFILES_DIR = join(ROOT, 'hap-profiles');
 const INTEGRATIONS = join(ROOT, 'suveren-gateway', 'content', 'integrations');
 const MAIL_MANIFEST = join(INTEGRATIONS, 'mail.json');
 const available = existsSync(MAIL_MANIFEST) && !!process.env.SUVEREN_DB_URL;
+/** The REFUSED case needs both fixes: the AS's `refused` status (migration 010)
+ *  and a gateway that reports it. Skipped until both are present. */
+const AS_MIGRATIONS = existsSync(join(ROOT, 'suveren-as', 'apps', 'as', 'migrations'))
+  ? join(ROOT, 'suveren-as', 'apps', 'as', 'migrations') : join(ROOT, 'suveren-as', 'migrations');
+const GW_JOURNAL = join(ROOT, 'suveren-gateway', 'apps', 'mcp-server', 'src', 'lib', 'execution-journal.ts');
+const refusedAvailable = available
+  && existsSync(join(AS_MIGRATIONS, '010_proposal_refused.sql'))
+  && existsSync(GW_JOURNAL) && readFileSync(GW_JOURNAL, 'utf8').includes('as_refused');
 const PKG = { erp: 'erp-mcp', crm: 'crm-mcp', mail: 'email-mcp' } as const;
 const SYSTEMS = ['erp', 'crm', 'mail'] as const;
 /** Which profile key gates each system — same mapping as simulation-rerun.test.ts. */
@@ -273,7 +281,7 @@ describe.skipIf(!available)('review-mode load_simulation: an approved proposal m
  * ITSELF, before the gateway ever calls the connector: the exact regression
  * this fix addresses.
  */
-describe.skipIf(!available)('review-mode load_simulation: the Authority Server refuses the 3rd ticket over setup_daily_max — proposal is REFUSED, never EXECUTED', () => {
+describe.skipIf(!refusedAvailable)('review-mode load_simulation: the Authority Server refuses the 3rd ticket over setup_daily_max — proposal is REFUSED, never EXECUTED', () => {
   const SP_PORT_2 = 17960;
   const GW_PORT_2 = 17992;
   const SP_URL_2 = `http://localhost:${SP_PORT_2}`;
