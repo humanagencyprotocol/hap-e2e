@@ -18,8 +18,8 @@
  *                    Authority*), reached by calling through the gateway
  *                    twice against a daily cap of 1.
  *
- * No vault/control-plane pairing happens in this harness (same as the other
- * real-stack suites), so the gateway's DenialLog persists in PLAINTEXT
+ * The gateway is started without signing in (`signIn: false`), so no vault
+ * key reaches the MCP server and its DenialLog persists in PLAINTEXT
  * (`denials.json` under its SUVEREN_DATA_DIR) — read directly here.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -147,8 +147,8 @@ async function call(tool: string, args: Record<string, unknown>) {
   return { denied: r.isError === true, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() };
 }
 
-/** Read the gateway process's own plaintext denial log (no vault pairing in
- * this harness, so it is never encrypted) — newest first. */
+/** Read the gateway process's own plaintext denial log (not signed in, so no
+ * vault key reaches it and it is never encrypted) — newest first. */
 function readDenials(): DenialRecord[] {
   const path = join(pm.getDataDir(), 'denials.json');
   const data = JSON.parse(readFileSync(path, 'utf-8')) as { records?: DenialRecord[] };
@@ -175,7 +175,8 @@ beforeAll(async () => {
     profiles: { [profileId]: 'profile.json' },
   }));
 
-  await pm.startGateway({ port: GW_PORT, spUrl: SP_URL, spApiKey: apiKey, profilesDir });
+  // signIn: false — sign-in would unlock the vault and encrypt denials.json (see header).
+  await pm.startGateway({ port: GW_PORT, spUrl: SP_URL, spApiKey: apiKey, profilesDir, signIn: false });
   await gw.configure({ sessionCookie: 'au2-blocked-e2e', apiKey });
 
   // Per-transaction cap 5,000; cumulative daily cap of exactly 1 write — the

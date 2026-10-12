@@ -26,7 +26,7 @@ import { join } from 'node:path';
 
 import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient, mintAuthorizationId } from '../src/helpers/sp-client.js';
-import { GatewayClient } from '../src/helpers/gateway-client.js';
+import { GatewayClient, internalSecretHeaders } from '../src/helpers/gateway-client.js';
 import {
   hashGateContent,
   hashExecutionContext,
@@ -456,11 +456,11 @@ describe('Gateway parity — identical-bounds twins keep separate intents end-to
     await sp.revokeAuthorization(gwApiKey, twinA, 'parity: revoke one twin');
 
     // Propagation trigger: in production the control plane reacts to the
-    // revoke event by POSTing /internal/resync-gates on the MCP server. The
-    // e2e runs the MCP server alone, so fire the same trigger directly —
+    // revoke event by POSTing /internal/resync-gates on the MCP server. Fire
+    // the same trigger directly, so the test does not wait on that event —
     // resync re-syncs every stored gate by its per-ceremony id, and
     // syncAuthorization drops revoked grants from the cache.
-    const resync = await fetch(`${GW_URL}/internal/resync-gates`, { method: 'POST' });
+    const resync = await fetch(`${GW_URL}/internal/resync-gates`, { method: 'POST', headers: internalSecretHeaders(GW_URL) });
     expect(resync.ok).toBe(true);
 
     const text = await listAuthorizations();

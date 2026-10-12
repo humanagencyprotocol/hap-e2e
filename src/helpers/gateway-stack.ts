@@ -3,11 +3,11 @@
  * `bundle/server.js` wires them, for suites whose subject lives in the
  * control plane (sign-in, pairing, locking) or in how the two halves agree.
  *
- * Most suites start only the MCP server (`ProcessManager.startGateway`) and
- * hand it an API key directly. That skips sign-in entirely, which is exactly
- * where the Authority Server's key is pinned, so the pairing suites cannot use
- * it. Everything here runs from the gateway's own build output; nothing is
- * stubbed.
+ * Most suites use `ProcessManager.startGateway`, which runs both halves with
+ * these same helpers and signs in once with a given API key. The pairing
+ * suites need control over sign-in itself (that is where the Authority
+ * Server's key is pinned), so they drive the halves directly. Everything here
+ * runs from the gateway's own build output; nothing is stubbed.
  *
  * Environment hygiene matters more than usual: the control plane and MCP
  * server fall back to the developer's live ports (3402 / 3430) and to

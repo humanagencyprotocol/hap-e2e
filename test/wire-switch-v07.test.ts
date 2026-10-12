@@ -234,10 +234,10 @@ describe('A custody archive entry verifies offline with its stored issuer key', 
     const user = await sp.register('Custody Archive', `custody-archive-${Date.now()}@test.local`);
     const groupId = await sp.getPersonalGroupId(user.apiKey);
 
-    await pm.startGateway({ port: MCP_PORT, spUrl: `http://localhost:${SP_PORT}`, spApiKey: user.apiKey, profilesDir: PROFILES_DIR });
+    await pm.startGateway({ port: MCP_PORT, spUrl: `http://localhost:${SP_PORT}`, spApiKey: user.apiKey, profilesDir: PROFILES_DIR, signIn: false });
     mcpInternal = new GatewayClient(`http://localhost:${MCP_PORT}`);
-    // No control-plane pairing in this test -- same direct-configure pattern
-    // as-outage-fail-closed.test.ts uses. No vault key is ever pushed, so the
+    // Not signed in to the control plane (signIn: false) -- configured directly,
+    // the pattern as-outage-fail-closed.test.ts uses. No vault key is ever pushed, so the
     // receipt archive stays plaintext on disk and this test can read it
     // directly, exactly as an operator's own offline export tooling would.
     await mcpInternal.configure({ sessionCookie: `api-key=${user.apiKey}`, apiKey: user.apiKey });

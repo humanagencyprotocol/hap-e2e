@@ -69,7 +69,8 @@ beforeAll(async () => {
   apiKey = reg.apiKey;
   did = reg.user.did;
   groupId = await sp.getPersonalGroupId(apiKey);
-  await pm.startGateway({ port: GW_PORT, spUrl: SP_URL, spApiKey: apiKey, profilesDir: PROFILES_DIR });
+  // signIn: false — sign-in unlocks the vault, and denials.json (read below) would be encrypted.
+  await pm.startGateway({ port: GW_PORT, spUrl: SP_URL, spApiKey: apiKey, profilesDir: PROFILES_DIR, signIn: false });
   await gw.configure({ sessionCookie: 'tools-always-listed-e2e', apiKey });
   await gw.waitForIntegration('crm');
   await sleep(2_000);
