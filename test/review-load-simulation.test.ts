@@ -239,3 +239,171 @@ describe.skipIf(!available)('review-mode load_simulation: an approved proposal m
       .toBe(pkg.customers.length);
   }, 90_000);
 });
+
+/**
+ * 2026-10-12 fix — a FURTHER live bug on the same real stack (demo gateway
+ * log): "Auto-exec proposal 4a0de6460d47: SP rejected receipt — Cumulative
+ * daily count (3) exceeds setup_daily_max=2", then check-pending-commitments
+ * told the agent the proposal "was approved and has already been EXECUTED
+ * ... the gateway did not retain its output" — though nothing ran. The
+ * Authority Server's `committed → executed` CAS used to run BEFORE its
+ * cumulative/bounds check, so a bound refusal left the proposal `executed`
+ * regardless. Fixed: the AS now answers a genuine terminal `status:
+ * 'refused'` (with a `refusal: { code, message, at }`) for exactly this
+ * case — see suveren-as/docs/architecture.md §3.4.
+ *
+ * Own SP + gateway + CRM connector (own ProcessManager, own actor, own
+ * ports) — NOT the describe above. Cumulative counting is scoped to
+ * (group, profile, actionType), shared across every mandate in a group, so
+ * reusing the actor above (whose 'customers' setup_daily_max=2 budget is
+ * already fully spent by its clear+load) would make the FIRST request here
+ * an immediate over-cap refusal rather than showing the cap actually being
+ * reached first. A fresh actor on its own stack gives a clean, verifiable
+ * sequence from zero.
+ *
+ * Simplification from the live bug's exact trace: there, the FIRST counted
+ * ticket was refused BY THE CONNECTOR (the simulator was already non-empty)
+ * — that distinct behaviour (a connector refusal still consumes a
+ * cumulative slot, so cumulative counting and "did it actually run" are two
+ * different questions) is already covered elsewhere (hap-e2e's own
+ * load_simulation guard above; the gateway's commitment-status.test.ts
+ * REFUSED-by-connector cases; the AU4/AU5 fix, 2026-10-10). This test fills
+ * the cap with two ORDINARY successful review actions (clear, then load)
+ * and shows the THIRD request — over cap — refused by the AUTHORITY SERVER
+ * ITSELF, before the gateway ever calls the connector: the exact regression
+ * this fix addresses.
+ */
+describe.skipIf(!available)('review-mode load_simulation: the Authority Server refuses the 3rd ticket over setup_daily_max — proposal is REFUSED, never EXECUTED', () => {
+  const SP_PORT_2 = 17960;
+  const GW_PORT_2 = 17992;
+  const SP_URL_2 = `http://localhost:${SP_PORT_2}`;
+  const GW_URL_2 = `http://localhost:${GW_PORT_2}`;
+
+  const pm2 = new ProcessManager();
+  const sp2 = new SPClient(SP_URL_2);
+  const gw2 = new GatewayClient(GW_URL_2);
+
+  let apiKey2: string;
+  let did2: string;
+  let groupId2: string;
+  let mcpClient2: Client;
+
+  async function grant2(kind: 'setup' | 'work', mode: 'review' | 'automatic'): Promise<string> {
+    const p = PROFILES.customers;
+    const bounds = { profile: p.id, ...p[kind] };
+    const boundsHash = computeBoundsHash(bounds, [...p.keyOrder]);
+    const contextHash = computeScopeHash(p.ctx, [...p.ctxOrder]);
+    const gate = { intent: `E2E ${kind}/${mode} mandate for customers (AS-refused-ticket test)` };
+    const att = await sp2.submitMandate(apiKey2, {
+      profile_id: p.id, profile_hash: profileHashFor(p.id, PROFILES_DIR), group_id: groupId2, bounds, bounds_hash: boundsHash, scope_hash: contextHash,
+      domain: 'owner', did: did2, commitment_mode: mode,
+      gate_content_hashes: hashGateContent(gate), execution_context_hash: hashExecutionContext({ kind, mode }),
+    });
+    await gw2.pushGateContent({ authorizationId: att.authorization_id, boundsHash, contextHash, context: p.ctx }, p.id, gate);
+    return att.authorization_id;
+  }
+
+  async function call2(tool: string, args: Record<string, unknown>) {
+    const r = await mcpClient2.callTool({ name: tool, arguments: args });
+    const text = (r.content as Array<{ text?: string }>)?.map((c) => c.text ?? '').join('\n') ?? '';
+    return { denied: r.isError === true, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() };
+  }
+
+  async function resolveProposal2(proposalId: string): Promise<void> {
+    const res = await fetch(`${SP_URL_2}/api/proposals/${proposalId}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey2 },
+      body: JSON.stringify({ action: 'commit', domain: 'owner' }),
+    });
+    const body = await res.json().catch(() => ({}));
+    expect(res.ok, JSON.stringify(body)).toBe(true);
+  }
+
+  async function checkPending2(proposalId: string) {
+    const r = await mcpClient2.callTool({ name: 'check-pending-commitments', arguments: { proposal_id: proposalId } });
+    const text = (r.content as Array<{ text?: string }>)?.[0]?.text ?? '';
+    return { denied: r.isError === true, text };
+  }
+
+  /** Call a gated tool, expect a proposal, approve it at the AS. Returns the proposal id. */
+  async function proposeAndApprove(tool: string, args: Record<string, unknown>): Promise<string> {
+    const r = await call2(tool, args);
+    expect(r.denied, r.text).toBe(false);
+    expect(r.text).toMatch(/Awaiting commitment/);
+    const match = r.text.match(/Proposal ID: ([a-f0-9-]+)/);
+    expect(match, r.text).toBeTruthy();
+    const proposalId = match![1];
+    await resolveProposal2(proposalId);
+    return proposalId;
+  }
+
+  beforeAll(async () => {
+    pm2.buildGateway();
+    await pm2.startSP(SP_PORT_2);
+    const reg = await sp2.register('AS Refused Ticket Test', `as-refused-ticket-${Date.now()}@test.local`);
+    apiKey2 = reg.apiKey; did2 = reg.user.did;
+    groupId2 = await sp2.getPersonalGroupId(apiKey2);
+    await pm2.startGateway({ port: GW_PORT_2, spUrl: SP_URL_2, spApiKey: apiKey2, profilesDir: PROFILES_DIR });
+    await gw2.configure({ sessionCookie: 'as-refused-ticket-e2e', apiKey: apiKey2 });
+    await gw2.waitForIntegration('crm');
+
+    await grant2('setup', 'review');
+    mcpClient2 = new Client({ name: 'as-refused-ticket-agent', version: '1.0.0' }, { capabilities: {} });
+    await mcpClient2.connect(new SSEClientTransport(new URL(`${GW_URL_2}/sse`)));
+  }, 300_000);
+
+  afterAll(async () => {
+    if (mcpClient2) { try { await mcpClient2.close(); } catch { /* ignore */ } }
+    await pm2.killAll();
+  }, 30_000);
+
+  it('setup_daily_max=2: approved clear (1), approved load (2=cap), approved load again (3) — the Authority Server refuses THIS ticket; the proposal is REFUSED, never EXECUTED, and nothing extra loaded', async () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'simulation-package.example.json'), 'utf8'));
+
+    // (1) clear on an already-empty simulator — succeeds trivially, uses 1 of 2.
+    // check-pending-commitments itself runs a still-'committed' proposal (no
+    // nudge/poll has reached it yet), so this returns executeCommitted's own
+    // first-time success text ("committed and executed."), not the later
+    // ALL-CAPS "EXECUTED" status report a SUBSEQUENT check would show.
+    const clearId = await proposeAndApprove('crm__clear_simulation', {});
+    expect((await checkPending2(clearId)).text).toMatch(/executed/i);
+
+    // (2) load — succeeds, the cap is now fully spent (2 of 2).
+    const loadId1 = await proposeAndApprove('crm__load_simulation', { package: pkg });
+    expect((await checkPending2(loadId1)).text).toMatch(/executed/i);
+
+    // (3) a THIRD setup-type ticket request — the AS computes the would-be
+    // cumulative count (3) against setup_daily_max=2 and refuses the TICKET
+    // ITSELF, before the gateway ever calls the connector.
+    const loadId2 = await proposeAndApprove('crm__load_simulation', { package: pkg });
+    await fetch(`${GW_URL_2}/internal/run-committed`, { method: 'POST', headers: internalSecretHeaders(GW_URL_2) });
+    await new Promise((r) => setTimeout(r, 3_000));
+
+    const refusedOutcome = await checkPending2(loadId2);
+    if (process.env.HAP_E2E_SHOW_CARD) console.error('[AS-REFUSED-TICKET] outcome:', refusedOutcome.text);
+
+    // The central invariant: never report a ticket the AS refused as executed.
+    expect(refusedOutcome.text).not.toMatch(/executed/i);
+    expect(refusedOutcome.text).toMatch(/Authority Server refused/i);
+    expect(refusedOutcome.text).toMatch(/setup_daily_max/);
+    expect(refusedOutcome.text).toMatch(/nothing ran/i);
+
+    // The AS's own record: a genuine terminal `refused` status with the
+    // limit message, carrying the AS's exact reason — not `executed`.
+    const proposalRes = await fetch(`${SP_URL_2}/api/proposals/${loadId2}`, { headers: { 'X-API-Key': apiKey2 } });
+    const proposalBody = await proposalRes.json();
+    expect(proposalRes.ok, JSON.stringify(proposalBody)).toBe(true);
+    expect(proposalBody.proposal.status).toBe('refused');
+    expect(proposalBody.proposal.refusal?.code).toBe('CUMULATIVE_LIMIT_EXCEEDED');
+    expect(proposalBody.proposal.refusal?.message).toMatch(/setup_daily_max/);
+
+    // Nothing extra was loaded: still exactly the ONE successful load's
+    // worth of contacts (from step 2) — the refused 3rd attempt added none.
+    await grant2('work', 'automatic');
+    await new Promise((r) => setTimeout(r, 1_000));
+    const contacts = await call2('crm__find_contacts', {});
+    expect(contacts.denied, contacts.text).toBe(false);
+    const contactCount = Array.isArray(contacts.json) ? contacts.json.length : (contacts.json?.contacts?.length ?? 0);
+    expect(contactCount).toBe(pkg.customers.length);
+  }, 90_000);
+});
