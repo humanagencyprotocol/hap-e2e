@@ -90,15 +90,37 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
   });
 
   test('C1: create_quote card merges bound args with its reads — customer name, item name, table row, 385.00 EUR', async ({ page, request }) => {
-    const bounds = salesBounds();
+    // Zero-capped for every action type: this mandate exists only to own a
+    // PENDING proposal fabricated via the raw AS API below (decision 1,
+    // temp/briefs/au3-au5-brief.md — a preview read never checks bounds),
+    // never a real tool call. Left at the defaults, it would ALSO be a
+    // matching (review-mode) authorization for D's later real
+    // erp__create_quote call — scope-specificity.ts's fail-safe tie-break
+    // prefers a review-mode match when several authorizations tie, routing
+    // D's automatic call through THIS one instead and refusing it.
+    const bounds = salesBounds({ quote_daily_max: 0, send_daily_max: 0, order_daily_max: 0 });
+    const intent = 'AU8 e2e: review quotes before they are created.';
     const att = await spApiAttest(request, apiKey, {
       profile_id: SALES_PROFILE, domain: 'owner', did: userDid,
       bounds, bounds_hash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER), scope_hash: computeScopeHash(SCOPE, ['currency']),
-      gate_content_hashes: hashGateContent({ intent: 'AU8 e2e: review quotes before they are created.' }),
+      gate_content_hashes: hashGateContent({ intent }),
       execution_context_hash: hashExecutionContext({ value: 385, discount_pct: 0, quote_count_daily: 0 }),
       defer_commitment: true,
     });
     expect(att.status).toBe('active');
+    // A real mandate-sign (AgentReviewPage.tsx) pushes the gate content
+    // (intent) to this gateway's local store right away — a mandate made
+    // via the raw AS API, as above, must do the same or the card's Intent
+    // box never finds it locally AND the AS never had it either (a
+    // personal mandate's intent is only ever local — see
+    // use-proposal-intent.ts's module doc comment).
+    await pushGateContent({
+      authorizationId: att.authorization_id as string,
+      boundsHash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
+      scopeHash: computeScopeHash(SCOPE, ['currency']),
+      path: SALES_PROFILE,
+      intent,
+    });
 
     const propRes = await request.post(`${SP_URL}/api/proposals`, {
       headers: { 'x-api-key': apiKey },
@@ -123,13 +145,36 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
     // Wait for the gateway's own live read (get_customer + get_item) to settle.
     await expect(card.locator('[data-preview-status="ok"]')).toBeVisible({ timeout: 20_000 });
 
+    // Identity: the customer's real name next to its bound id.
     await expect(card).toContainText('Steiner Landtechnik GmbH');
     await expect(card).toContainText('cust-1');
+    // display.labels (2026-10-13 follow-up): manifest labels, not humanized keys.
+    await expect(card).toContainText('Customer');
+    await expect(card).toContainText('Discount');
+    await expect(card).toContainText('Total (net)');
+    // The customer's own money fields, manifest-labelled and money-formatted.
+    await expect(card).toContainText('Credit limit');
+    await expect(card).toContainText('10,000.00 EUR');
+    await expect(card).toContainText('Open balance');
+    await expect(card).toContainText('1,200.00 EUR');
+
     const table = card.locator('table.preview-table');
     await expect(table).toBeVisible();
+    await expect(table).toContainText('Item'); // manifest label, not "Item id"
     await expect(table).toContainText('Keilriemen SPB 2000');
     await expect(table).toContainText('item-1');
+    await expect(table).toContainText('List price');
     await expect(card).toContainText('385.00 EUR');
+
+    // The legend + sealed/encrypted marker, same as the mockup and the
+    // other "What will be sent" box.
+    await expect(card).toContainText('sealed: approved and executed exactly so');
+    await expect(card).toContainText('from the system: read by the gateway, not by the AI');
+
+    // The intent now resolves locally (pushGateContent above) — never the
+    // "not available" fallback.
+    await expect(card).toContainText(intent);
+    await expect(card).not.toContainText('Intent not available');
 
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'c1-create-quote-card.png') });
   });
@@ -174,14 +219,22 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
 
     // Review-mode (send-only) mandate for the actual card under test.
     const sendBounds = salesBounds({ quote_daily_max: 0 });
+    const sendIntent = 'AU8 e2e: review quote sends before they go out.';
     const sendAtt = await spApiAttest(request, apiKey, {
       profile_id: SALES_PROFILE, domain: 'owner', did: userDid,
       bounds: sendBounds, bounds_hash: computeBoundsHash(sendBounds, BOUNDS_KEY_ORDER), scope_hash: computeScopeHash(SCOPE, ['currency']),
-      gate_content_hashes: hashGateContent({ intent: 'AU8 e2e: review quote sends before they go out.' }),
+      gate_content_hashes: hashGateContent({ intent: sendIntent }),
       execution_context_hash: hashExecutionContext({ send_count_daily: 0 }),
       defer_commitment: true,
     });
     expect(sendAtt.status).toBe('active');
+    await pushGateContent({
+      authorizationId: sendAtt.authorization_id as string,
+      boundsHash: computeBoundsHash(sendBounds, BOUNDS_KEY_ORDER),
+      scopeHash: computeScopeHash(SCOPE, ['currency']),
+      path: SALES_PROFILE,
+      intent: sendIntent,
+    });
 
     const propRes = await request.post(`${SP_URL}/api/proposals`, {
       headers: { 'x-api-key': apiKey },
@@ -212,6 +265,11 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
     await expect(table).toBeVisible();
     await expect(table).toContainText('item-1');
     await expect(card).toContainText('385');
+
+    // The intent resolves locally (pushGateContent above) — never the "not
+    // available" fallback, same expectation as C1.
+    await expect(card).toContainText(sendIntent);
+    await expect(card).not.toContainText('Intent not available');
 
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'd-send-quote-card.png') });
   });
