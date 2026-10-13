@@ -338,28 +338,66 @@ export async function authenticatedPage(browser: Browser, apiKey: string, baseUR
 /**
  * Sign in to the gateway through the browser login form.
  * Waits for the URL to leave /login rather than checking .sidebar (hidden on mobile).
+ *
+ * Also tolerates the gateway's own `/auth/login` rate limit (loginRateLimit
+ * in apps/control-plane/src/index.ts: 10 attempts per 60s, per IP) — real,
+ * deliberate defense against API-key brute forcing, never weakened here.
+ * This suite runs every journey's every test against ONE long-running
+ * gateway, each with a fresh page (no persisted session — "API key in React
+ * state, no cookies"), all from the same loopback IP. That volume of
+ * sign-ins can legitimately cross 10-per-60s well before any single test
+ * would on its own — a real person's browser never does (one sign-in, at
+ * most a second to confirm an account-switch wipe). Before this fixture
+ * recognized the limiter's response, a rate-limited login looked exactly
+ * like a hang: the UI shows an inline "Too many login attempts" message and
+ * never leaves /login, so the old wipe-only race waited out its full 45s
+ * twice (any 429 never resolves the race, so it falls through to the second,
+ * unconditional `leftLogin` wait) before failing with a misleading timeout.
  */
 export async function signInToGateway(page: Page, apiKey: string): Promise<void> {
   await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
   await page.locator('input[type="password"]').waitFor({ state: 'visible', timeout: 10_000 });
   await page.locator('input[type="password"]').fill(apiKey);
-  await page.locator('button:has-text("Sign In")').click();
 
-  // After submit, EITHER login succeeds (URL leaves /login) OR a "different
-  // account — wipe local data?" modal appears (switching accounts on the shared
-  // test gateway). The modal only appears after the login round-trip + 409, so
-  // race the two rather than using a fixed short timeout. Confirming the wipe is
-  // safe — the test gateway uses an isolated temp data dir (SUVEREN_DATA_DIR).
-  // (Single submit only — a re-click would queue a late navigate('/').)
   const leftLogin = (timeout: number) =>
     page.waitForURL(url => !url.toString().includes('/login'), { timeout });
   const wipeBtn = page.locator('button:has-text("Wipe local data and sign in")');
-  await Promise.race([
-    leftLogin(45_000).catch(() => {}),
-    wipeBtn.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {}),
-  ]);
-  if (await wipeBtn.isVisible().catch(() => false)) {
-    await wipeBtn.click();
+  const rateLimited = page.locator('.error-message', { hasText: 'Too many login attempts' });
+  const signInBtn = page.locator('button:has-text("Sign In")');
+
+  await signInBtn.click();
+
+  // After submit, EITHER login succeeds (URL leaves /login), OR a "different
+  // account — wipe local data?" modal appears (switching accounts on the
+  // shared test gateway), OR the gateway's rate limiter answers 429. The
+  // modal only appears after the login round-trip + 409, so race all three
+  // rather than using a fixed short timeout. Confirming the wipe is safe —
+  // the test gateway uses an isolated temp data dir (SUVEREN_DATA_DIR).
+  //
+  // Bounded retry (at most 2 extra attempts): a real rate-limited user would
+  // also just wait and retry, but an unbounded retry loop would turn an
+  // actual product regression into another silent hang instead of a failure.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // (Single submit per iteration — a re-click would queue a late navigate('/').)
+    await Promise.race([
+      leftLogin(45_000).catch(() => {}),
+      wipeBtn.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {}),
+      rateLimited.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {}),
+    ]);
+
+    if (await rateLimited.isVisible().catch(() => false)) {
+      // Extend this test's own timeout — the wait-out below (outlasting the
+      // limiter's fixed 60s window) plus the retry easily exceeds the
+      // suite's default per-test budget otherwise.
+      test.info().setTimeout(test.info().timeout + 90_000);
+      await page.waitForTimeout(61_000);
+      await signInBtn.click();
+      continue;
+    }
+    if (await wipeBtn.isVisible().catch(() => false)) {
+      await wipeBtn.click();
+    }
+    break;
   }
   await leftLogin(45_000);
   // Wait for the post-login navigation to settle on a real page.
