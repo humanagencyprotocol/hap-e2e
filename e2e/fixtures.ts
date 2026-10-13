@@ -395,7 +395,9 @@ export async function activateIntegration(page: Page, integrationName: string): 
   await page.waitForURL('**/integrations');
   await expect(page.locator('.page-title')).toHaveText('Integrations', { timeout: 10_000 });
 
-  const card = page.locator('.card', { has: page.locator(`text=${integrationName}`) }).first();
+  // Exact title match: a substring match ("text=ERP") also hits other cards
+  // whose text merely mentions the name, and then "already running" is never seen.
+  const card = page.locator('.card', { has: page.getByText(integrationName, { exact: true }) }).first();
   await card.waitFor({ state: 'visible', timeout: 10_000 });
   await card.scrollIntoViewIfNeeded();
 
