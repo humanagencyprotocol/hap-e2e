@@ -52,7 +52,7 @@ export const GW_MCP_URL = `http://localhost:${GW_MCP_PORT}`;
 
 // Shared CP↔MCP internal secret so the control plane and MCP server trust each
 // other's /internal/* calls (both must agree on the value).
-const INTERNAL_SECRET = 'e2e-internal-secret';
+export const INTERNAL_SECRET = 'e2e-internal-secret';
 
 // ─── Test users ──────────────────────────────────────────────────────────────
 
@@ -175,6 +175,10 @@ export async function startServers(): Promise<void> {
       SP_KV_REST_API_URL: '',
       SP_KV_REST_API_TOKEN: '',
       SUVEREN_ALLOW_EPHEMERAL: '1',
+      // This AS build refuses to start with no durable store even with
+      // SUVEREN_ALLOW_EPHEMERAL set — point it at the local test Postgres
+      // (already running) rather than loosening that refusal.
+      SUVEREN_DB_URL: process.env.SUVEREN_DB_URL ?? 'postgres://postgres:suveren_test@localhost:55432/suveren_as',
       ...localProfiles.env,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -185,6 +189,24 @@ export async function startServers(): Promise<void> {
   console.error('[E2E] Authority Server ready.');
 
   dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-'));
+
+  // AU8 (temp/briefs/au8-brief.md) — a company file for the erp connector's
+  // own ERP_COMPANY_FILE mechanism: any command seeds it into the (otherwise
+  // empty, since erp-mcp 0.4.0) local database on first open, with NO
+  // mandate/ticket needed (same technique hap-e2e's
+  // test/erp-quote-revisions.test.ts uses, via erp-mcp's own CLI, instead
+  // applied to the shared Playwright gateway). No other spec here activates
+  // ERP, so this is additive — nothing else is affected.
+  const ERP_COMPANY_FILE = join(dataDir, 'erp-company.json');
+  writeFileSync(ERP_COMPANY_FILE, JSON.stringify({
+    name: 'AU8 E2E Co', currency: 'EUR',
+    items: [
+      { id: 'item-1', sku: 'KB-4410', name: 'Keilriemen SPB 2000', unit: 'pcs', list_price: 38.5, stock: 40 },
+    ],
+    customers: [
+      { id: 'cust-1', name: 'Steiner Landtechnik GmbH', email: 'einkauf@steiner-landtechnik.example', country: 'AT', credit_limit: 10000, open_balance: 1200, payment_terms: 'NET30' },
+    ],
+  }));
 
   // Start gateway MCP server
   const mcp = spawn('node', ['apps/mcp-server/dist/http.mjs'], {
@@ -199,6 +221,9 @@ export async function startServers(): Promise<void> {
       SUVEREN_INTEGRATIONS_DIR: join(dataDir, 'integrations'),
       SUVEREN_DATA_DIR: dataDir,
       SUVEREN_INTERNAL_SECRET: INTERNAL_SECRET,
+      // erp.json declares `passEnv: ["ERP_COMPANY_FILE"]` — the connector
+      // seeds this company into its empty database on first open.
+      ERP_COMPANY_FILE,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
