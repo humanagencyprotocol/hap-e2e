@@ -221,6 +221,11 @@ export async function startServers(): Promise<void> {
       SUVEREN_INTEGRATIONS_DIR: join(dataDir, 'integrations'),
       SUVEREN_DATA_DIR: dataDir,
       SUVEREN_INTERNAL_SECRET: INTERNAL_SECRET,
+      // Its own control plane. Without this the MCP server falls back to the
+      // default 3402 — on a developer machine that is the running dev gateway,
+      // so encrypt/decrypt and every other MCP→CP call went to the wrong one.
+      SUVEREN_CP_PORT: String(GW_CP_PORT),
+      SUVEREN_CP_INTERNAL_URL: `http://127.0.0.1:${GW_CP_PORT}`,
       // erp.json declares `passEnv: ["ERP_COMPANY_FILE"]` — the connector
       // seeds this company into its empty database on first open.
       ERP_COMPANY_FILE,
