@@ -90,6 +90,7 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
   });
 
   test('C1: create_quote card merges bound args with its reads — customer name, item name, table row, 385.00 EUR', async ({ page, request }) => {
+    test.setTimeout(120_000);
     // Zero-capped for every action type: this mandate exists only to own a
     // PENDING proposal fabricated via the raw AS API below (decision 1,
     // temp/briefs/au3-au5-brief.md — a preview read never checks bounds),
@@ -141,9 +142,12 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
     await page.click('.nav-tab:has-text("Awaiting me")');
 
     const card = page.locator('.card', { hasText: 'create_quote' }).first();
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    // Wait for the gateway's own live read (get_customer + get_item) to settle.
-    await expect(card.locator('[data-preview-status="ok"]')).toBeVisible({ timeout: 20_000 });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    // Wait for the gateway's own live read (get_customer + get_item) to
+    // settle — generous on CI, where the erp connector's own npm install
+    // (first activation, same temp dataDir every run) and the two
+    // sequential reads together can run well past a tight local-dev budget.
+    await expect(card.locator('[data-preview-status="ok"]')).toBeVisible({ timeout: 45_000 });
 
     // Identity: the customer's real name next to its bound id.
     await expect(card).toContainText('Steiner Landtechnik GmbH');
@@ -180,7 +184,7 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
   });
 
   test('D: send_quote card still works — single-object legacy preview, lines now rendered as a table', async ({ page, request }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(150_000);
     // An AUTOMATIC mandate — real tool call, so a real quote exists for
     // erp__send_quote's own (unchanged) get_quote preview to read.
     const bounds = salesBounds();
@@ -255,8 +259,8 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
     await page.click('.nav-tab:has-text("Awaiting me")');
 
     const card = page.locator('.card', { hasText: 'send_quote' }).first();
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await expect(card.locator('[data-preview-status="ok"]')).toBeVisible({ timeout: 20_000 });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card.locator('[data-preview-status="ok"]')).toBeVisible({ timeout: 45_000 });
 
     // The single-object preview (erp.json's send_quote config, unchanged)
     // still resolves, and its `lines` array now renders as a real table
