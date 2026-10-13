@@ -309,13 +309,18 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
   it('the internal route calls only the declared preview tool — never an arbitrary one', async () => {
     const res = await fetch(`${MCP_URL}/internal/preview`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': secret },
-      // update_quote declares no preview: the route must not run anything for it.
-      body: JSON.stringify({ proposalId: 'x', tool: 'erp__update_quote', toolArgs: { id: quoteId, lines: [], value: 0, discount_pct: 0, currency: 'EUR' } }),
+      // AU8 (temp/briefs/au8-brief.md) gave update_quote its own preview
+      // (item reads for its own `lines`) — clear_simulation still declares
+      // none, and is the most dangerous possible choice here: if the route
+      // ever fell back to running the ACTION tool itself for "no preview
+      // declared", this would wipe the whole simulated ERP (every quote,
+      // customer, item) instead of quietly doing nothing.
+      body: JSON.stringify({ proposalId: 'x', tool: 'erp__clear_simulation', toolArgs: {} }),
     });
     const body = await res.json() as any;
     expect(body.status).toBe('none');
     const quote = await call('erp__get_quote', { id: quoteId });
-    expect(quote.json.revision).toBe(2); // unchanged — nothing ran
+    expect(quote.json.revision).toBe(2); // unchanged — nothing ran, nothing wiped
   }, 30_000);
 
   it('the agent never sees the preview: no preview tool or text reaches the MCP client', async () => {
