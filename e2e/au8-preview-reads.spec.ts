@@ -21,7 +21,7 @@
  */
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
@@ -73,7 +73,13 @@ async function pushGateContent(opts: {
   if (!res.ok) throw new Error(`pushGateContent failed (${res.status}): ${await res.text()}`);
 }
 
+// Runs only against a gateway that has AU8 (CI runs the journeys against the
+// gateway's main branch, which may not have it yet).
+const GW_PREVIEW_TS = join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'mcp-server', 'src', 'lib', 'preview.ts');
+const HAS_AU8 = existsSync(GW_PREVIEW_TS) && readFileSync(GW_PREVIEW_TS, 'utf8').includes('planPreviewReads');
+
 test.describe.serial('AU8: several reads per preview (real stack)', () => {
+  test.skip(!HAS_AU8, 'gateway without AU8 (several reads per preview)');
   let apiKey: string;
   let userDid: string;
 
