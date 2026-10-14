@@ -7,9 +7,14 @@
  * (the Authority Server never learns a test is running): only connectors that
  * declare a simulation mode start, forced into it; everything else stays off.
  *
- * Also pinned here: `load_simulation` is hidden from an agent whose mandates
- * cannot authorize it (setup_daily_max 0) and appears once a setup mandate
- * exists — the working AI never sees that test data exists.
+ * Also pinned here (SIM1, work-plan "Added 2026-10-13"): in gateway-wide
+ * simulation mode, `load_simulation`/`clear_simulation` are listed for every
+ * agent REGARDLESS of mandate — like every other connector tool since 0.25
+ * — so the tool list no longer changes mid-session once a setup mandate is
+ * approved. An agent holding only the ordinary work mandate (setup_daily_max
+ * 0) sees the tool but is refused a clear "no mandate covers ... (setup)"
+ * reason when it calls it; see sim1-setup-tools-listed.test.ts for the
+ * dedicated suite (identical list before/after approval, no reconnect).
  *
  * Runs the published connectors the gateway installs itself, the shipped
  * manifests and the live profiles. Credential-free.
@@ -113,14 +118,24 @@ describe('gateway simulation mode (real AS + gateway + published simulators)', (
     expect(rec?.error).toBeFalsy();
   });
 
-  it("the working agent sees the ERP's work tools but not load_simulation, and no tools of a blocked system", async () => {
+  it("the working agent sees the ERP's work tools AND load_simulation (SIM1, always listed in simulation mode) — but not tools of a blocked system", async () => {
     await grantSales(SALES_WORK);
     await reconnect();
     const names = await toolNames();
     expect(names).toContain('erp__create_quote');
-    expect(names).not.toContain('erp__load_simulation');
-    expect(names).not.toContain('erp__clear_simulation');
+    expect(names).toContain('erp__load_simulation');
+    expect(names).toContain('erp__clear_simulation');
     expect(names.some((n) => n.startsWith('records__'))).toBe(false);
+  });
+
+  it('calling load_simulation with only the work mandate (setup_daily_max 0) is refused with a clear reason — nothing runs', async () => {
+    const r = await mcpClient.callTool({ name: 'erp__load_simulation', arguments: { package: pkg } });
+    const text = (r.content as Array<{ text?: string }>)?.[0]?.text ?? '';
+    expect(r.isError).toBe(true);
+    expect(text).toBe(
+      'Refused: no mandate covers erp__load_simulation (setup). Nothing was done. ' +
+        'Ask the person to grant a setup mandate in the gateway, then try again. No ticket was requested.',
+    );
   });
 
   it('a setup mandate makes load_simulation appear — and it loads into the simulated ERP', async () => {
