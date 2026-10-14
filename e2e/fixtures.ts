@@ -52,7 +52,7 @@ export const GW_MCP_URL = `http://localhost:${GW_MCP_PORT}`;
 
 // Shared CP↔MCP internal secret so the control plane and MCP server trust each
 // other's /internal/* calls (both must agree on the value).
-const INTERNAL_SECRET = 'e2e-internal-secret';
+export const INTERNAL_SECRET = 'e2e-internal-secret';
 
 // ─── Test users ──────────────────────────────────────────────────────────────
 
@@ -175,6 +175,10 @@ export async function startServers(): Promise<void> {
       SP_KV_REST_API_URL: '',
       SP_KV_REST_API_TOKEN: '',
       SUVEREN_ALLOW_EPHEMERAL: '1',
+      // This AS build refuses to start with no durable store even with
+      // SUVEREN_ALLOW_EPHEMERAL set — point it at the local test Postgres
+      // (already running) rather than loosening that refusal.
+      SUVEREN_DB_URL: process.env.SUVEREN_DB_URL ?? 'postgres://postgres:suveren_test@localhost:55432/suveren_as',
       ...localProfiles.env,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -185,6 +189,24 @@ export async function startServers(): Promise<void> {
   console.error('[E2E] Authority Server ready.');
 
   dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-'));
+
+  // AU8 (temp/briefs/au8-brief.md) — a company file for the erp connector's
+  // own ERP_COMPANY_FILE mechanism: any command seeds it into the (otherwise
+  // empty, since erp-mcp 0.4.0) local database on first open, with NO
+  // mandate/ticket needed (same technique hap-e2e's
+  // test/erp-quote-revisions.test.ts uses, via erp-mcp's own CLI, instead
+  // applied to the shared Playwright gateway). No other spec here activates
+  // ERP, so this is additive — nothing else is affected.
+  const ERP_COMPANY_FILE = join(dataDir, 'erp-company.json');
+  writeFileSync(ERP_COMPANY_FILE, JSON.stringify({
+    name: 'AU8 E2E Co', currency: 'EUR',
+    items: [
+      { id: 'item-1', sku: 'KB-4410', name: 'Keilriemen SPB 2000', unit: 'pcs', list_price: 38.5, stock: 40 },
+    ],
+    customers: [
+      { id: 'cust-1', name: 'Steiner Landtechnik GmbH', email: 'einkauf@steiner-landtechnik.example', country: 'AT', credit_limit: 10000, open_balance: 1200, payment_terms: 'NET30' },
+    ],
+  }));
 
   // Start gateway MCP server
   const mcp = spawn('node', ['apps/mcp-server/dist/http.mjs'], {
@@ -199,6 +221,14 @@ export async function startServers(): Promise<void> {
       SUVEREN_INTEGRATIONS_DIR: join(dataDir, 'integrations'),
       SUVEREN_DATA_DIR: dataDir,
       SUVEREN_INTERNAL_SECRET: INTERNAL_SECRET,
+      // Its own control plane. Without this the MCP server falls back to the
+      // default 3402 — on a developer machine that is the running dev gateway,
+      // so encrypt/decrypt and every other MCP→CP call went to the wrong one.
+      SUVEREN_CP_PORT: String(GW_CP_PORT),
+      SUVEREN_CP_INTERNAL_URL: `http://127.0.0.1:${GW_CP_PORT}`,
+      // erp.json declares `passEnv: ["ERP_COMPANY_FILE"]` — the connector
+      // seeds this company into its empty database on first open.
+      ERP_COMPANY_FILE,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -308,28 +338,66 @@ export async function authenticatedPage(browser: Browser, apiKey: string, baseUR
 /**
  * Sign in to the gateway through the browser login form.
  * Waits for the URL to leave /login rather than checking .sidebar (hidden on mobile).
+ *
+ * Also tolerates the gateway's own `/auth/login` rate limit (loginRateLimit
+ * in apps/control-plane/src/index.ts: 10 attempts per 60s, per IP) — real,
+ * deliberate defense against API-key brute forcing, never weakened here.
+ * This suite runs every journey's every test against ONE long-running
+ * gateway, each with a fresh page (no persisted session — "API key in React
+ * state, no cookies"), all from the same loopback IP. That volume of
+ * sign-ins can legitimately cross 10-per-60s well before any single test
+ * would on its own — a real person's browser never does (one sign-in, at
+ * most a second to confirm an account-switch wipe). Before this fixture
+ * recognized the limiter's response, a rate-limited login looked exactly
+ * like a hang: the UI shows an inline "Too many login attempts" message and
+ * never leaves /login, so the old wipe-only race waited out its full 45s
+ * twice (any 429 never resolves the race, so it falls through to the second,
+ * unconditional `leftLogin` wait) before failing with a misleading timeout.
  */
 export async function signInToGateway(page: Page, apiKey: string): Promise<void> {
   await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
   await page.locator('input[type="password"]').waitFor({ state: 'visible', timeout: 10_000 });
   await page.locator('input[type="password"]').fill(apiKey);
-  await page.locator('button:has-text("Sign In")').click();
 
-  // After submit, EITHER login succeeds (URL leaves /login) OR a "different
-  // account — wipe local data?" modal appears (switching accounts on the shared
-  // test gateway). The modal only appears after the login round-trip + 409, so
-  // race the two rather than using a fixed short timeout. Confirming the wipe is
-  // safe — the test gateway uses an isolated temp data dir (SUVEREN_DATA_DIR).
-  // (Single submit only — a re-click would queue a late navigate('/').)
   const leftLogin = (timeout: number) =>
     page.waitForURL(url => !url.toString().includes('/login'), { timeout });
   const wipeBtn = page.locator('button:has-text("Wipe local data and sign in")');
-  await Promise.race([
-    leftLogin(45_000).catch(() => {}),
-    wipeBtn.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {}),
-  ]);
-  if (await wipeBtn.isVisible().catch(() => false)) {
-    await wipeBtn.click();
+  const rateLimited = page.locator('.error-message', { hasText: 'Too many login attempts' });
+  const signInBtn = page.locator('button:has-text("Sign In")');
+
+  await signInBtn.click();
+
+  // After submit, EITHER login succeeds (URL leaves /login), OR a "different
+  // account — wipe local data?" modal appears (switching accounts on the
+  // shared test gateway), OR the gateway's rate limiter answers 429. The
+  // modal only appears after the login round-trip + 409, so race all three
+  // rather than using a fixed short timeout. Confirming the wipe is safe —
+  // the test gateway uses an isolated temp data dir (SUVEREN_DATA_DIR).
+  //
+  // Bounded retry (at most 2 extra attempts): a real rate-limited user would
+  // also just wait and retry, but an unbounded retry loop would turn an
+  // actual product regression into another silent hang instead of a failure.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // (Single submit per iteration — a re-click would queue a late navigate('/').)
+    await Promise.race([
+      leftLogin(45_000).catch(() => {}),
+      wipeBtn.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {}),
+      rateLimited.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {}),
+    ]);
+
+    if (await rateLimited.isVisible().catch(() => false)) {
+      // Extend this test's own timeout — the wait-out below (outlasting the
+      // limiter's fixed 60s window) plus the retry easily exceeds the
+      // suite's default per-test budget otherwise.
+      test.info().setTimeout(test.info().timeout + 90_000);
+      await page.waitForTimeout(61_000);
+      await signInBtn.click();
+      continue;
+    }
+    if (await wipeBtn.isVisible().catch(() => false)) {
+      await wipeBtn.click();
+    }
+    break;
   }
   await leftLogin(45_000);
   // Wait for the post-login navigation to settle on a real page.
@@ -370,7 +438,9 @@ export async function activateIntegration(page: Page, integrationName: string): 
   await page.waitForURL('**/integrations');
   await expect(page.locator('.page-title')).toHaveText('Integrations', { timeout: 10_000 });
 
-  const card = page.locator('.card', { has: page.locator(`text=${integrationName}`) }).first();
+  // Exact title match: a substring match ("text=ERP") also hits other cards
+  // whose text merely mentions the name, and then "already running" is never seen.
+  const card = page.locator('.card', { has: page.getByText(integrationName, { exact: true }) }).first();
   await card.waitFor({ state: 'visible', timeout: 10_000 });
   await card.scrollIntoViewIfNeeded();
 
