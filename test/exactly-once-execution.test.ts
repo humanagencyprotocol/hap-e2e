@@ -187,8 +187,15 @@ describe('Exactly-once execution under concurrent triggers', () => {
     expect(forProposal[0].id).toBe(rows[0].ticketId);
 
     // 4. Every later check reports "executed" and refuses to run it again.
+    // Gateway PR #115 (fix/keep-execution-result): a later check now returns
+    // the gateway's own retained result ("approved and executed... Result:
+    // ...") instead of falling through to the generic "already been
+    // EXECUTED ... did not retain its output" — the exact regression that
+    // PR fixes. Either phrasing refuses a re-run; assert the NEW one and
+    // that the stale "did not retain its output" text is gone.
     const later = await callCheckPending(proposalId);
-    expect(later).toMatch(/already been EXECUTED/);
+    expect(later).toMatch(/approved and executed/);
+    expect(later).not.toContain('did not retain its output');
     expect(contactsNamed(NAME)).toBe(1);
   }, 30_000);
 });
