@@ -31,7 +31,7 @@
  */
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
@@ -54,6 +54,16 @@ const EMAIL_PROFILE = latestProfileId('email');
 const CUSTOMERS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
 const EMAIL_KEY_ORDER = ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'];
 const CUSTOMERS_SCOPE = { contact_type: 'customer' };
+const SALES_PROFILE = latestProfileId('sales');
+const SALES_KEY_ORDER = [
+  'profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max',
+  'quote_daily_max', 'send_daily_max', 'order_daily_max', 'setup_daily_max',
+];
+const SALES_SCOPE = { currency: 'EUR' };
+const salesBounds = (o: Record<string, unknown> = {}) => ({
+  profile: SALES_PROFILE, read_access: 'unlimited', value_max: 1000, discount_max: 10,
+  order_value_daily_max: 5000, quote_daily_max: 10, send_daily_max: 10, order_daily_max: 0, setup_daily_max: 0, ...o,
+});
 
 const HISTORY_LABEL = 'Read by the gateway — same customer, not matched to this request';
 
@@ -61,6 +71,12 @@ const HISTORY_LABEL = 'Read by the gateway — same customer, not matched to thi
 // gateway's main branch, which may not have it yet) — same gate as AU8.
 const GW_AU10_TS = join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'mcp-server', 'src', 'lib', 'request-context.ts');
 const HAS_AU10 = existsSync(GW_AU10_TS) && readFileSync(GW_AU10_TS, 'utf8').includes('stripSourceLink');
+// Phase B needs both sides: the gateway's snapshot store and an AS that
+// records shown_hash per decision.
+const GW_SHOWN_TS = join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'control-plane', 'src', 'lib', 'shown-snapshot.ts');
+const AS_STORE_TS = join(__dirname, '..', '..', 'suveren-as', 'apps', 'as', 'src', 'lib', 'proposal-store.ts');
+const HAS_PHASE_B = existsSync(GW_SHOWN_TS)
+  && existsSync(AS_STORE_TS) && readFileSync(AS_STORE_TS, 'utf8').includes('shownHashes');
 
 async function pushGateContent(opts: {
   authorizationId: string; boundsHash: string; scopeHash: string; scope: Record<string, string>; path: string; intent: string;
@@ -145,6 +161,7 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await handleOnboarding(page);
     await activateIntegration(page, 'Email (simulation)');
     await activateIntegration(page, 'CRM');
+    await activateIntegration(page, 'ERP');
 
     await mandate(request, apiKey, did, {
       profile: EMAIL_PROFILE, keyOrder: EMAIL_KEY_ORDER, scope: {}, mode: 'automatic',
@@ -156,6 +173,12 @@ test.describe.serial('AU10: request and customer history on the approval card (r
       bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 20, delete_daily_max: 0, setup_daily_max: 0 },
       intent: 'AU10 e2e: keep the CRM up to date automatically.',
     });
+    await mandate(request, apiKey, did, {
+      profile: SALES_PROFILE, keyOrder: SALES_KEY_ORDER, scope: SALES_SCOPE, mode: 'automatic',
+      bounds: salesBounds({ send_daily_max: 0 }),
+      intent: 'AU10 e2e: create quotes automatically, within bounds.',
+    });
+    let quoteId = '';
 
     await withAgent(async (c) => {
       // The AI sees _source on write tools, not on reads (contract §1).
@@ -223,7 +246,17 @@ test.describe.serial('AU10: request and customer history on the approval card (r
       personEntry(hans, 'call', 'Hans fragt nach Hammersatz', 'L. Leitner');
       const stranger = await contact('Gerda Fremd', 'gerda.fremd@gmail.com');
       personEntry(stranger, 'call', 'GMAIL-STRANGER entry', 'L. Leitner');
+      // The ERP customer cust-1 (fixtures: einkauf@steiner-landtechnik.example)
+      // has a colleague in the CRM on the same domain.
+      const steiner = await contact('M. Steiner', 'm.steiner@steiner-landtechnik.example');
+      personEntry(steiner, 'call', 'STEINER-CALL Rückfrage Keilriemen', 'L. Leitner');
       crmDb.close();
+
+      // A real quote, so sending it has something to read (quote → customer).
+      const quote = JSON.parse(await call(c, 'erp__create_quote', {
+        customer_id: 'cust-1', lines: [{ item_id: 'item-1', qty: 10 }], discount_pct: 0, value: 385, currency: 'EUR',
+      })) as { id: string };
+      quoteId = quote.id;
 
       // Case D (contract test 6): an automatic call with _source executes,
       // and the record that reaches the CRM carries no _source.
@@ -249,6 +282,11 @@ test.describe.serial('AU10: request and customer history on the approval card (r
       bounds: { profile: EMAIL_PROFILE, read_access: 'unlimited', recipient_max: 1, send_daily_max: 10, read_max_age_days: 30, setup_daily_max: 0 },
       intent: 'AU10 e2e: review replies before they go out.',
     });
+    await mandate(request, apiKey, did, {
+      profile: SALES_PROFILE, keyOrder: SALES_KEY_ORDER, scope: SALES_SCOPE, mode: 'review',
+      bounds: salesBounds({ quote_daily_max: 0 }),
+      intent: 'AU10 e2e: review quote sends before they go out.',
+    });
 
     await withAgent(async (c) => {
       const propose = async (args: Record<string, unknown>) => {
@@ -265,6 +303,11 @@ test.describe.serial('AU10: request and customer history on the approval card (r
         arguments: { to: ['j.kraus@bavaria-umform.de'], subject: 'Re: RF 55 Stillstand', body: 'IMPLICIT-REPLY wir rufen zurück.', in_reply_to: msg.kraus },
       });
       expect(reply.isError, text(reply)).toBeFalsy();
+      const send = await c.callTool({
+        name: 'erp__send_quote',
+        arguments: { id: quoteId, value: 385, discount_pct: 0, currency: 'EUR', revision: 1 },
+      });
+      expect(send.isError, text(send)).toBeFalsy();
     });
   });
 
@@ -305,11 +348,37 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await expect(card.getByTestId('au10-request')).not.toContainText('Linked by the AI');
     await expect(card.getByTestId('au10-history')).toContainText(HISTORY_LABEL);
 
+    const shortId = ((await card.textContent()) ?? '').match(/Proposal:\s*([0-9a-f]{6,})/)?.[1];
+    expect(shortId, 'card shows its proposal id').toBeTruthy();
+
     await card.locator('button:has-text("Approve")').click();
     await expect(async () => {
       const found = await withAgent(c => call(c, 'crm__find_contacts', { query: 'nosource@au10-nolink.de' }));
       expect(found).toContain('nosource@au10-nolink.de');
     }).toPass({ timeout: 45_000 });
+
+    // Phase B: the decision carried the fingerprint of what the card showed —
+    // one entry, for this approver, and only a hash (contract §8.4).
+    if (!HAS_PHASE_B) return;
+    const list = await page.request.get(`${SP_URL}/api/proposals?domain=owner&status=all`, { headers: { 'x-api-key': apiKey } });
+    const proposals = ((await list.json()).proposals ?? []) as Array<{ id: string }>;
+    const full = proposals.find(p => p.id.replace(/^prop_/, '').startsWith(shortId!) || p.id.startsWith(shortId!));
+    expect(full, `proposal ${shortId} on the AS`).toBeTruthy();
+    const got = await page.request.get(`${SP_URL}/api/proposals/${encodeURIComponent(full!.id)}`, { headers: { 'x-api-key': apiKey } });
+    const shown = (await got.json()).proposal.shownHashes as Record<string, { hash: string; by: string }>;
+    const entries = Object.values(shown ?? {});
+    expect(entries).toHaveLength(1);
+    expect(entries[0].hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(JSON.stringify(shown)).not.toContain('No request linked');
+
+    // The ticket view re-checks the local copy against that fingerprint.
+    await page.click('.sidebar-item:has-text("Tickets")');
+    await page.waitForURL('**/tickets');
+    const what = page.getByTestId('au10-shown').first();
+    await expect(what).toBeVisible({ timeout: 30_000 });
+    await expect(what).toHaveAttribute('data-shown-status', 'verified');
+    await expect(what).toContainText('What you saw');
+    await what.screenshot({ path: join(SCREENSHOT_DIR, 'g-what-you-saw.png') });
   });
 
   test('C: an unreadable link is shown as such and never blocks', async ({ page }) => {
@@ -344,5 +413,44 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await expect(req).toContainText('RF 55 Stillstand – Seriennummer 55-2291');
     await expect(card.getByTestId('au10-history')).toContainText('RF 55 steht, Ventil dringend', { timeout: 45_000 });
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'f-implicit-reply.png') });
+  });
+
+  test('H: sending an existing quote — the customer is found in two steps (quote → customer)', async ({ page }) => {
+    test.setTimeout(120_000);
+    const card = await openCard(page, apiKey, 'send_quote');
+    const hist = card.getByTestId('au10-history');
+    await expect(hist).toContainText('STEINER-CALL Rückfrage Keilriemen', { timeout: 45_000 });
+    await expect(hist).toContainText('steiner-landtechnik.example');
+    await expect(hist).not.toContainText('RF 55 steht');
+    await expect(card.getByTestId('au10-request')).toContainText('No request linked.');
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'h-send-quote.png') });
+  });
+
+  // Last: it breaks the CRM for the rest of this run.
+  test('I: CRM down → "not reachable", and approving is still possible', async ({ page }) => {
+    test.setTimeout(120_000);
+    // A stopped connector is restarted by the gateway on its own (credential
+    // push, sign-in), so "down" here is a CRM that cannot start: its
+    // installed package is moved away, then the running process is stopped.
+    // The registration stays — installed, but not reachable.
+    const pkg = join(gatewayDataDir(), 'integrations', 'node_modules', '@humanagencyp', 'crm-mcp');
+    renameSync(pkg, `${pkg}.broken`);
+    await signInToGateway(page, apiKey);
+    const stop = await fetch(`${GW_MCP_URL}/internal/stop-all-running`, {
+      method: 'POST', headers: { 'X-Internal-Secret': INTERNAL_SECRET },
+    });
+    expect(stop.ok, await stop.text()).toBe(true);
+
+    await page.click('.sidebar-item:has-text("Pending Approvals")');
+    await page.waitForURL('**/approvals');
+    await page.click('.nav-tab:has-text("Awaiting me")');
+    const card = page.locator('.card', { hasText: 'Hans Privat Neu' }).first();
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    const hist = card.getByTestId('au10-history');
+    await expect(hist).toContainText('not reachable', { timeout: 45_000 });
+    await expect(hist).toContainText('Read by the gateway');
+    await expect(hist).not.toContainText('Hans fragt nach Hammersatz');
+    await expect(card.locator('button:has-text("Approve")')).toBeEnabled();
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'i-crm-down.png') });
   });
 });
