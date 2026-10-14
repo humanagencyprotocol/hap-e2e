@@ -178,8 +178,9 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
 
     // The legend + sealed/encrypted marker, same as the mockup and the
     // other "What will be sent" box.
-    await expect(card).toContainText('sealed: approved and executed exactly so');
-    await expect(card).toContainText('from the system: read by the gateway, not by the AI');
+    // AU10 moved the legend to the end of the card and added the AI's colour.
+    await expect(card).toContainText('sealed — approved and executed exactly so');
+    await expect(card).toContainText('from the system — read by the gateway, not by the AI');
 
     // The intent now resolves locally (pushGateContent above) — never the
     // "not available" fallback.

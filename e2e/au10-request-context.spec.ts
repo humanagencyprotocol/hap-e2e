@@ -132,8 +132,8 @@ async function call(c: Client, name: string, args: Record<string, unknown>): Pro
   return body;
 }
 
-async function openCard(page: Page, apiKey: string, hasText: string): Promise<Locator> {
-  await signInToGateway(page, apiKey);
+async function openCard(page: Page, hasText: string): Promise<Locator> {
+  await page.click('.sidebar-item:has-text("Dashboard")');
   await page.click('.sidebar-item:has-text("Pending Approvals")');
   await page.waitForURL('**/approvals');
   await page.click('.nav-tab:has-text("Awaiting me")');
@@ -148,12 +148,18 @@ test.describe.serial('AU10: request and customer history on the approval card (r
   test.skip(!HAS_AU10, 'gateway without AU10 (request and history on the card)');
   let apiKey: string;
   let did: string;
+  // One browser page, signed in once, for the whole spec: the gateway allows
+  // 10 sign-ins a minute, and the browser specs share one gateway — signing
+  // in per test locked the next spec out.
+  let page: Page;
+  test.beforeAll(async ({ browser }) => { page = await browser.newPage(); });
+  test.afterAll(async () => { await page?.close(); });
   const msg: Record<'kraus' | 'hans', string> = { kraus: '', hans: '' };
 
-  test('setup: connectors, automatic mandates, inbox and CRM history seeded through the gateway', async ({ page, request }) => {
+  test('setup: connectors, automatic mandates, inbox and CRM history seeded through the gateway', async ({ request }) => {
     test.setTimeout(240_000);
     apiKey = await registerOnSP(page, 'AU10 Request Context');
-    const sess = await page.request.post(`${SP_URL}/api/auth/session`, { headers: { 'x-api-key': apiKey } });
+    const sess = await request.post(`${SP_URL}/api/auth/session`, { headers: { 'x-api-key': apiKey } });
     expect(sess.ok()).toBe(true);
     did = (await sess.json()).user.did;
 
@@ -311,9 +317,9 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     });
   });
 
-  test('A: request linked by the AI, and the latest entries for the same email domain', async ({ page }) => {
+  test('A: request linked by the AI, and the latest entries for the same email domain', async () => {
     test.setTimeout(120_000);
-    const card = await openCard(page, apiKey, 'j.kraus@bavaria-umform.de');
+    const card = await openCard(page, 'j.kraus@bavaria-umform.de');
     const req = card.getByTestId('au10-request');
     const hist = card.getByTestId('au10-history');
 
@@ -341,9 +347,9 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'a-request-and-history.png') });
   });
 
-  test('B: no link → "No request linked."; approving still creates the contact', async ({ page }) => {
+  test('B: no link → "No request linked."; approving still creates the contact', async () => {
     test.setTimeout(120_000);
-    const card = await openCard(page, apiKey, 'nosource@au10-nolink.de');
+    const card = await openCard(page, 'nosource@au10-nolink.de');
     await expect(card.getByTestId('au10-request')).toContainText('No request linked.', { timeout: 45_000 });
     await expect(card.getByTestId('au10-request')).not.toContainText('Linked by the AI');
     await expect(card.getByTestId('au10-history')).toContainText(HISTORY_LABEL);
@@ -381,9 +387,9 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await what.screenshot({ path: join(SCREENSHOT_DIR, 'g-what-you-saw.png') });
   });
 
-  test('C: an unreadable link is shown as such and never blocks', async ({ page }) => {
+  test('C: an unreadable link is shown as such and never blocks', async () => {
     test.setTimeout(120_000);
-    const unknown = await openCard(page, apiKey, 'unknown@au10-bad.de');
+    const unknown = await openCard(page, 'unknown@au10-bad.de');
     await expect(unknown.getByTestId('au10-request')).toContainText('Request: link not readable', { timeout: 45_000 });
     await expect(unknown.locator('button:has-text("Approve")')).toBeEnabled();
 
@@ -393,9 +399,9 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await expect(missing.locator('button:has-text("Approve")')).toBeEnabled();
   });
 
-  test('E: free-mail sender → only the exact address is matched, never the shared domain', async ({ page }) => {
+  test('E: free-mail sender → only the exact address is matched, never the shared domain', async () => {
     test.setTimeout(120_000);
-    const card = await openCard(page, apiKey, 'Hans Privat Neu');
+    const card = await openCard(page, 'Hans Privat Neu');
     const hist = card.getByTestId('au10-history');
     await expect(card.getByTestId('au10-request')).toContainText('Preisanfrage Ersatzteil', { timeout: 45_000 });
     await expect(hist).toContainText('Hans fragt nach Hammersatz', { timeout: 45_000 });
@@ -405,9 +411,9 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'e-free-mail.png') });
   });
 
-  test('F: a reply with in_reply_to shows the request although the AI gave no _source', async ({ page }) => {
+  test('F: a reply with in_reply_to shows the request although the AI gave no _source', async () => {
     test.setTimeout(120_000);
-    const card = await openCard(page, apiKey, 'IMPLICIT-REPLY');
+    const card = await openCard(page, 'IMPLICIT-REPLY');
     const req = card.getByTestId('au10-request');
     await expect(req).toContainText('Linked by the AI', { timeout: 45_000 });
     await expect(req).toContainText('RF 55 Stillstand – Seriennummer 55-2291');
@@ -415,9 +421,9 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'f-implicit-reply.png') });
   });
 
-  test('H: sending an existing quote — the customer is found in two steps (quote → customer)', async ({ page }) => {
+  test('H: sending an existing quote — the customer is found in two steps (quote → customer)', async () => {
     test.setTimeout(120_000);
-    const card = await openCard(page, apiKey, 'send_quote');
+    const card = await openCard(page, 'send_quote');
     const hist = card.getByTestId('au10-history');
     await expect(hist).toContainText('STEINER-CALL Rückfrage Keilriemen', { timeout: 45_000 });
     await expect(hist).toContainText('steiner-landtechnik.example');
@@ -427,7 +433,7 @@ test.describe.serial('AU10: request and customer history on the approval card (r
   });
 
   // Last: it breaks the CRM for the rest of this run.
-  test('I: CRM down → "not reachable", and approving is still possible', async ({ page }) => {
+  test('I: CRM down → "not reachable", and approving is still possible', async () => {
     test.setTimeout(120_000);
     // A stopped connector is restarted by the gateway on its own (credential
     // push, sign-in), so "down" here is a CRM that cannot start: its
@@ -435,22 +441,31 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     // The registration stays — installed, but not reachable.
     const pkg = join(gatewayDataDir(), 'integrations', 'node_modules', '@humanagencyp', 'crm-mcp');
     renameSync(pkg, `${pkg}.broken`);
-    await signInToGateway(page, apiKey);
+    try {
     const stop = await fetch(`${GW_MCP_URL}/internal/stop-all-running`, {
       method: 'POST', headers: { 'X-Internal-Secret': INTERNAL_SECRET },
     });
     expect(stop.ok, await stop.text()).toBe(true);
 
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
-    const card = page.locator('.card', { hasText: 'Hans Privat Neu' }).first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
+    const card = await openCard(page, 'Hans Privat Neu');
     const hist = card.getByTestId('au10-history');
     await expect(hist).toContainText('not reachable', { timeout: 45_000 });
     await expect(hist).toContainText('Read by the gateway');
     await expect(hist).not.toContainText('Hans fragt nach Hammersatz');
     await expect(card.locator('button:has-text("Approve")')).toBeEnabled();
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'i-crm-down.png') });
+    } finally {
+      // The browser specs share one gateway: put the CRM back and wait until
+      // every connector this spec stopped answers again.
+      renameSync(`${pkg}.broken`, pkg);
+      await signInToGateway(page, apiKey);
+      await expect(async () => {
+        const { tools } = await withAgent(c => c.listTools());
+        for (const t of ['crm__find_contacts', 'erp__get_customer', 'mail__list_messages']) {
+          expect(tools.some(x => x.name === t), `${t} listed again`).toBe(true);
+        }
+        await withAgent(c => call(c, 'crm__find_contacts', { query: 'Hans' }));
+      }).toPass({ timeout: 60_000 });
+    }
   });
 });
