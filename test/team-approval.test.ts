@@ -21,6 +21,16 @@ import { ProcessManager } from '../src/helpers/process-manager.js';
 import { SPClient, mintAuthorizationId } from '../src/helpers/sp-client.js';
 import { hashGateContent, hashExecutionContext, computeScopeHash } from '../src/helpers/crypto.js';
 import { PROFILE_V07, profileHashFor } from '../src/helpers/profiles.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { AS_DIR } from '../src/helpers/as-dir.js';
+
+// TR5/TR6 (suveren-as #86): cumulative team caps escalate from the first write
+// over the cap. An AS checkout before it escalated only past the mandate's own
+// bound. Detected from the AS source (same gate as team-roles-caps.test.ts).
+const PROFILE_CONFIG_ROUTE = join(AS_DIR, 'src', 'app', 'api', 'groups', '[id]', 'profile-config', '[profileId]', 'route.ts');
+const hasTeamRolesCaps =
+  existsSync(PROFILE_CONFIG_ROUTE) && readFileSync(PROFILE_CONFIG_ROUTE, 'utf8').includes('grantors');
 
 const SP_PORT = 15300;
 const SP_URL = `http://localhost:${SP_PORT}`;
@@ -198,12 +208,24 @@ describe('Intent disclosure — C2 binding', () => {
 
 describe('Team approval (above-cap escalation)', () => {
   it('allows actions up to the bound, then escalates to approval_required', async () => {
-    // write_daily_max = 2 → first two writes succeed.
+    // The team's configured cap is write_daily_max: 1 (the mandate's OWN bound
+    // is 2 — the outer, hard ceiling). TR5/TR6 (suveren-as PR #86) made the
+    // above-cap check dispatch through checkBound itself, so this CUMULATIVE
+    // team cap now actually governs starting from the second write — it did
+    // not before (content/0.7/review.md's "emails per day" example: a
+    // cumulative team cap used to be checked only per-transaction, so the
+    // first two writes both cleared the per-transaction check and only the
+    // THIRD write — exceeding the mandate's own bound of 2 — ever escalated).
+    // First write stays within the team's cap (1).
     expect((await writeReceipt()).status).toBe(201);
-    expect((await writeReceipt()).status).toBe(201);
+    // Before TR5/TR6 the cumulative team cap was not checked, so the second
+    // write still passed and only the third (past the mandate's own bound of
+    // 2) escalated.
+    if (!hasTeamRolesCaps) expect((await writeReceipt()).status).toBe(201);
 
-    // Third write exceeds the bound. Because the authority is above-cap AND the
-    // profile has approvers, it escalates to 409 (not a hard 403).
+    // Second write exceeds the CUMULATIVE team cap (1). Because the authority
+    // is above-cap AND the profile has approvers, it escalates to 409 (not a
+    // hard 403).
     const escalated = await writeReceipt();
     expect(escalated.status).toBe(409);
     const errors = escalated.body.errors as Array<Record<string, unknown>>;
