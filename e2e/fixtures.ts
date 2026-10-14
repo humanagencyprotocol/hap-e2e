@@ -8,7 +8,7 @@
 import { test as base, expect, type Page, type Browser, type APIRequestContext } from '@playwright/test';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -189,6 +189,20 @@ export async function startServers(): Promise<void> {
   console.error('[E2E] Authority Server ready.');
 
   dataDir = mkdtempSync(join(tmpdir(), 'hap-e2e-'));
+  // Playwright workers inherit the env set during globalSetup (gatewayDataDir).
+  process.env.HAP_E2E_GATEWAY_DATA_DIR = dataDir;
+
+  // AU10 — same mechanism src/helpers/process-manager.ts's vitest harness
+  // already supports, wired here too so a Playwright spec can run against an
+  // unpublished connector build: HAP_E2E_PREINSTALLED_INTEGRATIONS=<dir>
+  // (a ready `<dir>/node_modules/...`) is copied in as this gateway's
+  // integrations dir; with SUVEREN_OFFLINE=1 (passed through via
+  // `...process.env` below) the gateway runs those instead of installing
+  // from npm. Package versions must equal the manifests' npmVersion pins.
+  {
+    const preinstalled = process.env.HAP_E2E_PREINSTALLED_INTEGRATIONS;
+    if (preinstalled) cpSync(preinstalled, join(dataDir, 'integrations'), { recursive: true });
+  }
 
   // AU8 (temp/briefs/au8-brief.md) — a company file for the erp connector's
   // own ERP_COMPANY_FILE mechanism: any command seeds it into the (otherwise
@@ -261,6 +275,15 @@ export async function startServers(): Promise<void> {
   console.error('[E2E] Test users registered.');
 
   serversReady = true;
+}
+
+/** The running gateway's data folder (its connectors' local databases live
+ *  here). Lets a spec write a record the way a person in that system would,
+ *  without going through the gateway — e.g. a colleague's CRM call note. */
+export function gatewayDataDir(): string {
+  const dir = dataDir ?? process.env.HAP_E2E_GATEWAY_DATA_DIR;
+  if (!dir) throw new Error('servers not started');
+  return dir;
 }
 
 export async function stopServers(): Promise<void> {
