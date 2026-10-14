@@ -1,40 +1,69 @@
 /**
- * AU10 — Request and customer history on the approval card (E2E, corrected)
+ * AU10 — the request and the customer's latest entries on the approval card,
+ * on the real stack (Authority Server + gateway + the email, CRM connectors,
+ * over the browser).
  *
- * Contract: doc/au10-request-context.md (source of truth)
- * Mockup: temp/au10-mockup/index.html (visual reference)
+ * Contract: doc/au10-request-context.md (HAP root). Visual reference: the
+ * signed-off mockup temp/au10-mockup/index.html.
  *
- * Tests phase A (cases 1–8): the gateway displays request metadata (_source)
- * and customer history independently. Missing/invalid sources never block approval.
+ * Everything the AI does goes through the gateway's MCP server, as an AI
+ * would: automatic calls seed the world (inbox via mail__load_simulation, CRM
+ * contacts and activities), review-mode calls create the proposals whose cards
+ * are checked. The CRM activities written here by an AUTOMATIC call carry a
+ * real ticket, so the gateway knows them as written by the AI.
  *
- * Real MCP servers (CRM, Email). Proposals created via MCP tool calls.
- * Capability detection: check if _source field is present in crm__create_contact
- * tool's input schema from tools/list over real MCP session.
+ *  A  (cases 1, 2, 7) _source → Request block; history of the same email
+ *     domain within 14 days, incl. an AI-written entry; older entries and
+ *     other domains are absent.
+ *  B  (case 3) no _source → "No request linked."; approve → the contact is
+ *     really created.
+ *  C  (case 4) unknown connector / missing message → visible state, approve
+ *     still enabled.
+ *  D  (case 6) an automatic call with _source executes and the stored record
+ *     carries no _source.
+ *  E  (case 8) free-mail sender → only the exact address is matched.
+ *  F  (implicit source) mail__send_message with in_reply_to → the request is
+ *     shown although the AI gave no _source, labelled as the AI's link.
+ *
+ * Case 5 (connector not reachable) and case 9 (phase B) are not here yet: 5
+ * needs an installed-but-stopped connector (open question on the gateway
+ * side), 9 is phase B.
  */
-
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import {
   test, expect,
-  SP_URL, GW_URL, GW_MCP_URL,
+  SP_URL, GW_MCP_URL, INTERNAL_SECRET,
   registerOnSP, signInToGateway, handleOnboarding, activateIntegration,
-  spApiAttest, latestProfileId,
+  spApiAttest, latestProfileId, gatewayDataDir,
 } from './fixtures';
-import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
+import { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
+import { hashGateContent, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(__dirname, '..', 'test-results', 'au10');
+mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 const CUSTOMERS_PROFILE = latestProfileId('customers');
-const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
-const SCOPE = { contact_type: 'customer' };
+const EMAIL_PROFILE = latestProfileId('email');
+const CUSTOMERS_KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
+const EMAIL_KEY_ORDER = ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'];
+const CUSTOMERS_SCOPE = { contact_type: 'customer' };
 
-const INTERNAL_SECRET = 'e2e-internal-secret'; // Matches fixtures.ts
+const HISTORY_LABEL = 'Read by the gateway — same customer, not matched to this request';
+
+// Runs only against a gateway that has AU10 (CI runs the journeys against the
+// gateway's main branch, which may not have it yet) — same gate as AU8.
+const GW_AU10_TS = join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'mcp-server', 'src', 'lib', 'request-context.ts');
+const HAS_AU10 = existsSync(GW_AU10_TS) && readFileSync(GW_AU10_TS, 'utf8').includes('stripSourceLink');
 
 async function pushGateContent(opts: {
-  authorizationId: string; boundsHash: string; scopeHash: string; path: string; intent: string;
+  authorizationId: string; boundsHash: string; scopeHash: string; scope: Record<string, string>; path: string; intent: string;
 }): Promise<void> {
   const res = await fetch(`${GW_MCP_URL}/internal/gate-content`, {
     method: 'POST',
@@ -43,7 +72,7 @@ async function pushGateContent(opts: {
       authorizationId: opts.authorizationId,
       boundsHash: opts.boundsHash,
       contextHash: opts.scopeHash,
-      context: SCOPE,
+      context: opts.scope,
       path: opts.path,
       gateContent: { intent: opts.intent },
     }),
@@ -51,703 +80,269 @@ async function pushGateContent(opts: {
   if (!res.ok) throw new Error(`pushGateContent failed (${res.status}): ${await res.text()}`);
 }
 
-test.describe.serial('AU10: Request and customer history on approval card', () => {
-  let apiKey: string;
-  let userDid: string;
-  let au10Supported = false;
+async function mandate(request: APIRequestContext, apiKey: string, did: string, opts: {
+  profile: string; keyOrder: string[]; bounds: Record<string, unknown>; scope: Record<string, string>;
+  intent: string; mode: 'automatic' | 'review';
+}): Promise<void> {
+  const boundsHash = computeBoundsHash(opts.bounds, opts.keyOrder);
+  const scopeHash = computeScopeHash(opts.scope, Object.keys(opts.scope));
+  const att = await spApiAttest(request, apiKey, {
+    profile_id: opts.profile, domain: 'owner', did,
+    bounds: opts.bounds, bounds_hash: boundsHash, scope_hash: scopeHash,
+    gate_content_hashes: hashGateContent({ intent: opts.intent }),
+    execution_context_hash: 'sha256:' + 'd'.repeat(64),
+    commitment_mode: opts.mode,
+  });
+  expect(att.status).toBe('active');
+  await pushGateContent({
+    authorizationId: att.authorization_id as string, boundsHash, scopeHash, scope: opts.scope, path: opts.profile, intent: opts.intent,
+  });
+}
 
-  test('setup: register, sign in, check AU10, activate CRM', async ({ page }) => {
-    test.setTimeout(120_000);
-    apiKey = await registerOnSP(page, 'AU10 Request and History');
+async function withAgent<T>(fn: (c: Client) => Promise<T>): Promise<T> {
+  const client = new Client({ name: 'au10-e2e-agent', version: '1.0.0' }, { capabilities: {} });
+  await client.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
+  try { return await fn(client); } finally { await client.close(); }
+}
+
+function text(res: { content?: unknown }): string {
+  return ((res.content as Array<{ text?: string }>) ?? [])[0]?.text ?? '';
+}
+
+async function call(c: Client, name: string, args: Record<string, unknown>): Promise<string> {
+  const res = await c.callTool({ name, arguments: args });
+  const body = text(res);
+  if (res.isError) throw new Error(`${name} failed: ${body}`);
+  return body;
+}
+
+async function openCard(page: Page, apiKey: string, hasText: string): Promise<Locator> {
+  await signInToGateway(page, apiKey);
+  await page.click('.sidebar-item:has-text("Pending Approvals")');
+  await page.waitForURL('**/approvals');
+  await page.click('.nav-tab:has-text("Awaiting me")');
+  const card = page.locator('.card', { hasText }).first();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  return card;
+}
+
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+test.describe.serial('AU10: request and customer history on the approval card (real stack)', () => {
+  test.skip(!HAS_AU10, 'gateway without AU10 (request and history on the card)');
+  let apiKey: string;
+  let did: string;
+  const msg: Record<'kraus' | 'hans', string> = { kraus: '', hans: '' };
+
+  test('setup: connectors, automatic mandates, inbox and CRM history seeded through the gateway', async ({ page, request }) => {
+    test.setTimeout(240_000);
+    apiKey = await registerOnSP(page, 'AU10 Request Context');
     const sess = await page.request.post(`${SP_URL}/api/auth/session`, { headers: { 'x-api-key': apiKey } });
     expect(sess.ok()).toBe(true);
-    userDid = (await sess.json()).user.did;
-
-    // Check AU10 support by attempting an MCP connection and inspecting tools/list
-    const mcpClient = new Client({ name: 'au10-detect', version: '1.0.0' }, { capabilities: {} });
-    try {
-      await mcpClient.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
-      const { tools } = await mcpClient.listTools();
-      const createContactTool = tools.find(t => t.name === 'crm__create_contact');
-      au10Supported = createContactTool?.inputSchema?.properties?.['_source'] !== undefined;
-      await mcpClient.close();
-    } catch (e) {
-      console.error('[AU10 setup] MCP connection failed:', e);
-      au10Supported = false;
-    }
-
-    if (!au10Supported) {
-      test.skip();
-      return;
-    }
+    did = (await sess.json()).user.did;
 
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
+    await activateIntegration(page, 'Email (simulation)');
     await activateIntegration(page, 'CRM');
+
+    await mandate(request, apiKey, did, {
+      profile: EMAIL_PROFILE, keyOrder: EMAIL_KEY_ORDER, scope: {}, mode: 'automatic',
+      bounds: { profile: EMAIL_PROFILE, read_access: 'unlimited', recipient_max: 1, send_daily_max: 0, read_max_age_days: 30, setup_daily_max: 2 },
+      intent: 'AU10 e2e: load a simulated inbox and read it.',
+    });
+    await mandate(request, apiKey, did, {
+      profile: CUSTOMERS_PROFILE, keyOrder: CUSTOMERS_KEY_ORDER, scope: CUSTOMERS_SCOPE, mode: 'automatic',
+      bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 20, delete_daily_max: 0, setup_daily_max: 0 },
+      intent: 'AU10 e2e: keep the CRM up to date automatically.',
+    });
+
+    await withAgent(async (c) => {
+      // The AI sees _source on write tools, not on reads (contract §1).
+      const { tools } = await c.listTools();
+      const schemaOf = (n: string) => tools.find(t => t.name === n)?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+      expect(schemaOf('crm__create_contact')?.properties?._source).toBeDefined();
+      expect(schemaOf('crm__log_activity')?.properties?._source).toBeDefined();
+      expect(schemaOf('crm__get_timeline')?.properties?._source).toBeUndefined();
+      expect(schemaOf('mail__list_messages')?.properties?._source).toBeUndefined();
+
+      await call(c, 'mail__load_simulation', {
+        package: {
+          name: 'Ennstal Umformtechnik', currency: 'EUR',
+          customers: [{ id: 'cust-77', name: 'Bavaria Umformtechnik GmbH', email: 'einkauf@bavaria-umform.de', credit_limit: 15000 }],
+          products: [{ id: 'item-1', sku: 'PV-55A', name: 'Proportionalventil PV-55A', list_price: 1850, stock: 4 }],
+          cases: [
+            {
+              id: 'c1',
+              request: {
+                from: { name: 'J. Kraus', email: 'j.kraus@bavaria-umform.de' },
+                subject: 'RF 55 Stillstand – Seriennummer 55-2291',
+                body: 'Guten Morgen,\n\nunsere Anlage RF 55 steht seit heute früh. Bitte um Rückruf.\n\nJürgen Kraus',
+              },
+              reply: { subject: 'Re: RF 55 Stillstand', body: 'Wir melden uns.' },
+            },
+            {
+              id: 'c2',
+              request: {
+                from: { name: 'Hans Privat', email: 'hans.privat@gmail.com' },
+                subject: 'Preisanfrage Ersatzteil',
+                body: 'Was kostet ein Hammersatz?',
+              },
+              reply: { subject: 'Re: Preisanfrage', body: 'Wir melden uns.' },
+            },
+          ],
+        },
+      });
+      const inbox = JSON.parse(await call(c, 'mail__list_messages', { folder: 'inbox' })) as Array<{ id: string; subject: string }>;
+      msg.kraus = inbox.find(m => m.subject.startsWith('RF 55 Stillstand'))!.id;
+      msg.hans = inbox.find(m => m.subject === 'Preisanfrage Ersatzteil')!.id;
+      expect(msg.kraus).toBeTruthy();
+      expect(msg.hans).toBeTruthy();
+
+      const contact = async (name: string, email: string) =>
+        (JSON.parse(await call(c, 'crm__create_contact', { name, email, type: 'customer', contact_type: 'customer' })) as { id: string }).id;
+      // An entry a PERSON typed into the CRM — written straight into the
+      // connector's database, not through the gateway, so it has no ticket.
+      const crmDb = new DatabaseSync(join(gatewayDataDir(), 'crm.db'));
+      const personEntry = (contact_id: string, type: string, summary: string, created_by: string, date = new Date().toISOString()) =>
+        crmDb.prepare('INSERT INTO activities (id, contact_id, type, summary, detail, date, created_by, receipt_id) VALUES (?, ?, ?, ?, NULL, ?, ?, NULL)')
+          .run(randomUUID(), contact_id, type, summary, date, created_by);
+
+      // Same domain as Kraus: a colleague's call note, an entry written by
+      // the AI (this automatic call carries a ticket), and one older than the
+      // 14-day window.
+      const leitner = await contact('L. Leitner', 'l.leitner@bavaria-umform.de');
+      personEntry(leitner, 'call', 'RF 55 steht, Ventil dringend', 'L. Leitner');
+      await call(c, 'crm__log_activity', { contact_id: leitner, type: 'email', summary: 'Angebot Q-1198 an Bavaria gesendet', contact_type: 'customer' });
+      personEntry(leitner, 'note', 'OLD-ENTRY outside the window', 'L. Leitner', daysAgo(30));
+      // Another company: must never appear on a Bavaria card.
+      const other = await contact('O. Anders', 'o.anders@other-firma.de');
+      personEntry(other, 'call', 'OTHER-DOMAIN entry', 'O. Anders');
+      // Free mail: the exact address matches, the shared domain never does.
+      const hans = await contact('Hans Privat', 'hans.privat@gmail.com');
+      personEntry(hans, 'call', 'Hans fragt nach Hammersatz', 'L. Leitner');
+      const stranger = await contact('Gerda Fremd', 'gerda.fremd@gmail.com');
+      personEntry(stranger, 'call', 'GMAIL-STRANGER entry', 'L. Leitner');
+      crmDb.close();
+
+      // Case D (contract test 6): an automatic call with _source executes,
+      // and the record that reaches the CRM carries no _source.
+      const stored = JSON.parse(await call(c, 'crm__create_contact', {
+        name: 'Stripped Source', email: 'stripped@other-firma.de', type: 'customer', contact_type: 'customer',
+        _source: { connector: 'mail', kind: 'message', id: msg.kraus },
+      })) as Record<string, unknown>;
+      expect(stored.name).toBe('Stripped Source');
+      expect(JSON.stringify(stored)).not.toContain('_source');
+      const reread = await call(c, 'crm__get_contact', { id: stored.id as string });
+      expect(reread).not.toContain('_source');
+    });
+
+    // Review mandates for the cards. Created after the seeding: when an
+    // automatic and a review mandate both match, the review one wins.
+    await mandate(request, apiKey, did, {
+      profile: CUSTOMERS_PROFILE, keyOrder: CUSTOMERS_KEY_ORDER, scope: CUSTOMERS_SCOPE, mode: 'review',
+      bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 20, delete_daily_max: 0, setup_daily_max: 0 },
+      intent: 'AU10 e2e: review new contacts before they are created.',
+    });
+    await mandate(request, apiKey, did, {
+      profile: EMAIL_PROFILE, keyOrder: EMAIL_KEY_ORDER, scope: {}, mode: 'review',
+      bounds: { profile: EMAIL_PROFILE, read_access: 'unlimited', recipient_max: 1, send_daily_max: 10, read_max_age_days: 30, setup_daily_max: 0 },
+      intent: 'AU10 e2e: review replies before they go out.',
+    });
+
+    await withAgent(async (c) => {
+      const propose = async (args: Record<string, unknown>) => {
+        const res = await c.callTool({ name: 'crm__create_contact', arguments: { type: 'customer', contact_type: 'customer', ...args } });
+        expect(res.isError, text(res)).toBeFalsy();
+      };
+      await propose({ name: 'J. Kraus', email: 'j.kraus@bavaria-umform.de', _source: { connector: 'mail', kind: 'message', id: msg.kraus } });
+      await propose({ name: 'No Source', email: 'nosource@au10-nolink.de' });
+      await propose({ name: 'Unknown Connector', email: 'unknown@au10-bad.de', _source: { connector: 'nosuchconnector', kind: 'record', id: 'x' } });
+      await propose({ name: 'Missing Message', email: 'missing@au10-bad.de', _source: { connector: 'mail', kind: 'message', id: 'no-such-message' } });
+      await propose({ name: 'Hans Privat Neu', email: 'hans.privat@gmail.com', _source: { connector: 'mail', kind: 'message', id: msg.hans } });
+      const reply = await c.callTool({
+        name: 'mail__send_message',
+        arguments: { to: ['j.kraus@bavaria-umform.de'], subject: 'Re: RF 55 Stillstand', body: 'IMPLICIT-REPLY wir rufen zurück.', in_reply_to: msg.kraus },
+      });
+      expect(reply.isError, text(reply)).toBeFalsy();
+    });
   });
 
-  test('AU10.1: _source links request; request shown with author, time, subject', async ({ page, request }) => {
-    test.skip(!au10Supported, 'gateway without AU10 support (_source not in schema)');
+  test('A: request linked by the AI, and the latest entries for the same email domain', async ({ page }) => {
     test.setTimeout(120_000);
+    const card = await openCard(page, apiKey, 'j.kraus@bavaria-umform.de');
+    const req = card.getByTestId('au10-request');
+    const hist = card.getByTestId('au10-history');
 
-    const bounds = {
-      profile: CUSTOMERS_PROFILE,
-      read_access: 'unlimited',
-      export_access: 'none',
-      write_daily_max: 10,
-      delete_daily_max: 0,
-      setup_daily_max: 0,
-    };
-    const intent = 'AU10.1: Review contacts before creation, with request context.';
+    await expect(req).toContainText('Linked by the AI', { timeout: 45_000 });
+    await expect(req).toContainText('RF 55 Stillstand – Seriennummer 55-2291');
+    await expect(req).toContainText('unsere Anlage RF 55 steht');
+    await expect(req).toContainText('from J. Kraus, not checked');
 
-    const att = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds,
-      bounds_hash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-      defer_commitment: true,
-    });
-    expect(att.status).toBe('active');
+    await expect(hist).toContainText(HISTORY_LABEL, { timeout: 45_000 });
+    await expect(hist).toContainText('bavaria-umform.de');
+    await expect(hist).toContainText('matched by email domain');
+    await expect(hist).toContainText('RF 55 steht, Ventil dringend');
+    await expect(hist).toContainText('from L. Leitner, not checked');
+    // An entry the AI wrote through the gateway is the AI's text, quoted.
+    await expect(hist).toContainText('Angebot Q-1198 an Bavaria gesendet');
+    await expect(hist).toContainText('Written by the AI via Suveren');
+    // Outside the window, or another company: never on this card.
+    await expect(hist).not.toContainText('OLD-ENTRY');
+    await expect(hist).not.toContainText('OTHER-DOMAIN');
+    // Never claimed as related to this request.
+    await expect(card).not.toContainText('related to this request');
 
-    await pushGateContent({
-      authorizationId: att.authorization_id as string,
-      boundsHash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scopeHash: computeScopeHash(SCOPE, ['contact_type']),
-      path: CUSTOMERS_PROFILE,
-      intent,
-    });
-
-    const propRes = await request.post(`${SP_URL}/api/proposals`, {
-      headers: { 'x-api-key': apiKey },
-      data: {
-        authorization_id: att.authorization_id,
-        profile_id: CUSTOMERS_PROFILE,
-        pending_domains: ['owner'],
-        tool: 'crm__create_contact',
-        tool_args: {
-          name: 'J. Kraus',
-          email: 'j.kraus@bavaria-umform.de',
-          type: 'customer',
-          _source: {
-            connector: 'mail',
-            kind: 'message',
-            id: 'm-17',
-          },
-        },
-        execution_context: { contact_type: 'customer', action_type: 'write' },
-      },
-    });
-    expect(propRes.ok()).toBe(true);
-
-    await signInToGateway(page, apiKey);
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
-
-    const card = page.locator('.card').first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
-
-    // Assert Request block contains "Linked by the AI" label
-    await expect(card.locator('text=Linked by the AI')).toBeVisible();
-    await expect(card.locator('text=from J. Kraus')).toBeVisible();
-    await expect(card.locator('text=not checked')).toBeVisible();
+    // The sealed action is still there, above the context.
+    await expect(card).toContainText('j.kraus@bavaria-umform.de');
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'a-request-and-history.png') });
   });
 
-  test('AU10.2: History shows CRM entries for same customer, within 14 days', async ({ page, request }) => {
-    test.skip(!au10Supported, 'gateway without AU10 support');
-    test.setTimeout(150_000);
-
-    // Create a contact first (automatic mode)
-    const automBounds = {
-      profile: CUSTOMERS_PROFILE,
-      read_access: 'unlimited',
-      export_access: 'none',
-      write_daily_max: 10,
-      delete_daily_max: 0,
-      setup_daily_max: 0,
-    };
-    const automAtt = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds: automBounds,
-      bounds_hash: computeBoundsHash(automBounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10: Create contact automatically.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-    });
-    expect(automAtt.status).toBe('active');
-
-    // Create a contact via MCP to seed CRM data
-    const mcpClient = new Client({ name: 'au10-e2e-agent', version: '1.0.0' }, { capabilities: {} });
-    await mcpClient.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
-    let contactId: string;
-    try {
-      const createRes = await mcpClient.callTool({
-        name: 'crm__create_contact',
-        arguments: {
-          name: 'Existing Customer',
-          email: 'contact@bavaria-umform.de',
-          type: 'customer',
-        },
-      });
-      expect(createRes.isError).toBeFalsy();
-      const createText = (createRes.content as Array<{ text?: string }>)?.[0]?.text ?? '';
-      const contact = JSON.parse(createText) as { id: string };
-      contactId = contact.id;
-
-      const actRes = await mcpClient.callTool({
-        name: 'crm__log_activity',
-        arguments: {
-          contact_id: contactId,
-          type: 'call',
-          summary: 'RF 55 steht, Ventil dringend',
-        },
-      });
-      expect(actRes.isError).toBeFalsy();
-    } finally {
-      await mcpClient.close();
-    }
-
-    // Create review-mode proposal for the same customer domain
-    const revBounds = automBounds;
-    const revIntent = 'AU10.2: Review quotes with customer history.';
-    const revAtt = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds: revBounds,
-      bounds_hash: computeBoundsHash(revBounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: revIntent }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-      defer_commitment: true,
-    });
-    expect(revAtt.status).toBe('active');
-
-    await pushGateContent({
-      authorizationId: revAtt.authorization_id as string,
-      boundsHash: computeBoundsHash(revBounds, BOUNDS_KEY_ORDER),
-      scopeHash: computeScopeHash(SCOPE, ['contact_type']),
-      path: CUSTOMERS_PROFILE,
-      intent: revIntent,
-    });
-
-    const propRes = await request.post(`${SP_URL}/api/proposals`, {
-      headers: { 'x-api-key': apiKey },
-      data: {
-        authorization_id: revAtt.authorization_id,
-        profile_id: CUSTOMERS_PROFILE,
-        pending_domains: ['owner'],
-        tool: 'crm__create_contact',
-        tool_args: {
-          name: 'New Contact',
-          email: 'new@bavaria-umform.de',
-          type: 'customer',
-          _source: {
-            connector: 'mail',
-            kind: 'message',
-            id: 'm-1',
-          },
-        },
-        execution_context: { contact_type: 'customer', action_type: 'write' },
-      },
-    });
-    expect(propRes.ok()).toBe(true);
-
-    await signInToGateway(page, apiKey);
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
-
-    const card = page.locator('.card').first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
-
-    await expect(card.locator('text=Read by the gateway')).toBeVisible();
-    await expect(card.locator('text=RF 55 steht')).toBeVisible({ timeout: 5_000 });
-    await expect(card.locator('text=not checked')).toBeVisible();
-  });
-
-  test('AU10.3: No _source → "No request linked"; action still executes', async ({ page, request }) => {
-    test.skip(!au10Supported, 'gateway without AU10 support');
+  test('B: no link → "No request linked."; approving still creates the contact', async ({ page }) => {
     test.setTimeout(120_000);
+    const card = await openCard(page, apiKey, 'nosource@au10-nolink.de');
+    await expect(card.getByTestId('au10-request')).toContainText('No request linked.', { timeout: 45_000 });
+    await expect(card.getByTestId('au10-request')).not.toContainText('Linked by the AI');
+    await expect(card.getByTestId('au10-history')).toContainText(HISTORY_LABEL);
 
-    const bounds = {
-      profile: CUSTOMERS_PROFILE,
-      read_access: 'unlimited',
-      export_access: 'none',
-      write_daily_max: 10,
-      delete_daily_max: 0,
-      setup_daily_max: 0,
-    };
-
-    const att = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds,
-      bounds_hash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10.3: No source.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-      defer_commitment: true,
-    });
-    expect(att.status).toBe('active');
-
-    await pushGateContent({
-      authorizationId: att.authorization_id as string,
-      boundsHash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scopeHash: computeScopeHash(SCOPE, ['contact_type']),
-      path: CUSTOMERS_PROFILE,
-      intent: 'AU10.3: No source.',
-    });
-
-    const propRes = await request.post(`${SP_URL}/api/proposals`, {
-      headers: { 'x-api-key': apiKey },
-      data: {
-        authorization_id: att.authorization_id,
-        profile_id: CUSTOMERS_PROFILE,
-        pending_domains: ['owner'],
-        tool: 'crm__create_contact',
-        tool_args: {
-          name: 'No Source Contact',
-          email: 'nosource@test.com',
-          type: 'customer',
-        },
-        execution_context: { contact_type: 'customer', action_type: 'write' },
-      },
-    });
-    expect(propRes.ok()).toBe(true);
-
-    await signInToGateway(page, apiKey);
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
-
-    const card = page.locator('.card').first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
-
-    await expect(card.locator('text=No request linked')).toBeVisible();
-
-    const approveBtn = card.locator('button:has-text("Approve")').first();
-    await expect(approveBtn).toBeVisible();
-    await approveBtn.click();
-
-    await page.waitForTimeout(2000);
-    await expect(card.locator('text=executed').or(card.locator('[data-status="executed"]'))).toBeVisible({ timeout: 10_000 });
+    await card.locator('button:has-text("Approve")').click();
+    await expect(async () => {
+      const found = await withAgent(c => call(c, 'crm__find_contacts', { query: 'nosource@au10-nolink.de' }));
+      expect(found).toContain('nosource@au10-nolink.de');
+    }).toPass({ timeout: 45_000 });
   });
 
-  test('AU10.4: Invalid _source → "link not readable"; not a block', async ({ page, request }) => {
-    test.skip(!au10Supported, 'gateway without AU10 support');
+  test('C: an unreadable link is shown as such and never blocks', async ({ page }) => {
     test.setTimeout(120_000);
+    const unknown = await openCard(page, apiKey, 'unknown@au10-bad.de');
+    await expect(unknown.getByTestId('au10-request')).toContainText('Request: link not readable', { timeout: 45_000 });
+    await expect(unknown.locator('button:has-text("Approve")')).toBeEnabled();
 
-    const bounds = {
-      profile: CUSTOMERS_PROFILE,
-      read_access: 'unlimited',
-      export_access: 'none',
-      write_daily_max: 10,
-      delete_daily_max: 0,
-      setup_daily_max: 0,
-    };
-
-    const att = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds,
-      bounds_hash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10.4: Invalid source.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-      defer_commitment: true,
-    });
-    expect(att.status).toBe('active');
-
-    await pushGateContent({
-      authorizationId: att.authorization_id as string,
-      boundsHash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scopeHash: computeScopeHash(SCOPE, ['contact_type']),
-      path: CUSTOMERS_PROFILE,
-      intent: 'AU10.4: Invalid source.',
-    });
-
-    const propRes = await request.post(`${SP_URL}/api/proposals`, {
-      headers: { 'x-api-key': apiKey },
-      data: {
-        authorization_id: att.authorization_id,
-        profile_id: CUSTOMERS_PROFILE,
-        pending_domains: ['owner'],
-        tool: 'crm__create_contact',
-        tool_args: {
-          name: 'Bad Source Contact',
-          email: 'badsource@test.com',
-          type: 'customer',
-          _source: {
-            connector: 'unknown_system',
-            kind: 'record',
-            id: 'x',
-          },
-        },
-        execution_context: { contact_type: 'customer', action_type: 'write' },
-      },
-    });
-    expect(propRes.ok()).toBe(true);
-
-    await signInToGateway(page, apiKey);
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
-
-    const card = page.locator('.card').first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
-
-    await expect(card.locator('text=link not readable')).toBeVisible();
-
-    const approveBtn = card.locator('button:has-text("Approve")').first();
-    await expect(approveBtn).toBeEnabled();
+    const missing = page.locator('.card', { hasText: 'missing@au10-bad.de' }).first();
+    await expect(missing).toBeVisible({ timeout: 30_000 });
+    await expect(missing.getByTestId('au10-request')).toContainText('Request: this message no longer exists.', { timeout: 45_000 });
+    await expect(missing.locator('button:has-text("Approve")')).toBeEnabled();
   });
 
-  test('AU10.5: CRM unavailable → history shows "not reachable"', async ({ page, request }) => {
-    test.skip(!au10Supported, 'gateway without AU10 support');
+  test('E: free-mail sender → only the exact address is matched, never the shared domain', async ({ page }) => {
     test.setTimeout(120_000);
-
-    const bounds = {
-      profile: CUSTOMERS_PROFILE,
-      read_access: 'unlimited',
-      export_access: 'none',
-      write_daily_max: 10,
-      delete_daily_max: 0,
-      setup_daily_max: 0,
-    };
-
-    const att = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds,
-      bounds_hash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10.5: CRM unreachable.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-      defer_commitment: true,
-    });
-    expect(att.status).toBe('active');
-
-    await pushGateContent({
-      authorizationId: att.authorization_id as string,
-      boundsHash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scopeHash: computeScopeHash(SCOPE, ['contact_type']),
-      path: CUSTOMERS_PROFILE,
-      intent: 'AU10.5: CRM unreachable.',
-    });
-
-    // TODO: Disable CRM integration via control-plane API
-    // For now, just create proposal without the integration available
-    // const disableRes = await request.delete(`${GW_URL}/integrations/crm`);
-
-    const propRes = await request.post(`${SP_URL}/api/proposals`, {
-      headers: { 'x-api-key': apiKey },
-      data: {
-        authorization_id: att.authorization_id,
-        profile_id: CUSTOMERS_PROFILE,
-        pending_domains: ['owner'],
-        tool: 'crm__create_contact',
-        tool_args: {
-          name: 'Test Contact',
-          email: 'test@test.com',
-          type: 'customer',
-        },
-        execution_context: { contact_type: 'customer', action_type: 'write' },
-      },
-    });
-    expect(propRes.ok()).toBe(true);
-
-    await signInToGateway(page, apiKey);
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
-
-    const card = page.locator('.card').first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
-
-    // NOTE: This test SKIPPED pending fixture for disabling integrations
-    test.skip(true, 'Case 5 needs fixture to disable integrations mid-test');
+    const card = await openCard(page, apiKey, 'Hans Privat Neu');
+    const hist = card.getByTestId('au10-history');
+    await expect(card.getByTestId('au10-request')).toContainText('Preisanfrage Ersatzteil', { timeout: 45_000 });
+    await expect(hist).toContainText('Hans fragt nach Hammersatz', { timeout: 45_000 });
+    await expect(hist).toContainText('hans.privat@gmail.com');
+    await expect(hist).not.toContainText('matched by email domain');
+    await expect(hist).not.toContainText('GMAIL-STRANGER');
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'e-free-mail.png') });
   });
 
-  test('AU10.6: _source never reaches downstream tool', async ({ request }) => {
-    test.skip(!au10Supported, 'gateway without AU10 support');
+  test('F: a reply with in_reply_to shows the request although the AI gave no _source', async ({ page }) => {
     test.setTimeout(120_000);
-
-    const bounds = {
-      profile: CUSTOMERS_PROFILE,
-      read_access: 'unlimited',
-      export_access: 'none',
-      write_daily_max: 10,
-      delete_daily_max: 0,
-      setup_daily_max: 0,
-    };
-
-    const att = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds,
-      bounds_hash: computeBoundsHash(bounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10.6: Source stripping.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-    });
-    expect(att.status).toBe('active');
-
-    const mcpClient = new Client({ name: 'au10-e2e-source-test', version: '1.0.0' }, { capabilities: {} });
-    await mcpClient.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
-    try {
-      const testId = `au10-source-${Date.now()}`;
-      const createRes = await mcpClient.callTool({
-        name: 'crm__create_contact',
-        arguments: {
-          name: testId,
-          email: `${testId}@test.com`,
-          type: 'customer',
-          _source: {
-            connector: 'mail',
-            kind: 'message',
-            id: 'msg-123',
-          },
-        },
-      });
-      expect(createRes.isError).toBeFalsy();
-      const createText = (createRes.content as Array<{ text?: string }>)?.[0]?.text ?? '';
-      const contact = JSON.parse(createText) as Record<string, unknown>;
-
-      expect('_source' in contact).toBe(false);
-      expect(contact.name).toBe(testId);
-    } finally {
-      await mcpClient.close();
-    }
-  });
-
-  test('AU10.7: AI-written activity shows "Written by the AI via Suveren — not checked"', async ({ page, request }) => {
-    test.skip(!au10Supported, 'gateway without AU10 support');
-    test.setTimeout(150_000);
-
-    // Create a contact and log an activity (automatic mode)
-    const automBounds = {
-      profile: CUSTOMERS_PROFILE,
-      read_access: 'unlimited',
-      export_access: 'none',
-      write_daily_max: 10,
-      delete_daily_max: 0,
-      setup_daily_max: 0,
-    };
-    const automAtt = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds: automBounds,
-      bounds_hash: computeBoundsHash(automBounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10.7: AI activity.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-    });
-    expect(automAtt.status).toBe('active');
-
-    const mcpClient = new Client({ name: 'au10-e2e-ai-activity', version: '1.0.0' }, { capabilities: {} });
-    await mcpClient.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
-    let contactId: string;
-    try {
-      const createRes = await mcpClient.callTool({
-        name: 'crm__create_contact',
-        arguments: {
-          name: 'AI Activity Test Customer',
-          email: 'aiactivity@test.com',
-          type: 'customer',
-        },
-      });
-      expect(createRes.isError).toBeFalsy();
-      const createText = (createRes.content as Array<{ text?: string }>)?.[0]?.text ?? '';
-      const contact = JSON.parse(createText) as { id: string };
-      contactId = contact.id;
-
-      const actRes = await mcpClient.callTool({
-        name: 'crm__log_activity',
-        arguments: {
-          contact_id: contactId,
-          type: 'email',
-          summary: 'Sent quote Q-1198 for PV-55A replacement, confirmed stock.',
-        },
-      });
-      expect(actRes.isError).toBeFalsy();
-    } finally {
-      await mcpClient.close();
-    }
-
-    // Create review-mode proposal for the same customer
-    const revBounds = automBounds;
-    const revAtt = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds: revBounds,
-      bounds_hash: computeBoundsHash(revBounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10.7: Review with history.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-      defer_commitment: true,
-    });
-    expect(revAtt.status).toBe('active');
-
-    await pushGateContent({
-      authorizationId: revAtt.authorization_id as string,
-      boundsHash: computeBoundsHash(revBounds, BOUNDS_KEY_ORDER),
-      scopeHash: computeScopeHash(SCOPE, ['contact_type']),
-      path: CUSTOMERS_PROFILE,
-      intent: 'AU10.7: Review with history.',
-    });
-
-    const propRes = await request.post(`${SP_URL}/api/proposals`, {
-      headers: { 'x-api-key': apiKey },
-      data: {
-        authorization_id: revAtt.authorization_id,
-        profile_id: CUSTOMERS_PROFILE,
-        pending_domains: ['owner'],
-        tool: 'crm__create_contact',
-        tool_args: {
-          name: 'Another Contact',
-          email: 'another@test.com',
-          type: 'customer',
-          _source: {
-            connector: 'mail',
-            kind: 'message',
-            id: 'm-quote',
-          },
-        },
-        execution_context: { contact_type: 'customer', action_type: 'write' },
-      },
-    });
-    expect(propRes.ok()).toBe(true);
-
-    await signInToGateway(page, apiKey);
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
-
-    const card = page.locator('.card').first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
-
-    await expect(card.locator('text=Written by the AI via Suveren')).toBeVisible({ timeout: 5_000 });
-    await expect(card.locator('text=not checked')).toBeVisible();
-    await expect(card.locator('text=Q-1198')).toBeVisible();
-  });
-
-  test('AU10.8: Free-mail sender (gmail.com) → only exact-email history', async ({ page, request }) => {
-    test.skip(!au10Supported, 'gateway without AU10 support');
-    test.setTimeout(120_000);
-
-    // Pre-seed: create contact with gmail.com
-    const automBounds = {
-      profile: CUSTOMERS_PROFILE,
-      read_access: 'unlimited',
-      export_access: 'none',
-      write_daily_max: 10,
-      delete_daily_max: 0,
-      setup_daily_max: 0,
-    };
-    const automAtt = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds: automBounds,
-      bounds_hash: computeBoundsHash(automBounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10.8: Free-mail.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-    });
-    expect(automAtt.status).toBe('active');
-
-    const mcpClient = new Client({ name: 'au10-e2e-freemail', version: '1.0.0' }, { capabilities: {} });
-    await mcpClient.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
-    try {
-      const createRes = await mcpClient.callTool({
-        name: 'crm__create_contact',
-        arguments: {
-          name: 'Hans Mueller',
-          email: 'hans.privat@gmail.com',
-          type: 'customer',
-        },
-      });
-      expect(createRes.isError).toBeFalsy();
-
-      await mcpClient.callTool({
-        name: 'crm__log_activity',
-        arguments: {
-          contact_id: (JSON.parse((createRes.content as Array<{ text?: string }>)?.[0]?.text ?? '') as { id: string }).id,
-          type: 'call',
-          summary: 'Nachfrage Ersatzteilpreis',
-        },
-      });
-    } finally {
-      await mcpClient.close();
-    }
-
-    // Create review-mode proposal for another gmail address
-    const revBounds = automBounds;
-    const revAtt = await spApiAttest(request, apiKey, {
-      profile_id: CUSTOMERS_PROFILE,
-      domain: 'owner',
-      did: userDid,
-      bounds: revBounds,
-      bounds_hash: computeBoundsHash(revBounds, BOUNDS_KEY_ORDER),
-      scope_hash: computeScopeHash(SCOPE, ['contact_type']),
-      gate_content_hashes: hashGateContent({ intent: 'AU10.8: Review with free-mail.' }),
-      execution_context_hash: hashExecutionContext({ contact_type: 'customer', action_type: 'write' }),
-      defer_commitment: true,
-    });
-    expect(revAtt.status).toBe('active');
-
-    await pushGateContent({
-      authorizationId: revAtt.authorization_id as string,
-      boundsHash: computeBoundsHash(revBounds, BOUNDS_KEY_ORDER),
-      scopeHash: computeScopeHash(SCOPE, ['contact_type']),
-      path: CUSTOMERS_PROFILE,
-      intent: 'AU10.8: Review with free-mail.',
-    });
-
-    const propRes = await request.post(`${SP_URL}/api/proposals`, {
-      headers: { 'x-api-key': apiKey },
-      data: {
-        authorization_id: revAtt.authorization_id,
-        profile_id: CUSTOMERS_PROFILE,
-        pending_domains: ['owner'],
-        tool: 'crm__create_contact',
-        tool_args: {
-          name: 'Test User',
-          email: 'test@gmail.com',
-          type: 'customer',
-          _source: {
-            connector: 'mail',
-            kind: 'message',
-            id: 'm-gmail',
-          },
-        },
-        execution_context: { contact_type: 'customer', action_type: 'write' },
-      },
-    });
-    expect(propRes.ok()).toBe(true);
-
-    await signInToGateway(page, apiKey);
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
-    await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
-
-    const card = page.locator('.card').first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
-
-    // At minimum, card should render
-    await expect(card).toContainText('Test User');
+    const card = await openCard(page, apiKey, 'IMPLICIT-REPLY');
+    const req = card.getByTestId('au10-request');
+    await expect(req).toContainText('Linked by the AI', { timeout: 45_000 });
+    await expect(req).toContainText('RF 55 Stillstand – Seriennummer 55-2291');
+    await expect(card.getByTestId('au10-history')).toContainText('RF 55 steht, Ventil dringend', { timeout: 45_000 });
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'f-implicit-reply.png') });
   });
 });
