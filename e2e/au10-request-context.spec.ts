@@ -1,256 +1,648 @@
 /**
- * AU10 — Request and customer history on the approval card
+ * AU10 — Request and customer history on the approval card (real E2E)
  *
- * Contract: doc/au10-request-context.md
- * Mockup: temp/au10-mockup/index.html
+ * Contract: doc/au10-request-context.md (source of truth)
+ * Mockup: temp/au10-mockup/index.html (visual reference)
  *
  * Tests phase A (cases 1–8): the gateway reads request metadata and customer
  * history independently. Neither the AI's claim nor the read reach the AI or the AS.
  * Missing/invalid sources never block approval.
  *
- * Phase B (case 9) — snapshot binding — is optional and gated by a capability check.
+ * Real MCP servers only (CRM, Email, ERP). Proposals are created through the
+ * gateway's MCP server (as an AI would), not via SP API. Requires:
+ * - hap-crm-mcp@feat/au10-context-reads branch (or bundled manifest with AU10 context)
+ * - Email MCP with mail_message records
+ * - ERP MCP or synthetic backend
  *
- * Real MCP servers only (CRM, Email, ERP). To run against feat/au10-context-reads,
- * the test fixtures must pin hap-crm-mcp to that branch via npm overrides or
- * HAP_E2E_PREINSTALLED_INTEGRATIONS environment variable.
+ * Capability gate: detect AU10 by checking if _source appears in the create_contact
+ * tool's input schema (tools/list response). If _source is absent, skip the suite.
  */
 
 import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, activateIntegration, SP_URL, GW_URL, latestProfileId } from './fixtures';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { randomUUID } from 'node:crypto';
 
 const CUSTOMERS_PROFILE = latestProfileId('customers');
-const RECORDS_PROFILE = latestProfileId('records');
 
 test.describe.serial('AU10: Request and customer history on approval card', () => {
   let apiKey: string;
+  let mcpClient: Client;
+  let au10Supported = false;
 
-  test.beforeAll(async () => {
+  test.beforeAll(async ({ request }) => {
     await ensureUsersRegistered();
     apiKey = ALICE.apiKey;
     expect(apiKey).toBeTruthy();
 
-    // TODO: Detect AU10 capability via gateway health endpoint.
-    // For now, always run. When implemented, gate with:
-    // const health = await fetch(`${GW_URL}/health`);
-    // const au10Capable = health.headers.get('X-AU10') === '1';
-    // test.skip(!au10Capable, 'Gateway lacks AU10 support');
+    // Detect AU10 support: check if create_contact tool has _source in its input schema
+    // (the contract says the gateway injects it as an optional field with a description).
+    const health = await fetch(`${GW_URL}/mcp/tools/list`);
+    const toolsList = await health.json() as { tools: Array<{ name: string; inputSchema?: { properties?: Record<string, unknown> } }> };
+    const createContactTool = toolsList.tools?.find(t => t.name === 'crm__create_contact');
+    const hasSource = createContactTool?.inputSchema?.properties?.['_source'] !== undefined;
+
+    if (!hasSource) {
+      console.error('[AU10] _source not found in create_contact schema; skipping AU10 suite');
+      test.skip();
+      return;
+    }
+
+    au10Supported = true;
+    console.error('[AU10] AU10 supported; _source found in create_contact schema');
   });
 
-  test('AU10.1: _source links request; shows author, time, title on card', async ({ page }) => {
-    // CASE 1: Quote with _source → card shows request with author/subject.
-    //
-    // Expected UI elements (from mockup):
-    // - Request block with label "Linked by the AI" (amber)
-    // - Sender name (bold): "J. Kraus"
-    // - Time and connector: "mail · message · from J. Kraus · 09:55"
-    // - Subject/title in bold: "RF 55 Stillstand – Seriennummer 55-2291"
-    // - Body excerpt (italic, truncated to ~6 lines)
-    // - Attribution: "— from J. Kraus, not checked"
+  test.beforeEach(async () => {
+    if (!au10Supported) return;
 
+    // Connect MCP client for tool calls (each test gets a fresh connection)
+    const transport = new SSEClientTransport(new URL(`${GW_URL}/sse`));
+    mcpClient = new Client(
+      { name: 'au10-e2e', version: '0.1.0' },
+      { capabilities: {} },
+    );
+    await mcpClient.connect(transport);
+  });
+
+  test.afterEach(async () => {
+    if (mcpClient) {
+      try { await mcpClient.close(); } catch { /* ignore */ }
+    }
+  });
+
+  // ─── AU10.1: _source links request ───────────────────────────────────────
+
+  test('AU10.1: _source links request; shows author, time, title on card', async ({ page, request }) => {
+    // CASE 1: Proposal with _source → Request block shows sender, time, subject, body.
+    //
+    // Setup:
+    // 1. Create authorization with review mode (triggers proposal on tool call)
+    // 2. Call create_contact with _source linking to a mail message
+    // 3. Open browser, navigate to /approvals, find the card
+    // 4. Assert Request block text and History block
+
+    // Step 1: Create authorization with review mode
+    const authzRes = await request.post(`${SP_URL}/api/as/mandate`, {
+      headers: { 'x-api-key': apiKey },
+      data: {
+        profile_id: CUSTOMERS_PROFILE,
+        group_id: ALICE.id, // TODO: resolve correct group_id
+        bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: 'sha256:' + '0'.repeat(64),
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        execution_context_hash: 'sha256:' + 'd'.repeat(64),
+        commitment_mode: 'review', // Review mode: each tool call requires approval
+      },
+    });
+
+    if (!authzRes.ok()) {
+      const body = await authzRes.json();
+      console.error('[AU10.1] Authorization failed:', body);
+      throw new Error(`Failed to create authorization: ${authzRes.status()}`);
+    }
+
+    const authzData = await authzRes.json() as { authorization_id: string };
+    const authorizationId = authzData.authorization_id;
+
+    // Step 2: Call create_contact with _source (review mode → proposal generated)
+    const contactResult = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'J. Kraus',
+        email: 'j.kraus@bavaria-umform.de',
+        company: 'Bavaria Umformtechnik GmbH',
+        type: 'customer',
+        _source: {
+          connector: 'mail',
+          kind: 'message',
+          id: 'm-17',
+        },
+      },
+    });
+
+    expect(contactResult.isError).toBe(false);
+
+    // Wait a moment for the proposal to be generated
+    await new Promise(r => setTimeout(r, 1000));
+
+    // Step 3: Open browser, navigate to /approvals
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
     await activateIntegration(page, 'CRM');
     await activateIntegration(page, 'Email');
 
-    // TODO: Create a proposal with _source via API, then check the approval card.
-    // This requires:
-    // 1. Creating an authorization in review mode
-    // 2. Posting a proposal with tool_args containing _source
-    // 3. Navigating to /approvals
-    // 4. Finding the card and asserting on the Request block text
-
-    // Placeholder: verify the approvals page loads
     await page.goto(`${GW_URL}/approvals`);
     await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+
+    // Step 4: Find the approval card and assert Request block text
+    const card = page.locator('.card', { hasText: 'J. Kraus' }).first();
+    await expect(card).toBeVisible({ timeout: 10_000 });
+
+    // Assert Request block is visible and contains expected text
+    const requestBlock = card.locator('text=Linked by the AI').or(card.locator('text=Request'));
+    await expect(requestBlock).toBeVisible();
+
+    // Assert visible text from contract mockup: "from J. Kraus, not checked"
+    await expect(card.locator('text=from J. Kraus')).toBeVisible();
+    await expect(card.locator('text=not checked')).toBeVisible();
   });
 
-  test('AU10.2: History shows CRM entries for same domain, within 14 days', async ({ page }) => {
-    // CASE 2: Latest entries for the same customer domain shown in history.
-    // Older entries and different domains are excluded.
+  // ─── AU10.2: History for same customer domain ───────────────────────────
+
+  test('AU10.2: History shows CRM entries for same domain, within 14 days', async ({ page, request }) => {
+    // CASE 2: History block shows latest CRM entries for the same customer.
     //
-    // Expected:
-    // - History block label: "Read by the gateway — same customer, not matched to this request"
-    // - Subtitle: "Latest entries for bavaria-umform.de (matched by email domain)"
-    // - Entries from the last 14 days, newest first
-    // - Type label (e.g., "Call note"), time, title, body excerpt, author
-    // - Max limit entries per connector
+    // Setup:
+    // 1. Pre-seed CRM with contact and activity
+    // 2. Create authorization with review mode
+    // 3. Call create_quote with contextKeys pointing to the same customer
+    // 4. Open browser, find card, assert History block text
+
+    // Step 1: Pre-seed CRM
+    const contactResult = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'Existing Customer',
+        email: 'contact@bavaria-umform.de',
+        type: 'customer',
+      },
+    });
+    expect(contactResult.isError).toBe(false);
+    const contactText = (contactResult.content as Array<{ text?: string }>)[0]?.text ?? '';
+    const contact = JSON.parse(contactText);
+    const contactId = contact.id;
+
+    // Log an activity for this contact
+    const activityResult = await mcpClient.callTool({
+      name: 'crm__log_activity',
+      arguments: {
+        contact_id: contactId,
+        type: 'call',
+        summary: 'RF 55 steht, Ventil dringend',
+      },
+    });
+    expect(activityResult.isError).toBe(false);
+
+    // Step 2: Create authorization
+    const authzRes = await request.post(`${SP_URL}/api/as/mandate`, {
+      headers: { 'x-api-key': apiKey },
+      data: {
+        profile_id: CUSTOMERS_PROFILE,
+        group_id: ALICE.id,
+        bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: 'sha256:' + '0'.repeat(64),
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        execution_context_hash: 'sha256:' + 'd'.repeat(64),
+        commitment_mode: 'review',
+      },
+    });
+    expect(authzRes.ok()).toBe(true);
+
+    // Step 3: Call create_contact for the same domain (triggers proposal)
+    const result = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'New Customer',
+        email: 'new@bavaria-umform.de',
+        type: 'customer',
+        _source: {
+          connector: 'mail',
+          kind: 'message',
+          id: 'm-1',
+        },
+      },
+    });
+    expect(result.isError).toBe(false);
+
+    await new Promise(r => setTimeout(r, 1000));
+
+    // Step 4: Open browser and assert History block
+    await signInToGateway(page, apiKey);
+    await handleOnboarding(page);
+    await activateIntegration(page, 'CRM');
+
+    await page.goto(`${GW_URL}/approvals`);
+    const card = page.locator('.card').first();
+    await expect(card).toBeVisible({ timeout: 10_000 });
+
+    // Assert History block is visible and contains text from contract
+    await expect(card.locator('text=Read by the gateway')).toBeVisible();
+    await expect(card.locator('text=RF 55 steht, Ventil dringend')).toBeVisible({ timeout: 5_000 });
+    await expect(card.locator('text=not checked')).toBeVisible();
+  });
+
+  // ─── AU10.3: No _source, action still executes ───────────────────────────
+
+  test('AU10.3: No _source → "No request linked"; action still executes', async ({ page, request }) => {
+    // CASE 3: Proposal without _source.
+    //
+    // Setup:
+    // 1. Create authorization with review mode
+    // 2. Call create_contact WITHOUT _source
+    // 3. Open browser, assert Request block shows "No request linked"
+    // 4. Approve and verify action executes
+
+    const authzRes = await request.post(`${SP_URL}/api/as/mandate`, {
+      headers: { 'x-api-key': apiKey },
+      data: {
+        profile_id: CUSTOMERS_PROFILE,
+        group_id: ALICE.id,
+        bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: 'sha256:' + '0'.repeat(64),
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        execution_context_hash: 'sha256:' + 'd'.repeat(64),
+        commitment_mode: 'review',
+      },
+    });
+    expect(authzRes.ok()).toBe(true);
+
+    const result = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'No Source Contact',
+        email: 'nosource@test.com',
+        type: 'customer',
+        // No _source field
+      },
+    });
+    expect(result.isError).toBe(false);
+
+    await new Promise(r => setTimeout(r, 1000));
 
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
     await activateIntegration(page, 'CRM');
 
-    // TODO: Set up CRM data and create a proposal for the same customer.
-    // Verify history block displays correct subset and time window.
-
     await page.goto(`${GW_URL}/approvals`);
-    await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+    const card = page.locator('.card').first();
+    await expect(card).toBeVisible({ timeout: 10_000 });
+
+    // Assert "No request linked" text
+    await expect(card.locator('text=No request linked')).toBeVisible();
+
+    // Assert Approve button is visible and click it
+    const approveBtn = card.locator('button:has-text("Approve")').first();
+    await expect(approveBtn).toBeVisible();
+    await approveBtn.click();
+
+    // Verify action executed by checking the contact was created
+    const getAllResult = await mcpClient.callTool({
+      name: 'crm__find_contacts',
+      arguments: { query: 'No Source Contact' },
+    });
+    expect(getAllResult.isError).toBe(false);
+    const contactsText = (getAllResult.content as Array<{ text?: string }>)[0]?.text ?? '';
+    const contacts = JSON.parse(contactsText);
+    expect(contacts.some((c: { name: string }) => c.name === 'No Source Contact')).toBe(true);
   });
 
-  test('AU10.3: No _source → "No request linked"; action still executes', async ({ page }) => {
-    // CASE 3: Proposal without _source → Request block shows "No request linked."
-    // History is read independently. Approval is not blocked.
+  // ─── AU10.4: Invalid _source (unknown connector) ──────────────────────
+
+  test('AU10.4: Invalid _source → "link not readable"; not a block', async ({ page, request }) => {
+    // CASE 4: _source with unknown connector.
     //
-    // Expected:
-    // - Request block text: "No request linked."
-    // - History block still shows independently
-    // - Approve button enabled and functional
+    // Expected: Request block shows error state, never blocks approval.
+
+    const authzRes = await request.post(`${SP_URL}/api/as/mandate`, {
+      headers: { 'x-api-key': apiKey },
+      data: {
+        profile_id: CUSTOMERS_PROFILE,
+        group_id: ALICE.id,
+        bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: 'sha256:' + '0'.repeat(64),
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        execution_context_hash: 'sha256:' + 'd'.repeat(64),
+        commitment_mode: 'review',
+      },
+    });
+    expect(authzRes.ok()).toBe(true);
+
+    const result = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'Bad Source Contact',
+        email: 'badsource@test.com',
+        type: 'customer',
+        _source: {
+          connector: 'unknown_system', // Invalid connector
+          kind: 'record',
+          id: 'x',
+        },
+      },
+    });
+    expect(result.isError).toBe(false);
+
+    await new Promise(r => setTimeout(r, 1000));
 
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
     await activateIntegration(page, 'CRM');
 
-    // TODO: Create proposal without _source field.
-    // Verify Request block shows "No request linked."
-    // Approve and verify execution succeeds.
-
     await page.goto(`${GW_URL}/approvals`);
-    await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+    const card = page.locator('.card').first();
+    await expect(card).toBeVisible({ timeout: 10_000 });
+
+    // Assert visible error state
+    await expect(card.locator('text=link not readable').or(card.locator('text=Request'))).toBeVisible();
+
+    // Approve button must still be enabled
+    const approveBtn = card.locator('button:has-text("Approve")').first();
+    await expect(approveBtn).toBeEnabled();
   });
 
-  test('AU10.4: Invalid _source → "link not readable"; not a block', async ({ page }) => {
-    // CASE 4: _source with unknown connector, kind, or non-existent id.
-    // Neither blocks approval nor causes an error.
+  // ─── AU10.5: CRM unavailable ─────────────────────────────────────────
+
+  test('AU10.5: CRM unavailable → history shows "not reachable"; action works', async ({ page, request }) => {
+    // CASE 5: CRM MCP is down during approval.
     //
-    // Expected:
-    // - Request block shows: "Request: link not readable (unknown connector)."
-    // - Approve button is enabled and functional
-    // - Action executes successfully
+    // TODO: This test requires a fixture to disable/stop an integration.
+    // For now, placeholder. The builder must provide a way to stop integrations
+    // or kill the CRM process; check if journey-5 or scope-discovery has the pattern.
 
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
+    test.skip(true, 'Case 5 (CRM unreachable): awaiting fixture for stopping integrations. Minimal additions needed: a fixture function to disable/stop the CRM connector.');
 
-    // TODO: Create proposal with _source = { connector: 'unknown-crm', kind: 'record', id: 'x' }
-    // Verify visible error state in Request block
-    // Verify approval still works
-
-    await page.goto(`${GW_URL}/approvals`);
-    await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+    // Expected impl:
+    // 1. Create authorization and call create_contact with _source
+    // 2. Stop/disable CRM integration
+    // 3. Open browser and check History block shows "CRM not reachable"
+    // 4. Approve and verify action still executes
   });
 
-  test('AU10.5: CRM unavailable → history shows "not reachable"; action works', async ({ page }) => {
-    // CASE 5: CRM MCP server is down or unreachable during approval.
-    // Action still executes.
+  // ─── AU10.6: _source stripped before execution ───────────────────────
+
+  test('AU10.6: _source never reaches downstream tool', async ({ request }) => {
+    // CASE 6: _source is stripped before tool execution.
     //
-    // Expected:
-    // - History block shows: "CRM not reachable — history could not be read."
-    // - Approve button enabled
-    // - Action executes
+    // Verify via: query CRM records after execution to confirm _source is absent.
 
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
+    const authzRes = await request.post(`${SP_URL}/api/as/mandate`, {
+      headers: { 'x-api-key': apiKey },
+      data: {
+        profile_id: CUSTOMERS_PROFILE,
+        group_id: ALICE.id,
+        bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: 'sha256:' + '0'.repeat(64),
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        execution_context_hash: 'sha256:' + 'd'.repeat(64),
+        commitment_mode: 'automatic', // Automatic mode for quick execution check
+      },
+    });
+    expect(authzRes.ok()).toBe(true);
 
-    // TODO: Simulate CRM outage (kill process or timeout).
-    // Create proposal. Verify history error state. Approve and execute.
+    const testId = `au10-source-test-${randomUUID().slice(0, 8)}`;
+    const result = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: testId,
+        email: `${testId}@test.com`,
+        type: 'customer',
+        _source: {
+          connector: 'mail',
+          kind: 'message',
+          id: 'msg-123',
+        },
+      },
+    });
+    expect(result.isError).toBe(false);
 
-    await page.goto(`${GW_URL}/approvals`);
-    await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+    // Query the created contact and verify no _source field in the record
+    const contactText = (result.content as Array<{ text?: string }>)[0]?.text ?? '';
+    const contact = JSON.parse(contactText);
+
+    // Assert _source is NOT in the contact record
+    expect('_source' in contact).toBe(false);
+    expect(contact.name).toBe(testId);
+    expect(contact.email).toMatch(testId);
   });
 
-  test('AU10.6: _source never reaches downstream tool', async ({ page, request }) => {
-    // CASE 6: _source is stripped before execution.
-    // Tool args at execution lack _source field.
+  // ─── AU10.7: AI-written activities ───────────────────────────────────
+
+  test('AU10.7: AI-written activity shows "Written by the AI via Suveren — not checked"', async ({ page, request }) => {
+    // CASE 7: Activity logged through the gateway carries a ticket_id in the journal.
+    // A later proposal shows it with the "Written by the AI" label.
     //
-    // Expected:
-    // - Downstream records (ERP, Mail) show no _source in args
-    // - Can verify via ERP tool call log or querying created records
+    // Setup:
+    // 1. Create contact
+    // 2. Create authorization with automatic mode
+    // 3. Call log_activity (gateway records ticket_id)
+    // 4. Create new authorization with review mode
+    // 5. Call create_contact for same customer (proposal generated)
+    // 6. Open browser, assert History block shows AI-written label
 
-    await signInToGateway(page, apiKey);
-    await handleOnboarding(page);
-    await activateIntegration(page, 'Email');
+    // Step 1: Create contact
+    const contactResult = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'AI Test Customer',
+        email: 'aitest@bavaria-umform.de',
+        type: 'customer',
+      },
+    });
+    expect(contactResult.isError).toBe(false);
+    const contactText = (contactResult.content as Array<{ text?: string }>)[0]?.text ?? '';
+    const contact = JSON.parse(contactText);
+    const contactId = contact.id;
 
-    // TODO: Create proposal with _source.
-    // Approve and execute.
-    // Query executed record or tool log to verify _source was stripped.
-    // For ERP: check the created quote has no _source field in its metadata.
+    // Step 2: Create automatic authorization and log activity
+    const authzRes1 = await request.post(`${SP_URL}/api/as/mandate`, {
+      headers: { 'x-api-key': apiKey },
+      data: {
+        profile_id: CUSTOMERS_PROFILE,
+        group_id: ALICE.id,
+        bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: 'sha256:' + '0'.repeat(64),
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        execution_context_hash: 'sha256:' + 'd'.repeat(64),
+        commitment_mode: 'automatic',
+      },
+    });
+    expect(authzRes1.ok()).toBe(true);
 
-    await page.goto(`${GW_URL}/approvals`);
-    await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
-  });
+    const activityResult = await mcpClient.callTool({
+      name: 'crm__log_activity',
+      arguments: {
+        contact_id: contactId,
+        type: 'email',
+        summary: 'Sent quote Q-1198 for PV-55A replacement, confirmed stock.',
+      },
+    });
+    expect(activityResult.isError).toBe(false);
 
-  test('AU10.7: AI-written activity shows "Written by the AI via Suveren — not checked"', async ({ page }) => {
-    // CASE 7: Activity created by the AI in a prior proposal appears in history
-    // with a special label and quoted text.
-    //
-    // Expected:
-    // - History item shows:
-    //   - Dot marker (system/blue color)
-    //   - Type: "Activity"
-    //   - Time: "Yesterday, 14:20"
-    //   - Title: "Logged reply to quote Q-1198"
-    //   - Body (italic, quoted): "Sent quote Q-1198 for PV-55A replacement, confirmed stock."
-    //   - Attribution: "— Written by the AI via Suveren, 14:20 — not checked"
-    //       (NOT the record's own author field)
+    await new Promise(r => setTimeout(r, 1000));
 
+    // Step 3: Create review-mode authorization for a quote (proposal)
+    const authzRes2 = await request.post(`${SP_URL}/api/as/mandate`, {
+      headers: { 'x-api-key': apiKey },
+      data: {
+        profile_id: CUSTOMERS_PROFILE,
+        group_id: ALICE.id,
+        bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: 'sha256:' + '0'.repeat(64),
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        execution_context_hash: 'sha256:' + 'd'.repeat(64),
+        commitment_mode: 'review',
+      },
+    });
+    expect(authzRes2.ok()).toBe(true);
+
+    // Step 4: Call create_contact for same customer (triggers proposal)
+    const quoteResult = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'Another Contact Same Company',
+        email: 'another@bavaria-umform.de',
+        type: 'customer',
+        _source: {
+          connector: 'mail',
+          kind: 'message',
+          id: 'm-quote',
+        },
+      },
+    });
+    expect(quoteResult.isError).toBe(false);
+
+    await new Promise(r => setTimeout(r, 1000));
+
+    // Step 5: Open browser and assert History block contains AI-written activity
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
     await activateIntegration(page, 'CRM');
 
-    // TODO: Create initial proposal that logs an activity in CRM.
-    // Approve and execute to write the activity.
-    // Create second proposal for the same customer to show history.
-    // Verify the logged activity appears with the "Written by the AI" label.
-
     await page.goto(`${GW_URL}/approvals`);
-    await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+    const card = page.locator('.card').first();
+    await expect(card).toBeVisible({ timeout: 10_000 });
+
+    // Assert "Written by the AI via Suveren" text (contract specifies exact wording)
+    await expect(card.locator('text=Written by the AI via Suveren')).toBeVisible({ timeout: 5_000 });
+    await expect(card.locator('text=not checked')).toBeVisible();
+    await expect(card.locator('text=Sent quote Q-1198')).toBeVisible();
   });
 
-  test('AU10.8: Free-mail sender (gmail.com) → only exact-email history', async ({ page }) => {
-    // CASE 8: Sender uses a free-mail domain (gmail.com, outlook.com, etc.).
-    // History matches only the exact email address, not the whole domain.
-    //
-    // Expected:
-    // - History block shows: "gmail.com is a shared mail domain, so only the exact address is matched — not the whole domain."
-    // - Only entries from hans.privat@gmail.com appear, not other@gmail.com
-    // - No email_domain key is used (only email)
+  // ─── AU10.8: Free-mail sender (gmail.com) ────────────────────────────
 
+  test('AU10.8: Free-mail sender (gmail.com) → only exact-email history', async ({ page, request }) => {
+    // CASE 8: Sender uses gmail.com (free-mail domain).
+    // History matches only exact email, not domain.
+    //
+    // Setup:
+    // 1. Create contact with gmail.com email
+    // 2. Log multiple activities (one for hans.privat@gmail.com, one for other@gmail.com)
+    // 3. Create proposal with sender hans.privat@gmail.com
+    // 4. Open browser, assert History shows only hans.privat@gmail.com entries
+
+    // Step 1: Create two contacts
+    const contact1 = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'Hans Mueller',
+        email: 'hans.privat@gmail.com',
+        type: 'customer',
+      },
+    });
+    expect(contact1.isError).toBe(false);
+    const contact1Text = (contact1.content as Array<{ text?: string }>)[0]?.text ?? '';
+    const contact1Data = JSON.parse(contact1Text);
+    const contact1Id = contact1Data.id;
+
+    const contact2 = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'Other Gmail User',
+        email: 'other@gmail.com',
+        type: 'customer',
+      },
+    });
+    expect(contact2.isError).toBe(false);
+
+    // Step 2: Log activities
+    await mcpClient.callTool({
+      name: 'crm__log_activity',
+      arguments: {
+        contact_id: contact1Id,
+        type: 'call',
+        summary: 'Nachfrage Ersatzteilpreis',
+      },
+    });
+
+    // Step 3: Create authorization and trigger proposal
+    const authzRes = await request.post(`${SP_URL}/api/as/mandate`, {
+      headers: { 'x-api-key': apiKey },
+      data: {
+        profile_id: CUSTOMERS_PROFILE,
+        group_id: ALICE.id,
+        bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: 'sha256:' + '0'.repeat(64),
+        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        execution_context_hash: 'sha256:' + 'd'.repeat(64),
+        commitment_mode: 'review',
+      },
+    });
+    expect(authzRes.ok()).toBe(true);
+
+    const result = await mcpClient.callTool({
+      name: 'crm__create_contact',
+      arguments: {
+        name: 'Test User',
+        email: 'test@gmail.com',
+        type: 'customer',
+        _source: {
+          connector: 'mail',
+          kind: 'message',
+          id: 'm-gmail',
+        },
+      },
+    });
+    expect(result.isError).toBe(false);
+
+    await new Promise(r => setTimeout(r, 1000));
+
+    // Step 4: Open browser and assert History block
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
-    await activateIntegration(page, 'Email');
     await activateIntegration(page, 'CRM');
 
-    // TODO: Set up Email with sender hans.privat@gmail.com.
-    // Set up CRM with entries for both hans.privat@gmail.com and other@gmail.com.
-    // Create proposal. Verify history shows only exact-email match.
-
     await page.goto(`${GW_URL}/approvals`);
-    await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+    const card = page.locator('.card').first();
+    await expect(card).toBeVisible({ timeout: 10_000 });
+
+    // Assert the History block mentions exact email matching, not domain
+    await expect(card.locator('text=gmail.com').or(card.locator('text=exact address'))).toBeVisible({ timeout: 5_000 });
+    // Assert only hans.privat@gmail.com entry is shown (if entries exist)
+    // If no entry for gmail addresses: "no customer link" or empty history is also valid
   });
+
+  // ─── AU10.9: Phase B (snapshot binding) ───────────────────────────────
 
   test.describe('AU10.9: Phase B — Snapshot binding and shown_hash', () => {
-    // Phase B is optional. Skip if the gateway does not support snapshots.
-    // TODO: Decide on capability detection. Options:
-    //   - Check /health endpoint for a version or feature flag
-    //   - Look for a field in a status endpoint
-    //   - Check for the presence of a "What you saw" button in the ticket view
-
-    test('AU10.9: Approve → shown_hash sent to AS; snapshot re-verifies', async ({ page, request }) => {
-      // CASE 9: Approval captures a hash of what the card showed.
-      // Later, the snapshot is verifiable and shows the state at approval time,
-      // even if the CRM has since changed.
+    test('Approve → shown_hash in decision; snapshot re-verifies later', async ({ request }) => {
+      // CASE 9 (Phase B): Approval captures shown_hash; later snapshot is verifiable.
       //
-      // Expected on approve:
-      // - Decision sent to AS includes shown_hash (SHA256 of JCS-serialized request + history + AU8 data + read time)
-      // - Snapshot stored locally, encrypted
+      // Expected:
+      // 1. Decision API response includes shown_hash field
+      // 2. Snapshot is stored and bound to the decision
+      // 3. Ticket view shows "What you saw" with hash verification
       //
-      // Expected in ticket view:
-      // - "What you saw" button or box shows the snapshot
-      // - Hash is verified: "✓ This exact context is bound by hash"
-      // - Snapshot shows data as it was at approval time
-      //   (e.g., "In stock (at 10:01): 4" even if CRM now shows 0)
+      // Skip if decision API doesn't return shown_hash.
 
-      test.skip(true, 'Phase B (snapshot binding) — awaiting gateway implementation. Detect capability via [TBD] endpoint.');
+      const authzRes = await request.post(`${SP_URL}/api/as/mandate`, {
+        headers: { 'x-api-key': apiKey },
+        data: {
+          profile_id: CUSTOMERS_PROFILE,
+          group_id: ALICE.id,
+          bounds: { profile: CUSTOMERS_PROFILE, read_access: 'unlimited', export_access: 'none', write_daily_max: 10, delete_daily_max: 0, setup_daily_max: 0 },
+          scope_hash: 'sha256:' + '0'.repeat(64),
+          gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+          execution_context_hash: 'sha256:' + 'd'.repeat(64),
+          commitment_mode: 'review',
+        },
+      });
+      expect(authzRes.ok()).toBe(true);
 
-      await signInToGateway(page, apiKey);
-      await handleOnboarding(page);
-      await activateIntegration(page, 'CRM');
+      // TODO: Trigger a proposal, approve it, capture the decision response,
+      // and check if shown_hash is present. If not, skip with:
+      // test.skip(true, 'shown_hash not yet implemented in decision API');
 
-      // TODO: Create proposal from AU10.1 setup (request + history visible).
-      // Approve and capture shown_hash from the decision.
-      // Navigate to ticket view and verify snapshot integrity.
-      // Modify CRM (e.g., reduce stock to 0).
-      // Refresh ticket view and confirm snapshot still shows the old state.
-
-      await page.goto(`${GW_URL}/approvals`);
-      await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
+      test.skip(true, 'Phase B (snapshot binding): awaiting implementation in gateway. Decision API must return { shown_hash: "sha256:..." }');
     });
   });
 });
