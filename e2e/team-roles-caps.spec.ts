@@ -92,13 +92,14 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { GatewayClient } from '../src/helpers/gateway-client.js';
-import { computeScopeHash, hashGateContent } from '../src/helpers/crypto.js';
+import { computeScopeHash, computeBoundsHash, hashGateContent } from '../src/helpers/crypto.js';
+import { DatabaseSync } from 'node:sqlite';
 import {
   test, expect,
   SP_URL, GW_URL, GW_MCP_URL, INTERNAL_SECRET,
   latestProfileId,
   signInToGateway, handleOnboarding, activateIntegration,
-  spApiAttest,
+  spApiAttest, gatewayDataDir,
 } from './fixtures';
 import type { APIRequestContext } from '@playwright/test';
 
@@ -420,91 +421,98 @@ test.describe('Team roles, caps and read limits — gateway (#119)', () => {
   // mandate/mode setup still runs (proving the plumbing works) but the one
   // assertion that needs mailbox content skips individually, loudly.
   test.describe.serial('TR7 — team read ceiling: min(local, signed) in team mode, local wins in personal mode', () => {
-    const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID ?? '';
-    const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET ?? '';
-    const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN ?? '';
-    const HAS_GMAIL = !!(GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET && GMAIL_REFRESH_TOKEN);
-    const OLD_MESSAGE_ID = process.env.GMAIL_OLD_MESSAGE_ID ?? '';
-
-    test.skip(!HAS_GMAIL, 'TR7 needs a real Gmail connector — set GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET/GMAIL_REFRESH_TOKEN to run it. Self-skips in CI by design (README "Credential-gated suites").');
-
+    // Our own email connector (simulation), not Gmail: it runs in CI. Its
+    // get_message is age-checked per item (received_at) since gateway #116.
     const EMAIL_ID = latestProfileId('email');
+    const EMAIL_KEY_ORDER = ['profile', 'read_access', 'recipient_max', 'send_daily_max', 'read_max_age_days', 'setup_daily_max'];
     const gw = new GatewayClient(GW_MCP_URL, INTERNAL_SECRET);
 
-    async function signEmailMandate(request: APIRequestContext, user: AsUser, forGroupId: string): Promise<void> {
+    async function emailMandate(request: APIRequestContext, user: AsUser, forGroupId: string): Promise<void> {
       const sessionRes = await request.post(`${SP_URL}/api/auth/session`, { headers: { 'x-api-key': user.apiKey } });
       const { user: sessionUser } = await sessionRes.json() as { user: { did: string } };
+      const intent = 'TR7: read the shared inbox, at most 30 days back.';
+      const bounds = { profile: EMAIL_ID, read_access: 'unlimited', recipient_max: 1, send_daily_max: 0, read_max_age_days: 30, setup_daily_max: 2 };
+      const boundsHash = computeBoundsHash(bounds, EMAIL_KEY_ORDER);
+      const scopeHash = computeScopeHash({}, []);
       const mandate = await spApiAttest(request, user.apiKey, {
-        profile_id: EMAIL_ID,
-        group_id: forGroupId,
-        domain: user.id,
-        did: sessionUser.did,
-        bounds: { profile: EMAIL_ID, read_access: 'unlimited', recipient_max: 5, send_daily_max: 10, read_max_age_days: 30, setup_daily_max: 0 },
-        scope_hash: 'sha256:' + '0'.repeat(64),
-        gate_content_hashes: { intent: 'sha256:' + 'a'.repeat(64) },
+        profile_id: EMAIL_ID, group_id: forGroupId, domain: user.id, did: sessionUser.did,
+        bounds, bounds_hash: boundsHash, scope_hash: scopeHash,
+        gate_content_hashes: hashGateContent({ intent }),
         execution_context_hash: 'sha256:' + 'd'.repeat(64),
         commitment_mode: 'automatic',
       });
       expect(mandate.authorization_id).toBeTruthy();
+      await gw.pushGateContent({ authorizationId: mandate.authorization_id as string, boundsHash, contextHash: scopeHash, context: {} }, EMAIL_ID, { intent });
+    }
+
+    /** Seeds one message through the connector and backdates it 40 days in
+     *  the connector's own database (the simulation ignores package dates). */
+    async function oldMessageId(client: Client): Promise<string> {
+      // The connector keeps its data between tests on the shared gateway.
+      await client.callTool({ name: 'mail__clear_simulation', arguments: {} });
+      const load = await client.callTool({ name: 'mail__load_simulation', arguments: { package: {
+        name: 'TR7 Co', currency: 'EUR',
+        customers: [{ id: 'cust-1', name: 'Old Customer GmbH', email: 'old@old-customer.example', credit_limit: 1000 }],
+        products: [{ id: 'item-1', sku: 'X-1', name: 'Item', list_price: 10, stock: 1 }],
+        cases: [{ id: 'c1', request: { from: { name: 'Old Customer', email: 'old@old-customer.example' }, subject: 'TR7 old message', body: 'Hello.' }, reply: { subject: 'Re', body: 'Ok' } }],
+      } } });
+      expect(load.isError, JSON.stringify(load.content)).toBeFalsy();
+      const listed = await client.callTool({ name: 'mail__list_messages', arguments: { folder: 'inbox' } });
+      const inbox = JSON.parse((listed.content as Array<{ text: string }>)[0].text) as Array<{ id: string; subject: string }>;
+      const id = inbox.find(m => m.subject === 'TR7 old message')!.id;
+      const db = new DatabaseSync(join(gatewayDataDir(), 'email.db'));
+      db.prepare('UPDATE messages SET received_at = ? WHERE id = ?').run(new Date(Date.now() - 40 * 86_400_000).toISOString(), id);
+      db.close();
+      return id;
     }
 
     test('TEAM mode: a local window far wider than the signed 30-day ceiling does not win — an old message is refused', async ({ request, page }) => {
-      test.skip(!OLD_MESSAGE_ID, 'Needs GMAIL_OLD_MESSAGE_ID — a real message in the test mailbox older than 30 days.');
-
-      const { tom, groupId } = await setUpTeam(request);
-
-      await gw.pushServiceCredentials('gmail', { clientId: GMAIL_CLIENT_ID, clientSecret: GMAIL_CLIENT_SECRET, refreshToken: GMAIL_REFRESH_TOKEN });
+      const { tom, andreas, lisa, groupId } = await setUpTeam(request);
+      // The team enables the email profile for Tom, with a hard 30-day read cap.
+      await putProfileConfig(request, andreas, groupId, EMAIL_ID, {
+        grantors: [tom.id], approvers: [lisa.id, andreas.id],
+        caps: { read_max_age_days: { value: 30, kind: 'hard' } },
+      });
       await signInToGateway(page, tom.apiKey);
       await handleOnboarding(page);
-      // Local window wide open (365d) — if TR7 did nothing, this alone would
-      // let Tom read anything newer than a year.
-      await page.request.put(`${GW_URL}/integrations/gmail/read-policy`, { data: { readAgeDays: 365 } });
-      await activateIntegration(page, 'Gmail');
+      await activateIntegration(page, 'Email (simulation)');
+      await emailMandate(request, tom, groupId);
+      // Local window wide open (365 days): without TR7 it alone would allow the read.
+      expect((await gw.setReadPolicy('mail', 365)).ok).toBe(true);
 
-      // A signed email mandate under TOM'S team workspace (WS0 — his
-      // account IS the team by now) with a 30-day read ceiling.
-      await signEmailMandate(request, tom, groupId);
-
-      const transport = new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`));
       const client = new Client({ name: 'tr7-tom-agent', version: '0.1.0' }, { capabilities: {} });
-      await client.connect(transport);
-
-      // TR7 requires min(local, signed) in TEAM mode — the signed 30-day
-      // ceiling must still refuse a message older than it, even though the
-      // local setting alone (365d) would have allowed it.
-      const oldRes = await client.callTool({ name: 'gmail__get_message', arguments: { id: OLD_MESSAGE_ID } });
-      expect(oldRes.isError).toBe(true);
-      const text = (oldRes.content as Array<{ text: string }>)[0]?.text ?? '';
-      expect(text).toMatch(/read_max_age_days/);
-      await client.close();
+      await client.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
+      try {
+        const id = await oldMessageId(client);
+        const res = await client.callTool({ name: 'mail__get_message', arguments: { id } });
+        expect(res.isError, 'the signed 30-day team ceiling must win over the local 365 days').toBe(true);
+        expect((res.content as Array<{ text: string }>)[0]?.text ?? '').toMatch(/30-day/);
+      } finally {
+        await client.close();
+      }
     });
 
     test('PERSONAL mode: a different, never-teamed user is governed by the local window alone, even beyond the signed value', async ({ request, page }) => {
-      test.skip(!OLD_MESSAGE_ID, 'Needs GMAIL_OLD_MESSAGE_ID — a real message in the test mailbox older than 30 days.');
-
       const solo = await registerAsUser(request, 'Solo Reader');
-      await gw.pushServiceCredentials('gmail', { clientId: GMAIL_CLIENT_ID, clientSecret: GMAIL_CLIENT_SECRET, refreshToken: GMAIL_REFRESH_TOKEN });
       await signInToGateway(page, solo.apiKey);
       await handleOnboarding(page);
-      await page.request.put(`${GW_URL}/integrations/gmail/read-policy`, { data: { readAgeDays: 365 } });
-      await activateIntegration(page, 'Gmail');
-
-      const personalGroupRes = await request.get(`${SP_URL}/api/groups`, { headers: { 'x-api-key': solo.apiKey } });
-      const { groups } = await personalGroupRes.json() as { groups: Array<{ id: string; allowLazyEnable?: boolean; isPersonal?: boolean }> };
+      await activateIntegration(page, 'Email (simulation)');
+      const groupsRes = await request.get(`${SP_URL}/api/groups`, { headers: { 'x-api-key': solo.apiKey } });
+      const { groups } = await groupsRes.json() as { groups: Array<{ id: string; allowLazyEnable?: boolean; isPersonal?: boolean }> };
       const personal = groups.find(g => g.allowLazyEnable || g.isPersonal) ?? groups[0];
-      await signEmailMandate(request, solo, personal.id);
+      await emailMandate(request, solo, personal.id);
+      expect((await gw.setReadPolicy('mail', 365)).ok).toBe(true);
 
-      const transport = new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`));
       const client = new Client({ name: 'tr7-solo-agent', version: '0.1.0' }, { capabilities: {} });
-      await client.connect(transport);
-
-      // Rule 8 (unchanged by TR7): in Personal mode the LOCAL setting wins
-      // outright — the SAME message that was refused in team mode (older
-      // than the signed 30-day value) must now proceed, because the local
-      // window (365d) governs instead.
-      const oldRes = await client.callTool({ name: 'gmail__get_message', arguments: { id: OLD_MESSAGE_ID } });
-      expect(oldRes.isError).not.toBe(true);
-      await client.close();
+      await client.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
+      try {
+        const id = await oldMessageId(client);
+        // Rule 8 (unchanged by TR7): personally, the local window governs.
+        const res = await client.callTool({ name: 'mail__get_message', arguments: { id } });
+        expect(res.isError, JSON.stringify(res.content)).not.toBe(true);
+      } finally {
+        await client.close();
+      }
     });
   });
 
