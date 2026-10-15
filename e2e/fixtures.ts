@@ -400,7 +400,7 @@ export async function signInToGateway(page: Page, apiKey: string): Promise<void>
   // Bounded retry (at most 2 extra attempts): a real rate-limited user would
   // also just wait and retry, but an unbounded retry loop would turn an
   // actual product regression into another silent hang instead of a failure.
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     // (Single submit per iteration — a re-click would queue a late navigate('/').)
     await Promise.race([
       leftLogin(45_000).catch(() => {}),
@@ -414,11 +414,18 @@ export async function signInToGateway(page: Page, apiKey: string): Promise<void>
       // suite's default per-test budget otherwise.
       test.info().setTimeout(test.info().timeout + 90_000);
       await page.waitForTimeout(61_000);
+      // Start from a fresh login page: the old "Too many login attempts"
+      // message would otherwise still be visible and be read as a new 429.
+      await page.goto(`${GW_URL}/login`, { waitUntil: 'networkidle' });
+      await page.locator('input[type="password"]').fill(apiKey);
       await signInBtn.click();
       continue;
     }
     if (await wipeBtn.isVisible().catch(() => false)) {
+      // Confirming the wipe signs in again — that second attempt can itself
+      // hit the rate limiter, so keep watching instead of leaving the loop.
       await wipeBtn.click();
+      continue;
     }
     break;
   }
