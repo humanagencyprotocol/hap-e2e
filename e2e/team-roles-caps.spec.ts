@@ -290,9 +290,10 @@ test.describe('Team roles, caps and read limits — gateway (#119)', () => {
       // CURRENTLY signed-in session.
       await signInToGateway(page, tom.apiKey);
       await handleOnboarding(page);
-      // CRM is `personalDefault: true` — it auto-registers on sign-in rather
-      // than needing an "Activate" click; poll (not the UI) for its tools to
-      // appear instead of racing activateIntegration's own UI-state check.
+      // CRM is `personalDefault: true`, but after other specs switched
+      // accounts on the shared gateway it may not be installed for Tom —
+      // activate it explicitly (a no-op when it is already running).
+      await activateIntegration(page, 'CRM');
       const transport = new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`));
       mcpClient = new Client({ name: 'tr5-tom-agent', version: '0.1.0' }, { capabilities: {} });
       await mcpClient.connect(transport);
