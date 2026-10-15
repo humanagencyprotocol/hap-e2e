@@ -401,6 +401,66 @@ test.describe('Team roles, caps and read limits — gateway (#119)', () => {
       expect(text).toContain('tr5-b@example.com');
       await mcpClient.close();
     });
+
+    test('Tom withdraws his own over-the-limit action: it disappears and can never run', async ({ page, request }) => {
+      // Today Tom has used his mandate's own 2 writes; a delete is over the
+      // team's hard cap… so use a fresh mandate on a fresh team instead.
+      const team2 = await setUpTeam(request);
+      await putProfileConfig(request, team2.andreas, team2.groupId, CUSTOMERS_ID, {
+        grantors: [team2.tom.id], approvers: [team2.lisa.id, team2.andreas.id],
+        caps: { write_daily_max: { value: 0, kind: 'approval' }, read_access: { value: 'none', kind: 'hard' } },
+      });
+      await signInToGateway(page, team2.tom.apiKey);
+      await handleOnboarding(page);
+      await activateIntegration(page, 'CRM');
+      const scopeContext = { contact_type: 'customer' };
+      const contextHash = computeScopeHash(scopeContext, ['contact_type']);
+      const intent = 'Withdraw test: every write needs a team approval.';
+      const sessionRes = await request.post(`${SP_URL}/api/auth/session`, { headers: { 'x-api-key': team2.tom.apiKey } });
+      const { user } = await sessionRes.json() as { user: { did: string } };
+      const mandate = await spApiAttest(request, team2.tom.apiKey, {
+        profile_id: CUSTOMERS_ID, group_id: team2.groupId, domain: team2.tom.id, did: user.did,
+        bounds: { profile: CUSTOMERS_ID, read_access: 'none', export_access: 'none', write_daily_max: 3, delete_daily_max: 0, setup_daily_max: 0 },
+        scope_hash: contextHash, gate_content_hashes: hashGateContent({ intent }),
+        execution_context_hash: 'sha256:' + 'd'.repeat(64), commitment_mode: 'automatic',
+      });
+      const gw = new GatewayClient(GW_MCP_URL, INTERNAL_SECRET);
+      await gw.pushGateContent({ authorizationId: mandate.authorization_id as string, contextHash, context: scopeContext }, CUSTOMERS_ID, { intent });
+
+      const client = new Client({ name: 'tr5-withdraw-agent', version: '0.1.0' }, { capabilities: {} });
+      await client.connect(new SSEClientTransport(new URL(`${GW_MCP_URL}/sse`)));
+      let id = '';
+      try {
+        await expect(async () => {
+          const { tools } = await client.listTools();
+          expect(tools.some(t => t.name === 'crm__create_contact')).toBe(true);
+        }).toPass({ timeout: 30_000 });
+        const res = await client.callTool({ name: 'crm__create_contact', arguments: { name: 'TR5 Withdrawn', email: 'tr5-w@example.com', type: 'customer' } });
+        const t = (res.content as Array<{ text: string }>)[0].text;
+        expect(t).toMatch(/Approval required/i);
+        id = t.match(/Proposal ID:\s*([^\s.]+)/)![1];
+      } finally {
+        await client.close();
+      }
+
+      // Tom's own card, from the AS's creator=me list, offers Withdraw.
+      await page.click('.sidebar-item:has-text("Pending Approvals")');
+      await page.waitForURL('**/approvals');
+      await page.click('.nav-tab:has-text("Awaiting others")');
+      const card = page.locator('.id-card', { hasText: /Needs 1 approval from/ }).first();
+      await expect(card).toBeVisible({ timeout: 15_000 });
+      await expect(card.getByTestId('cant-approve-own-action')).toBeVisible();
+      await card.locator('button:has-text("Withdraw")').click();
+      await expect(card).toHaveCount(0, { timeout: 15_000 });
+
+      // On the AS: withdrawn by Tom, never approvable afterwards.
+      const got = await request.get(`${SP_URL}/api/proposals/${encodeURIComponent(id)}`, { headers: { 'x-api-key': team2.tom.apiKey } });
+      const proposal = (await got.json()).proposal as { status: string; withdrawnBy?: { userId: string } };
+      expect(proposal.status).toBe('rejected');
+      expect(proposal.withdrawnBy?.userId).toBe(team2.tom.id);
+      const approve = await request.post(`${SP_URL}/api/proposals/${encodeURIComponent(id)}/approve`, { headers: { 'x-api-key': team2.lisa.apiKey } });
+      expect(approve.ok()).toBe(false);
+    });
   });
 
   // ── Team read ceiling (TR7) — credential-gated (real Gmail connector) ─────
