@@ -67,6 +67,10 @@ const salesBounds = (o: Record<string, unknown> = {}) => ({
 });
 
 const HISTORY_LABEL = 'Read by the gateway — same customer, not matched to this request';
+// Gateway 0.31.1: `_source` (stripped before execution) is never shown as a
+// sent value; the manifest's request link reads "Replying to".
+const GW_ARGS_TSX = join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'ui', 'src', 'components', 'ProposalArgs.tsx');
+const HAS_REQUEST_REF = existsSync(GW_ARGS_TSX) && readFileSync(GW_ARGS_TSX, 'utf8').includes('requestRefArg');
 
 // Runs only against a gateway that has AU10 (CI runs the journeys against the
 // gateway's main branch, which may not have it yet) — same gate as AU8.
@@ -345,6 +349,12 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await expect(req).toContainText('RF 55 Stillstand – Seriennummer 55-2291');
     await expect(req).toContainText('unsere Anlage RF 55 steht');
     await expect(req).toContainText('from J. Kraus, not checked');
+    if (HAS_REQUEST_REF) {
+      // The AI's _source link is never sent — so it is never among the
+      // values shown as what will be created (the Request box shows it).
+      const sealedText = await card.locator('[data-testid="approval-preview"], [data-testid="bound-values-open"]').allInnerTexts();
+      expect(sealedText.join('\n')).not.toMatch(/"connector"|\bSource\b/);
+    }
 
     await expect(hist).toContainText(HISTORY_LABEL, { timeout: 45_000 });
     await expect(hist).toContainText('bavaria-umform.de');
@@ -445,6 +455,11 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await expect(req).toContainText('Linked by the AI', { timeout: 45_000 });
     await expect(req).toContainText('RF 55 Stillstand – Seriennummer 55-2291');
     await expect(card.getByTestId('au10-history')).toContainText('RF 55 steht, Ventil dringend', { timeout: 45_000 });
+    if (HAS_REQUEST_REF) {
+      // in_reply_to IS sent, but reads as "Replying to" — never a raw id.
+      await expect(card.getByTestId('request-ref')).toHaveText('the message shown under Request');
+      await expect(card.getByTestId('bound-values-open')).toContainText('Replying to');
+    }
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'f-implicit-reply.png') });
   });
 
