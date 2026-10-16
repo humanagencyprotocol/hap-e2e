@@ -906,6 +906,23 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
 
   // ── 5. the AI writes the report ───────────────────────────────────────────
 
+  // Gateway 0.31.2: a report whose every block is outside the two tags would
+  // show nothing — refused before any ticket, nothing stored (simulation
+  // finding 2026-10-16). Older gateways stored it.
+  const REFUSES_EMPTY_REPORT = (() => {
+    const f = join(GW_DIR, 'apps', 'mcp-server', 'src', 'lib', 'builtins', 'report.ts');
+    return existsSync(f) && readFileSync(f, 'utf8').includes('nothing in this report would be shown');
+  })();
+  it.runIf(REFUSES_EMPTY_REPORT)('5.0 a report with only loose content (nothing would be shown) is refused — no ticket, nothing stored', async () => {
+    const before = (await asApi('GET', '/api/tickets/mine')).body.tickets?.length ?? 0;
+    const w = await call('report__write_report', { html: '<h1>Wochenbericht</h1><p>a</p><div>b</div>' });
+    expect(w.denied, w.text).toBe(true);
+    expect(w.text).toMatch(/nothing in this report would be shown/);
+    expect(w.text).toMatch(/<sv-ai>/);
+    const after = (await asApi('GET', '/api/tickets/mine')).body.tickets?.length ?? 0;
+    expect(after).toBe(before);
+  }, 30_000);
+
   it('5. the AI writes a two-tag report: junk, sv-* and styles inside sv-ai are dropped and reported; glossary checked', async () => {
     const ticketTs = fmtTs(t.c1Quote.timestamp);
     const html = `<!doctype html><html><head><title>R7</title><style>.sv-el{display:none!important}</style></head><body>
@@ -1520,6 +1537,41 @@ loose text
   }, 60_000);
 
   // ── 9. the gateway UI ─────────────────────────────────────────────────────
+
+  // Reports mockup (gateway 0.31.2): a new report is NEW — the nav label and
+  // the dashboard line — until the Reports page is opened. Gated on the
+  // gateway having it; older gateways have neither.
+  const HAS_REPORT_NEWS = existsSync(join(GW_DIR, 'apps', 'ui', 'src', 'components', 'ReportLine.tsx'));
+  it.runIf(HAS_REPORT_NEWS)('9.0 a new report shows "New" in the nav and one dashboard line, both gone once it is opened', async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${CP_URL}/login`, { waitUntil: 'networkidle' });
+      await page.locator('input[type="password"]').fill(user.apiKey);
+      await page.locator('button:has-text("Sign In")').click();
+      await page.waitForURL((u) => !u.toString().includes('/login'), { timeout: 45_000 });
+      await page.locator('.sidebar a[href="/"]').first().dispatchEvent('click');
+      await page.getByTestId('report-line').waitFor({ timeout: 20_000 });
+      const line = await page.getByTestId('report-line').innerText();
+      expect(line).toMatch(/NEW/i);
+      expect(line).toMatch(/value/);
+      expect(line).toMatch(/Covers .+ → /);
+      expect(await page.getByTestId('nav-new-report').count()).toBe(1);
+      // Opening the report marks it seen — label and line are gone.
+      await page.getByTestId('report-line').locator('a', { hasText: 'Open report' }).click();
+      await page.waitForURL('**/reports');
+      await page.locator('iframe.reports-iframe').waitFor({ timeout: 20_000 });
+      // The exact period, date-time to date-time, as the gateway scoped it.
+      const period = await page.getByTestId('report-period').innerText();
+      expect(period).toMatch(/^Covers .+ → .+ \(\d+ days?\)/);
+      expect(await page.getByTestId('report-period').getAttribute('title')).toMatch(/2 minutes/);
+      await page.getByTestId('nav-new-report').waitFor({ state: 'detached', timeout: 15_000 });
+      await page.locator('.sidebar a[href="/"]').first().dispatchEvent('click');
+      await page.getByTestId('core-cols').waitFor({ timeout: 20_000 });
+      expect(await page.getByTestId('report-line').count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
 
   it('9. gateway UI: AI CSS cannot cover a box; Checked values → details without a reload; the public-check popup (intercepted); the switch; phone width', async () => {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });

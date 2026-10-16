@@ -73,6 +73,9 @@ async function dashboard() {
     await page.getByText('Get started', { exact: true })
       .or(page.getByText('Needs your attention', { exact: true }))
       .or(page.getByText('Setup — needs attention', { exact: true }))
+      // Core-objects dashboards (0.31.2+) show setup problems only when there
+      // are any — the three columns are always there.
+      .or(page.getByTestId('core-cols'))
       .first().waitFor({ timeout: 20_000 });
   } catch (err) {
     throw new Error(`dashboard did not settle at ${page.url()}:\n${(await page.locator('body').innerText()).slice(0, 1500)}\n${err}`);
@@ -217,7 +220,7 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
     await agent.close();
     expect(r.isError, JSON.stringify(r.content)).not.toBe(true);
     await dashboard();
-    await page.getByText(/needs your attention|Setup — needs attention/i).first().waitFor({ timeout: 20_000 });
+    await page.getByText(/needs your attention|Setup — needs attention/i).or(page.getByTestId('core-cols')).first().waitFor({ timeout: 20_000 });
     await shot('4-card-gone');
     // The card's own title (exact match — "Getting started" elsewhere is not the card).
     expect(await page.getByText('Get started', { exact: true }).count()).toBe(0);
