@@ -906,6 +906,23 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
 
   // ── 5. the AI writes the report ───────────────────────────────────────────
 
+  // Gateway 0.31.2: a report whose every block is outside the two tags would
+  // show nothing — refused before any ticket, nothing stored (simulation
+  // finding 2026-10-16). Older gateways stored it.
+  const REFUSES_EMPTY_REPORT = (() => {
+    const f = join(GW_DIR, 'apps', 'mcp-server', 'src', 'lib', 'builtins', 'report.ts');
+    return existsSync(f) && readFileSync(f, 'utf8').includes('nothing in this report would be shown');
+  })();
+  it.runIf(REFUSES_EMPTY_REPORT)('5.0 a report with only loose content (nothing would be shown) is refused — no ticket, nothing stored', async () => {
+    const before = (await asApi('GET', '/api/tickets/mine')).body.tickets?.length ?? 0;
+    const w = await call('report__write_report', { html: '<h1>Wochenbericht</h1><p>a</p><div>b</div>' });
+    expect(w.denied, w.text).toBe(true);
+    expect(w.text).toMatch(/nothing in this report would be shown/);
+    expect(w.text).toMatch(/<sv-ai>/);
+    const after = (await asApi('GET', '/api/tickets/mine')).body.tickets?.length ?? 0;
+    expect(after).toBe(before);
+  }, 30_000);
+
   it('5. the AI writes a two-tag report: junk, sv-* and styles inside sv-ai are dropped and reported; glossary checked', async () => {
     const ticketTs = fmtTs(t.c1Quote.timestamp);
     const html = `<!doctype html><html><head><title>R7</title><style>.sv-el{display:none!important}</style></head><body>
