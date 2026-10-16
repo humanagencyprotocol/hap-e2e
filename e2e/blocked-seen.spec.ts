@@ -106,8 +106,11 @@ test.describe.serial('Blocked page: seen badge, rail, date and mandate title (re
     // reload, well before the 5-minute fallback poll.
     await page.click('.sidebar-item:has-text("Dashboard")');
     await expect(badge(page)).toBeVisible({ timeout: 20_000 });
+    // The badge can appear on the first block's event, before the second
+    // arrives — wait for the count, don't read it the moment it shows.
+    await expect.poll(async () => Number(await badge(page).textContent()), { timeout: 20_000 })
+      .toBeGreaterThanOrEqual(2);
     const before = Number(await badge(page).textContent());
-    expect(before).toBeGreaterThanOrEqual(2);
 
     await openBlocked(page);
     const item = page.locator('.blocked-item', { hasText: 'create_contact' }).first();
