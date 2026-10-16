@@ -709,8 +709,21 @@ describe.skipIf(!available)('RR7: regular reporting (real AS + gateway + records
 
   // ── 3. the reporting mandate ──────────────────────────────────────────────
 
-  it('3a. before any reporting mandate: report__* tools are not listed and refused', async () => {
-    expect((await toolNames()).filter((n) => n.startsWith('report__'))).toEqual([]);
+  // Since gateway 0.31.1 the `report` built-in declares `alwaysListed` (an AI
+  // client that ignores tools/list_changed must still see report__* when the
+  // mandate is signed mid-chat): listed before any reporting mandate — and
+  // still refused. Older gateways keep them unlisted.
+  const REPORT_ALWAYS_LISTED = (() => {
+    const f = join(GW_DIR, 'apps', 'mcp-server', 'src', 'lib', 'builtin-integration.ts');
+    return existsSync(f) && readFileSync(f, 'utf8').includes('alwaysListed');
+  })();
+  it('3a. before any reporting mandate: report__* tools are refused (listed since 0.31.1)', async () => {
+    const listed = (await toolNames()).filter((n) => n.startsWith('report__'));
+    if (REPORT_ALWAYS_LISTED) {
+      expect(listed.sort()).toEqual(['report__get_records', 'report__get_ticket', 'report__list_cases', 'report__list_tickets', 'report__write_report']);
+    } else {
+      expect(listed).toEqual([]);
+    }
     expect((await call('report__list_tickets', {})).denied).toBe(true);
     expect((await call('report__write_report', { html: '<sv-ai><p>x</p></sv-ai>' })).denied).toBe(true);
   }, 30_000);
