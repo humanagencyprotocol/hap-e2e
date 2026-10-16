@@ -116,8 +116,11 @@ test.describe.serial('Blocked page: seen badge, rail, date and mandate title (re
     const item = page.locator('.blocked-item', { hasText: 'create_contact' }).first();
     await expect(item).toBeVisible({ timeout: 30_000 });
     // Same card shape as Mandates: the profile rail on the left.
-    await expect(item.locator('.id-rail')).toBeVisible();
-    await expect(item.locator('.id-rail')).toContainText(/customers/i);
+    // The profile identity: the rail on older gateways, the shared top line
+    // on core-objects gateways (UI spec §12.2).
+    const identity = item.locator('.id-rail, .obj-line').first();
+    await expect(identity).toBeVisible();
+    await expect(identity).toContainText(/customers/i);
     // Date + time, not only the time.
     await expect(item).toContainText(/(Today|Yesterday|[A-Z][a-z]{2} \d{1,2}) · \d{1,2}:\d{2}/);
     // The mandate by its title.

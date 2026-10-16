@@ -40,6 +40,7 @@ import {
   SP_URL, GW_MCP_URL, INTERNAL_SECRET,
   registerOnSP, signInToGateway, handleOnboarding, activateIntegration,
   spApiAttest, latestProfileId, gatewayDataDir,
+  openApprovalCard,
 } from './fixtures';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
@@ -134,12 +135,10 @@ async function call(c: Client, name: string, args: Record<string, unknown>): Pro
 
 async function openCard(page: Page, hasText: string): Promise<Locator> {
   await page.click('.sidebar-item:has-text("Dashboard")');
-  await page.click('.sidebar-item:has-text("Pending Approvals")');
+  await page.click('.sidebar-item:has-text("Approvals")');
   await page.waitForURL('**/approvals');
   await page.click('.nav-tab:has-text("Awaiting me")');
-  const card = page.locator('.card', { hasText }).first();
-  await expect(card).toBeVisible({ timeout: 30_000 });
-  return card;
+  return openApprovalCard(page, hasText);
 }
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
@@ -317,6 +316,25 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     });
   });
 
+  // UI3 (UI spec §6.1/§12.2): every approval row reads as one sentence the
+  // gateway builds from the connector manifest's template and the sealed
+  // values — here with three real connectors (CRM, mail, ERP).
+  test('S: each waiting approval reads as one sentence from its manifest template', async () => {
+    test.skip(!existsSync(join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'ui', 'src', 'lib', 'approval-summary.ts')),
+      'gateway without manifest summaries (UI3)');
+    test.setTimeout(90_000);
+    await page.click('.sidebar-item:has-text("Dashboard")');
+    await page.click('.sidebar-item:has-text("Approvals")');
+    await page.waitForURL('**/approvals');
+    const sums = page.getByTestId('approval-row-summary');
+    await expect(sums.filter({ hasText: 'Create contact J. Kraus' })).toHaveCount(1, { timeout: 30_000 });
+    await expect(sums.filter({ hasText: 'Create contact No Source' })).toHaveCount(1);
+    await expect(sums.filter({ hasText: 'Email to j.kraus@bavaria-umform.de: Re: RF 55 Stillstand' })).toHaveCount(1);
+    await expect(sums.filter({ hasText: /^Send quote of €385(\.00)? net — 0% discount$/ })).toHaveCount(1);
+    // Never the bare action name when the template could be filled.
+    await expect(sums.filter({ hasText: /^(Create contact|Send message|Send quote)$/ })).toHaveCount(0);
+  });
+
   test('A: request linked by the AI, and the latest entries for the same email domain', async () => {
     test.setTimeout(120_000);
     const card = await openCard(page, 'j.kraus@bavaria-umform.de');
@@ -354,7 +372,12 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await expect(card.getByTestId('au10-request')).not.toContainText('Linked by the AI');
     await expect(card.getByTestId('au10-history')).toContainText(HISTORY_LABEL);
 
-    const shortId = ((await card.textContent()) ?? '').match(/Proposal:\s*([0-9a-f]{6,})/)?.[1];
+    // Core-objects gateways mark the row with the id (the card no longer
+    // prints it); older ones print "Proposal: <id>" in the card.
+    const openRow = page.locator('[data-testid="approval-row"].is-open');
+    const shortId = (await openRow.count())
+      ? await openRow.getAttribute('data-proposal-id')
+      : ((await card.textContent()) ?? '').match(/Proposal:\s*([0-9a-f]{6,})/)?.[1];
     expect(shortId, 'card shows its proposal id').toBeTruthy();
 
     await card.locator('button:has-text("Approve")').click();
@@ -380,6 +403,11 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     // The ticket view re-checks the local copy against that fingerprint.
     await page.click('.sidebar-item:has-text("Tickets")');
     await page.waitForURL('**/tickets');
+    // Gateways with the core-objects Tickets page (UI spec §12.3) list each
+    // ticket as a row that opens in place: open the approved one.
+    const approvedRow = page.locator('.ticket-obj-card', { hasText: 'approved' }).first();
+    await expect(approvedRow.or(page.getByTestId('au10-shown').first()).first()).toBeVisible({ timeout: 30_000 });
+    if (await approvedRow.isVisible()) await approvedRow.locator('.ticket-obj-head').click();
     const what = page.getByTestId('au10-shown').first();
     await expect(what).toBeVisible({ timeout: 30_000 });
     await expect(what).toHaveAttribute('data-shown-status', 'verified');
@@ -393,8 +421,7 @@ test.describe.serial('AU10: request and customer history on the approval card (r
     await expect(unknown.getByTestId('au10-request')).toContainText('Request: link not readable', { timeout: 45_000 });
     await expect(unknown.locator('button:has-text("Approve")')).toBeEnabled();
 
-    const missing = page.locator('.card', { hasText: 'missing@au10-bad.de' }).first();
-    await expect(missing).toBeVisible({ timeout: 30_000 });
+    const missing = await openApprovalCard(page, 'missing@au10-bad.de');
     await expect(missing.getByTestId('au10-request')).toContainText('Request: this message no longer exists.', { timeout: 45_000 });
     await expect(missing.locator('button:has-text("Approve")')).toBeEnabled();
   });

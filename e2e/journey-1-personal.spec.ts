@@ -40,7 +40,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     await expect(page.locator('.sidebar')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Integrations")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Settings")')).toBeVisible();
-    await expect(page.locator('.sidebar-item:has-text("Pending Approvals")')).toBeVisible();
+    await expect(page.locator('.sidebar-item:has-text("Approvals")')).toBeVisible();
     await expect(page.locator('.sidebar-item:has-text("Mandates")')).toBeVisible();
 
     // Navigate to Integrations via sidebar — assert the route + page title
@@ -55,7 +55,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
     // Navigate to Pending Approvals (proposals — empty)
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
+    await page.click('.sidebar-item:has-text("Approvals")');
     await page.waitForURL('**/approvals');
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
@@ -159,7 +159,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     // Mobile menu opens
     await expect(page.locator('.mobile-menu-panel')).toBeVisible();
     await expect(page.locator('.mobile-menu-item:has-text("Dashboard")')).toBeVisible();
-    await expect(page.locator('.mobile-menu-item:has-text("Pending Approvals")')).toBeVisible();
+    await expect(page.locator('.mobile-menu-item:has-text("Approvals")')).toBeVisible();
 
     // Click nav item — navigates and closes
     await page.click('.mobile-menu-item:has-text("Integrations")');
