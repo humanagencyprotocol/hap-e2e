@@ -154,7 +154,7 @@ describe.skipIf(!available)('proposal content is encrypted end to end — the AS
     try {
       const card = await openApprovalById(page, id);
       await card.getByText(body).waitFor({ timeout: 20_000 });
-      await card.getByRole('button', { name: 'Approve' }).click();
+      await card.getByRole('button', { name: 'Approve', exact: true }).click();
       // Backend truth before the page closes (closing could cancel the request).
       await until(async () => (['committed', 'executed'].includes(String((await storedRow(id)).row.status)) ? true : undefined), 'approval stored');
     } finally { await page.close(); }
