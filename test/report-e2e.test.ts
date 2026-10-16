@@ -1554,11 +1554,16 @@ loose text
       const line = await page.getByTestId('report-line').innerText();
       expect(line).toMatch(/NEW/i);
       expect(line).toMatch(/value/);
+      expect(line).toMatch(/Covers .+ → /);
       expect(await page.getByTestId('nav-new-report').count()).toBe(1);
       // Opening the report marks it seen — label and line are gone.
       await page.getByTestId('report-line').locator('a', { hasText: 'Open report' }).click();
       await page.waitForURL('**/reports');
       await page.locator('iframe.reports-iframe').waitFor({ timeout: 20_000 });
+      // The exact period, date-time to date-time, as the gateway scoped it.
+      const period = await page.getByTestId('report-period').innerText();
+      expect(period).toMatch(/^Covers .+ → .+ \(\d+ days?\)/);
+      expect(await page.getByTestId('report-period').getAttribute('title')).toMatch(/2 minutes/);
       await page.getByTestId('nav-new-report').waitFor({ state: 'detached', timeout: 15_000 });
       await page.locator('.sidebar a[href="/"]').first().dispatchEvent('click');
       await page.getByTestId('core-cols').waitFor({ timeout: 20_000 });
