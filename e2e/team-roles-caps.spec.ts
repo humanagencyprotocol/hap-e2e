@@ -357,7 +357,7 @@ test.describe('Team roles, caps and read limits — gateway (#119)', () => {
       await signInToGateway(page, tom.apiKey);
       await handleOnboarding(page);
       // In-app navigation: a full reload (page.goto) drops the session.
-      await page.click('.sidebar-item:has-text("Pending Approvals")');
+      await page.click('.sidebar-item:has-text("Approvals")');
       await page.waitForURL('**/approvals');
       // Tom is not an approver of his own action: it waits on others.
       await page.click('.nav-tab:has-text("Awaiting others")');
@@ -444,7 +444,7 @@ test.describe('Team roles, caps and read limits — gateway (#119)', () => {
       }
 
       // Tom's own card, from the AS's creator=me list, offers Withdraw.
-      await page.click('.sidebar-item:has-text("Pending Approvals")');
+      await page.click('.sidebar-item:has-text("Approvals")');
       await page.waitForURL('**/approvals');
       await page.click('.nav-tab:has-text("Awaiting others")');
       const card = page.locator('.id-card', { hasText: /Needs 1 approval from/ }).first();
@@ -667,5 +667,74 @@ test.describe('Team roles, caps and read limits — gateway (#119)', () => {
     await page.locator('input[placeholder*="e.g."]').fill('Team CRM ops (above cap)');
     await page.locator('button', { hasText: /^Sign mandate/ }).last().click();
     await page.waitForURL(url => url.toString().includes('/mandates'), { timeout: 15_000 });
+  });
+});
+
+// ── UI spec §12.2 — an approver decides from a ROW on the Approvals page ──
+//
+// The escalation block above approves via the AS API (one gateway, Tom's
+// session must survive for the execution step). This block covers the UI an
+// approver actually uses: the team approval is a row (summary sentence +
+// "Team approval" line) that opens in place, and Approve from that row is
+// recorded on the Authority Server. The proposal is made at the AS directly
+// with readable args (as au8 does) — a single test gateway cannot hold two
+// users' device keys, which sealed content would need.
+const HAS_CORE_UI = existsSync(join(GW_DIR, 'apps', 'ui', 'src', 'components', 'ApprovalRow.tsx'));
+test.describe('Team approval from a row (UI spec §12.2)', () => {
+  test.skip(!HAS_CORE_UI, 'gateway without the core-objects Approvals rows');
+
+  test('Lisa opens the team approval in place and approves it; the AS records her approval', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const team = await setUpTeam(request);
+    const scopeContext = { contact_type: 'customer' };
+    const scopeHash = computeScopeHash(scopeContext, ['contact_type']);
+    const intent = 'Row approval test: a write above the team cap.';
+    const sess = await request.post(`${SP_URL}/api/auth/session`, { headers: { 'x-api-key': team.tom.apiKey } });
+    const { user } = await sess.json() as { user: { did: string } };
+    const bounds = { profile: CUSTOMERS_ID, read_access: 'none', export_access: 'none', write_daily_max: 3, delete_daily_max: 0, setup_daily_max: 0 };
+    const mandate = await spApiAttest(request, team.tom.apiKey, {
+      profile_id: CUSTOMERS_ID, group_id: team.groupId, domain: team.tom.id, did: user.did,
+      bounds, bounds_hash: computeBoundsHash(bounds, ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max']),
+      scope_hash: scopeHash, gate_content_hashes: hashGateContent({ intent }),
+      execution_context_hash: 'sha256:' + 'd'.repeat(64), commitment_mode: 'automatic',
+    });
+    expect(mandate.status).toBe('active');
+
+    const created = await request.post(`${SP_URL}/api/proposals`, {
+      headers: { 'x-api-key': team.tom.apiKey },
+      data: {
+        authorization_id: mandate.authorization_id,
+        profile_id: CUSTOMERS_ID,
+        pending_domains: [team.tom.id],
+        tool: 'crm__create_contact',
+        tool_args: { name: 'TR5 Row Approval', email: 'tr5-row@example.com', type: 'customer' },
+        execution_context: { contact_type: 'customer', action_type: 'write' },
+        pending_approvers: [team.lisa.id, team.andreas.id],
+        created_by: team.tom.id,
+      },
+    });
+    expect(created.ok(), await created.text()).toBe(true);
+    const id = ((await created.json()) as { proposal: { id: string } }).proposal.id;
+
+    await signInToGateway(page, team.lisa.apiKey);
+    await handleOnboarding(page);
+    await page.click('.sidebar-item:has-text("Approvals")');
+    await page.waitForURL('**/approvals');
+    const row = page.locator(`[data-testid="approval-row"][data-proposal-id="${id}"]`);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    // The row reads as one sentence (manifest template) and says others are involved.
+    await expect(row.getByTestId('approval-row-summary')).toHaveText('Create contact TR5 Row Approval', { timeout: 30_000 });
+    await expect(row).toContainText('Team approval');
+    // A lone item opens by itself; otherwise open it.
+    if (!(await row.getAttribute('class'))?.includes('is-open')) await row.locator('.appr-item-head').click();
+    await expect(row).toHaveClass(/is-open/);
+    await expect(row.locator('.approval-resp')).toContainText('Approving sends exactly this');
+    await row.locator('button:has-text("Approve")').click();
+
+    await expect(async () => {
+      const got = await request.get(`${SP_URL}/api/proposals/${encodeURIComponent(id)}`, { headers: { 'x-api-key': team.lisa.apiKey } });
+      const p = (await got.json()).proposal as { approvedBy?: Record<string, unknown> };
+      expect(Object.keys(p.approvedBy ?? {})).toContain(team.lisa.id);
+    }).toPass({ timeout: 30_000 });
   });
 });

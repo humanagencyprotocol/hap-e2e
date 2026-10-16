@@ -7,7 +7,8 @@
  * 3. User reviews and commits/rejects in browser
  * 4. Revocation blocks further activity
  */
-import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups, latestProfileId} from './fixtures';
+import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups, latestProfileId, openApprovalCard,
+} from './fixtures';
 
 // The version the gateway's CRM wizard grants under (newest) — see latestProfileId.
 const CUSTOMERS_PROFILE = latestProfileId('customers');
@@ -112,11 +113,10 @@ test.describe.serial('Journey 5: Agent Flow', () => {
     await signInToGateway(page, apiKey);
     await handleOnboarding(page);
 
-    await page.click('.sidebar-item:has-text("Pending Approvals")');
+    await page.click('.sidebar-item:has-text("Approvals")');
     await page.waitForURL('**/approvals');
     await page.click('.nav-tab:has-text("Awaiting me")');
-    const card = page.locator('.card', { hasText: 'jane@example.com' }).first();
-    await expect(card).toBeVisible({ timeout: 15_000 });
+    const card = await openApprovalCard(page, 'jane@example.com');
 
     // Approving resolves under the proposal's own domain.
     await card.locator('button:has-text("Approve")').click();

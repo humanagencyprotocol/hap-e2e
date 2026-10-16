@@ -13,6 +13,7 @@
  * - replaced (Edit before signing) → REPLACED, not "must not be retried".
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { openApprovalById } from '../src/helpers/gateway-ui.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -90,9 +91,6 @@ async function showDecided(page: Page): Promise<void> {
   await page.locator('button.filter-chip', { hasText: /^All$/ }).click();
 }
 
-function cardOf(page: Page, proposalId: string) {
-  return page.locator('.card', { hasText: proposalId }).first();
-}
 
 async function until<T>(fn: () => Promise<T | undefined>, what: string, ms = 30_000): Promise<T> {
   const end = Date.now() + ms;
@@ -133,7 +131,7 @@ describe.skipIf(!available)('reject or ask for a change — the AI learns which 
     const id = await propose(`RJ reject ${Date.now()}`);
     const page = await approvalsPage();
     try {
-      const card = cardOf(page, id);
+      const card = await openApprovalById(page, id);
       await card.locator('[data-testid="btn-reject"]').click();
       // Backend truth first: the click must have reached the server before the
       // All view is opened (in CI the view could load before the rejection was stored).
@@ -160,7 +158,7 @@ describe.skipIf(!available)('reject or ask for a change — the AI learns which 
     const id = await propose(`RJ change ${Date.now()}`);
     const page = await approvalsPage();
     try {
-      const card = cardOf(page, id);
+      const card = await openApprovalById(page, id);
       expect(await card.locator('[data-testid="change-note"]').count()).toBe(0); // only after the click
       await card.locator('[data-testid="btn-change-needed"]').click();
       await card.locator('[data-testid="change-note"]').fill(NOTE);

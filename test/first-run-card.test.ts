@@ -70,7 +70,10 @@ async function dashboard() {
   await page.locator('.sidebar a[href="/"]').first().dispatchEvent('click');
   await page.waitForURL((u) => new URL(u.toString()).pathname === '/');
   try {
-    await page.getByText('Get started', { exact: true }).or(page.getByText('Needs your attention', { exact: true })).first().waitFor({ timeout: 20_000 });
+    await page.getByText('Get started', { exact: true })
+      .or(page.getByText('Needs your attention', { exact: true }))
+      .or(page.getByText('Setup — needs attention', { exact: true }))
+      .first().waitFor({ timeout: 20_000 });
   } catch (err) {
     throw new Error(`dashboard did not settle at ${page.url()}:\n${(await page.locator('body').innerText()).slice(0, 1500)}\n${err}`);
   }
@@ -214,7 +217,7 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
     await agent.close();
     expect(r.isError, JSON.stringify(r.content)).not.toBe(true);
     await dashboard();
-    await page.locator('text=Needs your attention').waitFor({ timeout: 20_000 });
+    await page.getByText(/needs your attention|Setup — needs attention/i).first().waitFor({ timeout: 20_000 });
     await shot('4-card-gone');
     // The card's own title (exact match — "Getting started" elsewhere is not the card).
     expect(await page.getByText('Get started', { exact: true }).count()).toBe(0);

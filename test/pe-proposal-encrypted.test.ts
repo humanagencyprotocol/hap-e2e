@@ -11,6 +11,7 @@
  * connector under a review mandate, a real browser on /approvals.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { openApprovalById } from '../src/helpers/gateway-ui.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -151,9 +152,9 @@ describe.skipIf(!available)('proposal content is encrypted end to end — the AS
     const id = await propose(title, body);
     const page = await approvalsPage();
     try {
-      const card = page.locator('.card', { hasText: id }).first();
+      const card = await openApprovalById(page, id);
       await card.getByText(body).waitFor({ timeout: 20_000 });
-      await card.getByRole('button', { name: 'Approve' }).click();
+      await card.getByRole('button', { name: 'Approve', exact: true }).click();
       // Backend truth before the page closes (closing could cancel the request).
       await until(async () => (['committed', 'executed'].includes(String((await storedRow(id)).row.status)) ? true : undefined), 'approval stored');
     } finally { await page.close(); }
@@ -178,7 +179,7 @@ describe.skipIf(!available)('proposal content is encrypted end to end — the AS
     const id = await propose(`PE change ${Date.now()}`, `Change me: ${SECRET}-C`);
     const page = await approvalsPage();
     try {
-      const card = page.locator('.card', { hasText: id }).first();
+      const card = await openApprovalById(page, id);
       await card.locator('[data-testid="btn-change-needed"]').click();
       await card.locator('[data-testid="change-note"]').fill(NOTE);
       await card.locator('[data-testid="btn-send-back"]').click();

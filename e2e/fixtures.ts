@@ -5,7 +5,7 @@
  * and helpers for common operations.
  */
 
-import { test as base, expect, type Page, type Browser, type APIRequestContext } from '@playwright/test';
+import { test as base, expect, type Page, type Browser, type APIRequestContext, type Locator } from '@playwright/test';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
@@ -695,3 +695,32 @@ export async function spApiReceipt(
 
 export const test = base;
 export { expect };
+
+/**
+ * The approval card on the Approvals page whose content contains `hasText`.
+ *
+ * Gateways with the core-objects queue (UI spec §12.2) render each approval as
+ * a row that opens in place, one at a time — the card's content exists only
+ * while its row is open. Older gateways render every card open. This opens
+ * rows one by one until the card is found, so specs work against both.
+ */
+export async function openApprovalCard(page: Page, hasText: string | RegExp): Promise<Locator> {
+  const openCard = page.locator('.card', { hasText }).first();
+  const rows = page.locator('[data-testid="approval-row"]');
+  await expect(rows.first().or(openCard).first()).toBeVisible({ timeout: 30_000 });
+  if (await openCard.isVisible()) return openCard;
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const n = await rows.count();
+    for (let i = 0; i < n; i++) {
+      const row = rows.nth(i);
+      if (!(await row.getAttribute('class'))?.includes('is-open')) {
+        await row.locator('.appr-item-head').click();
+      }
+      const card = row.locator('.card', { hasText });
+      const found = await card.first().waitFor({ state: 'visible', timeout: 6_000 }).then(() => true).catch(() => false);
+      if (found) return card.first();
+    }
+  }
+  throw new Error(`No approval card containing ${String(hasText)}`);
+}

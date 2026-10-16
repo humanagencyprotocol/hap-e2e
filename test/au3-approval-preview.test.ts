@@ -20,6 +20,7 @@
  * fallbacks and the re-read fallback for systems without versions.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { openAllTickets } from '../src/helpers/gateway-ui.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { chromium, type Browser } from '@playwright/test';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
@@ -337,6 +338,8 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
       await page.waitForURL((u) => !u.toString().includes('/login'), { timeout: 45_000 });
       await page.locator('.sidebar a[href="/tickets"]').click();
       await page.waitForURL('**/tickets');
+      await page.locator('.ticket-obj-card, [data-testid="ticket-what-was-done"]').first().waitFor({ timeout: 20_000 });
+      await openAllTickets(page);
       const boxes = page.locator('[data-testid="ticket-what-was-done"]');
       await boxes.first().waitFor({ timeout: 20_000 });
       await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="ticket-what-was-done"]')]
