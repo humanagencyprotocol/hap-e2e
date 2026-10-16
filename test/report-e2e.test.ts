@@ -1521,6 +1521,36 @@ loose text
 
   // ── 9. the gateway UI ─────────────────────────────────────────────────────
 
+  // Reports mockup (gateway 0.31.2): a new report is NEW — the nav label and
+  // the dashboard line — until the Reports page is opened. Gated on the
+  // gateway having it; older gateways have neither.
+  const HAS_REPORT_NEWS = existsSync(join(GW_DIR, 'apps', 'ui', 'src', 'components', 'ReportLine.tsx'));
+  it.runIf(HAS_REPORT_NEWS)('9.0 a new report shows "New" in the nav and one dashboard line, both gone once it is opened', async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${CP_URL}/login`, { waitUntil: 'networkidle' });
+      await page.locator('input[type="password"]').fill(user.apiKey);
+      await page.locator('button:has-text("Sign In")').click();
+      await page.waitForURL((u) => !u.toString().includes('/login'), { timeout: 45_000 });
+      await page.locator('.sidebar a[href="/"]').first().dispatchEvent('click');
+      await page.getByTestId('report-line').waitFor({ timeout: 20_000 });
+      const line = await page.getByTestId('report-line').innerText();
+      expect(line).toMatch(/NEW/i);
+      expect(line).toMatch(/value/);
+      expect(await page.getByTestId('nav-new-report').count()).toBe(1);
+      // Opening the report marks it seen — label and line are gone.
+      await page.getByTestId('report-line').locator('a', { hasText: 'Open report' }).click();
+      await page.waitForURL('**/reports');
+      await page.locator('iframe.reports-iframe').waitFor({ timeout: 20_000 });
+      await page.getByTestId('nav-new-report').waitFor({ state: 'detached', timeout: 15_000 });
+      await page.locator('.sidebar a[href="/"]').first().dispatchEvent('click');
+      await page.getByTestId('core-cols').waitFor({ timeout: 20_000 });
+      expect(await page.getByTestId('report-line').count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
+
   it('9. gateway UI: AI CSS cannot cover a box; Checked values → details without a reload; the public-check popup (intercepted); the switch; phone width', async () => {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const external: string[] = [];
