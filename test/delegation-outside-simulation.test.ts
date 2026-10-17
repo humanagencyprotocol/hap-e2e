@@ -39,6 +39,19 @@ const CP_URL = `http://localhost:${CP_PORT}`;
 const P = 'github.com/humanagencyprotocol/hap-profiles';
 const DELEGATION = `${P}/delegation@0.4`;
 const available = existsSync(join(PROFILES_DIR, 'delegation', '0.4.profile.json'));
+// A COMPLETE, valid Charge mandate for the newest charge profile the stack
+// serves — charge 0.7 ("Payments") changed the fields, and an invalid one would
+// be refused for that, not for the Delegation scope this suite is about.
+const CHARGE_07 = existsSync(join(PROFILES_DIR, 'charge', '0.7.profile.json'));
+const CHARGE_MANDATE = CHARGE_07
+  ? {
+      limits: { read_access: 'unlimited', amount_max: 100, amount_daily_max: 500, amount_monthly_max: 2000, charge_daily_max: 5, manage_daily_max: 5 },
+      scope: { currency: 'EUR' },
+    }
+  : {
+      limits: { amount_max: 100, amount_daily_max: 500, amount_monthly_max: 2000, transaction_count_daily_max: 5 },
+      scope: { currency: 'EUR', action_type: 'charge' },
+    };
 
 const pm = new ProcessManager();
 const sp = new SPClient(AS_URL);
@@ -169,8 +182,7 @@ describe.skipIf(!available)('delegation outside simulation mode: bounded by the 
   it('a Charge mandate is outside the Delegation scope: refused, no proposal, recorded under Blocked', async () => {
     const r = await call('setup__create_mandate', {
       // A COMPLETE, valid Charge mandate — so the only reason to refuse is the Delegation scope.
-      profile: 'charge', limits: { amount_max: 100, amount_daily_max: 500, amount_monthly_max: 2000, transaction_count_daily_max: 5 },
-      scope: { currency: 'EUR', action_type: 'charge' }, intent: 'Why — test.', mode: 'review',
+      profile: 'charge', ...CHARGE_MANDATE, intent: 'Why — test.', mode: 'review',
     });
     if (process.env.HAP_E2E_SHOW_CARD) console.error('[DL E2E] charge refusal: ' + r.text);
     expect(r.denied, r.text).toBe(true);
