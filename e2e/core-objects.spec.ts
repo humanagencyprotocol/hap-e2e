@@ -234,6 +234,20 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await expect(page.locator('.ticket-obj-card').first().locator('.obj-line')).toContainText(area);
     await expect(page.locator('.ticket-obj-card').first().locator('.obj-line')).toContainText('via CRM');
 
+    // Search: typing never blanks the page (2026-10-17: a ticket without
+    // path/attestationHash threw), and it finds what the row shows.
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    const search = page.getByTestId('tickets-search');
+    await search.fill('contact');
+    await expect(page.locator('.ticket-obj-card').first()).toBeVisible();
+    await search.fill('zzz-nothing-matches');
+    await expect(page.locator('.ticket-obj-card')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Tickets' })).toBeVisible();
+    await search.fill('');
+    await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-tickets-search.png'), fullPage: true });
+    expect(errors).toEqual([]);
+
     // Mandates: grouped by area, heading with the area name and the tool.
     await page.click('.sidebar-item:has-text("Mandates")');
     await page.waitForURL('**/mandates');
