@@ -16,7 +16,7 @@
  * caller's shell (SUVEREN_AS_URL, NODE_EXTRA_CA_CERTS, …) are removed.
  */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -78,6 +78,13 @@ export function newSecret(): string {
 
 /** The env both halves get — the same object, as in bundle/server.js. */
 export function stackEnv(o: StackOptions): NodeJS.ProcessEnv {
+  // Same contract as ProcessManager.getDataDir(): suites that bring their own
+  // dataDir must get the preinstalled connectors too, or SUVEREN_OFFLINE=1
+  // leaves them with none (README "Unpublished connector builds"). Copied once
+  // — a restart on the same dataDir keeps what the gateway installed.
+  const preinstalled = process.env.HAP_E2E_PREINSTALLED_INTEGRATIONS;
+  const integrationsDir = join(o.dataDir, 'integrations');
+  if (preinstalled && !existsSync(integrationsDir)) cpSync(preinstalled, integrationsDir, { recursive: true });
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const k of ['SUVEREN_AS_URL', 'SUVEREN_AS_API_KEY', 'NODE_EXTRA_CA_CERTS', 'SUVEREN_CP_INTERNAL_URL']) delete env[k];
   Object.assign(env, {
