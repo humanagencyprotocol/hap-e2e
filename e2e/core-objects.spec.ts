@@ -35,6 +35,21 @@ mkdirSync(SCREENSHOT_DIR, { recursive: true });
 // Runs only against a gateway with the core-objects UI (CI runs the journeys
 // against the gateway's main branch, which may not have it yet).
 const HAS_CORE = existsSync(join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'ui', 'src', 'lib', 'core-objects.ts'));
+// UI spec §13 (gateway 0.32.0): areas first, tools second.
+const HAS_AREAS = existsSync(join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'ui', 'src', 'lib', 'area.ts'));
+/**
+ * The area name the gateway must show: the newest customers profile's own
+ * `name`, as the Authority Server lists it (what the gateway receives).
+ */
+async function customersAreaName(request: APIRequestContext): Promise<string> {
+  const { profiles } = await (await request.get(`${SP_URL}/api/profiles`)).json() as { profiles: Array<{ id: string; name?: string }> };
+  const ver = (id: string) => id.slice(id.indexOf('@') + 1).split('.').map(Number);
+  const newest = profiles
+    .filter(p => /\/customers@/.test(p.id))
+    .sort((x, y) => ver(y.id)[0] - ver(x.id)[0] || ver(y.id)[1] - ver(x.id)[1])[0];
+  expect(newest?.name, 'the AS lists the profile name (suveren-as: /api/profiles returns name)').toBeTruthy();
+  return newest.name as string;
+}
 
 const CUSTOMERS_PROFILE = latestProfileId('customers');
 const KEY_ORDER = ['profile', 'read_access', 'export_access', 'write_daily_max', 'delete_daily_max', 'setup_daily_max'];
@@ -179,5 +194,76 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await page.getByTestId('tickets-filter-approved').click();
     await expect(page.locator('.ticket-obj-card')).toHaveCount(1, { timeout: 30_000 });
     await expect(page.locator('.ticket-obj-card').first()).toContainText('approved');
+    // The approved ticket's headline is the sentence the approver saw (from the
+    // proposal's sealed values), not only the action's name.
+    if (HAS_AREAS) {
+      await expect(page.locator('.ticket-obj-card').first().getByTestId('ticket-headline'))
+        .toHaveText(/^Create contact (Dora|Emil) Review$/, { timeout: 30_000 });
+    }
+  });
+  test('E: areas first, tools second — area + "via CRM" on the top line, the mandate name underneath', async ({ request }) => {
+    test.skip(!HAS_AREAS, 'gateway without UI spec §13 (areas)');
+    test.setTimeout(90_000);
+    const area = await customersAreaName(request);
+    await goDashboard(page);
+    const group = page.getByTestId('col-automatic').getByTestId('auto-group').filter({ hasText: 'Contact created' }).first();
+    await expect(group.locator('.obj-line')).toContainText(area, { timeout: 30_000 });
+    await expect(group.locator('.obj-line')).toContainText('via CRM');
+    // The mandate's own name is a separate line, under the headline — never the area.
+    await expect(group.getByTestId('mandate-line')).toHaveText('Mandate: Customer care');
+    await expect(group.locator('.obj-line')).not.toContainText('Customer care');
+    // Each mandate at work shows its own name; the area is the same for both.
+    const atWork = page.getByTestId('col-mandates').getByTestId('mandate-at-work');
+    await expect(atWork.filter({ hasText: 'Customer care' })).toHaveCount(1);
+    await expect(atWork.filter({ hasText: 'Customer care' }).locator('.obj-line')).toContainText(area);
+    await expect(page.getByTestId('col-waiting').getByTestId('dash-approval').first().getByTestId('mandate-line')).toHaveText('Mandate: Customer review');
+    await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-dashboard-areas.png'), fullPage: true });
+
+    // Approvals: the one left after D carries its mandate's name underneath.
+    await page.click('.sidebar-item:has-text("Approvals")');
+    await page.waitForURL('**/approvals**');
+    const row = page.getByTestId('approval-row').first();
+    await expect(row.locator('.obj-line')).toContainText(area, { timeout: 30_000 });
+    await expect(row.getByTestId('mandate-line')).toHaveText('Mandate: Customer review');
+
+    // Tickets: one area only → no area pills (nothing to choose between).
+    await page.click('.sidebar-item:has-text("Tickets")');
+    await page.waitForURL('**/tickets');
+    await expect(page.locator('.ticket-obj-card').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('area-filter')).toHaveCount(0);
+    await expect(page.locator('.ticket-obj-card').first().locator('.obj-line')).toContainText(area);
+    await expect(page.locator('.ticket-obj-card').first().locator('.obj-line')).toContainText('via CRM');
+
+    // Search: typing never blanks the page (2026-10-17: a ticket without
+    // path/attestationHash threw), and it finds what the row shows.
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    const search = page.getByTestId('tickets-search');
+    await search.fill('contact');
+    await expect(page.locator('.ticket-obj-card').first()).toBeVisible();
+    await search.fill('zzz-nothing-matches');
+    await expect(page.locator('.ticket-obj-card')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Tickets' })).toBeVisible();
+    await search.fill('');
+    await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-tickets-search.png'), fullPage: true });
+    expect(errors).toEqual([]);
+
+    // Mandates: grouped by area, heading with the area name and the tool.
+    await page.click('.sidebar-item:has-text("Mandates")');
+    await page.waitForURL('**/mandates');
+    const grp = page.locator('[data-testid="mandate-area"][data-area="customers"]');
+    await expect(grp.locator('.area-group-h')).toContainText(area, { timeout: 30_000 });
+    await expect(grp.locator('.area-group-h')).toContainText('via CRM');
+    // Cards under their area heading do not repeat the area.
+    await expect(grp.locator('.mandate-card .obj-line').first()).not.toContainText(area);
+    await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-mandates-areas.png'), fullPage: true });
+
+    // Integrations: the CRM under its area.
+    await page.click('.sidebar-item:has-text("Integrations")');
+    await page.waitForURL('**/integrations');
+    const ia = page.locator('[data-testid="integration-area"][data-area="customers"]');
+    await expect(ia.locator('.area-group-h')).toContainText(area, { timeout: 30_000 });
+    await expect(ia).toContainText('CRM');
+    await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-integrations-areas.png'), fullPage: true });
   });
 });
