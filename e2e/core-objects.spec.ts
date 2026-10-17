@@ -194,6 +194,12 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await page.getByTestId('tickets-filter-approved').click();
     await expect(page.locator('.ticket-obj-card')).toHaveCount(1, { timeout: 30_000 });
     await expect(page.locator('.ticket-obj-card').first()).toContainText('approved');
+    // The approved ticket's headline is the sentence the approver saw (from the
+    // proposal's sealed values), not only the action's name.
+    if (HAS_AREAS) {
+      await expect(page.locator('.ticket-obj-card').first().getByTestId('ticket-headline'))
+        .toHaveText(/^Create contact (Dora|Emil) Review$/, { timeout: 30_000 });
+    }
   });
   test('E: areas first, tools second — area + "via CRM" on the top line, the mandate name underneath', async ({ request }) => {
     test.skip(!HAS_AREAS, 'gateway without UI spec §13 (areas)');
