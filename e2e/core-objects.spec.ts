@@ -36,6 +36,8 @@ mkdirSync(SCREENSHOT_DIR, { recursive: true });
 // against the gateway's main branch, which may not have it yet).
 const HAS_CORE = existsSync(join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'ui', 'src', 'lib', 'core-objects.ts'));
 // UI spec §13 (gateway 0.32.0): areas first, tools second.
+// UI spec §14: automatic tickets show what was sent.
+const HAS_TICKET_CONTENT = existsSync(join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'mcp-server', 'src', 'lib', 'ticket-content.ts'));
 const HAS_AREAS = existsSync(join(__dirname, '..', '..', 'suveren-gateway', 'apps', 'ui', 'src', 'lib', 'area.ts'));
 /**
  * The area name the gateway must show: the newest customers profile's own
@@ -265,5 +267,26 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await expect(ia.locator('.area-group-h')).toContainText(area, { timeout: 30_000 });
     await expect(ia).toContainText('CRM');
     await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-integrations-areas.png'), fullPage: true });
+  });
+  test('F: an automatic ticket shows its sentence, what was sent (sealed, checked) and what the CRM answered', async () => {
+    test.skip(!HAS_TICKET_CONTENT, 'gateway without UI spec §14 (ticket content)');
+    test.setTimeout(90_000);
+    await page.click('.sidebar-item:has-text("Tickets")');
+    await page.waitForURL('**/tickets**');
+    await page.getByTestId('tickets-filter-automatic').click();
+    const cards = page.locator('.ticket-obj-card');
+    await expect(cards).toHaveCount(3, { timeout: 30_000 });
+    // The headline is the manifest's sentence filled from what was sent.
+    const anna = cards.filter({ has: page.getByTestId('ticket-headline').filter({ hasText: /^Create contact Anna Auto$/ }) });
+    await expect(anna).toHaveCount(1, { timeout: 30_000 });
+    await anna.locator('.ticket-obj-head').click();
+    const sent = anna.getByTestId('ticket-what-was-done');
+    await expect(sent).toHaveAttribute('data-bound', 'sealed', { timeout: 30_000 });
+    await expect(sent).toContainText('sealed in the ticket');
+    await expect(sent).toContainText('Anna Auto');
+    await expect(sent).toContainText('Matches the fingerprint in the signed ticket');
+    await expect(anna.getByTestId('ticket-result')).toHaveAttribute('data-ok', 'true');
+    await expect(anna.getByTestId('ticket-result')).toContainText('what CRM answered');
+    await page.screenshot({ path: join(SCREENSHOT_DIR, 'f-ticket-content.png'), fullPage: true });
   });
 });
