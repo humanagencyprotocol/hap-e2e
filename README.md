@@ -125,8 +125,12 @@ from npm at each manifest's pinned `npmVersion`. To run them against local
 builds instead, `npm install` the packed builds (`npm pack`) into a folder, then
 set `HAP_E2E_PREINSTALLED_INTEGRATIONS=<that folder>` and `SUVEREN_OFFLINE=1`:
 every suite's gateway gets that folder as its integrations dir and never calls
-npm. The packed versions must equal the pins, or the gateway refuses to start
-them; include every personal-default connector (erp, crm, records).
+npm (suites with their own data dir via `gateway-stack.ts` too). The packed
+versions must equal the pins, or the gateway refuses to start them. Include
+every connector the suites start, not only the one under test: the
+personal defaults (erp, crm, records) and also mail (`email-mcp`), deploy,
+google-calendar and linkedin — with `SUVEREN_OFFLINE=1` a connector missing
+from the folder fails to start instead of being installed.
 
 The AS runs as `next start`, not `next dev`. That is deliberate: the two are
 not the same server, and the difference is not academic — a route prerendered
