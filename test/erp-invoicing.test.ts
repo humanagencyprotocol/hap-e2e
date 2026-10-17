@@ -56,11 +56,15 @@ const preinstalled = !!PREINSTALLED_DIR && existsSync(PREINSTALLED_DIR);
 const perToolProfiles = existsSync(MANIFEST_LOADER)
   && readFileSync(MANIFEST_LOADER, 'utf8').includes('invalidManifestOverrideProfilesReason');
 const invoicingProfile = existsSync(join(PROFILES_DIR, 'invoicing', '0.1.profile.json'));
-const available = existsSync(MANIFEST) && preinstalled && perToolProfiles && invoicingProfile;
+// The published erp-mcp has invoicing from 0.7.0; with that pinned, the
+// gateway installs it from npm and no local build is needed.
+const pinnedVersion = existsSync(MANIFEST) ? String(JSON.parse(readFileSync(MANIFEST, 'utf8')).npmVersion ?? '') : '';
+const pinnedHasInvoicing = pinnedVersion.localeCompare('0.7.0', undefined, { numeric: true }) >= 0;
+const available = existsSync(MANIFEST) && (preinstalled || pinnedHasInvoicing) && perToolProfiles && invoicingProfile;
 if (!available) {
   console.warn(
     '[ERP INVOICING E2E] SKIPPED — needs ' +
-    (!preinstalled ? 'HAP_E2E_PREINSTALLED_INTEGRATIONS (a local erp-mcp build with invoicing); ' : '') +
+    (!preinstalled && !pinnedHasInvoicing ? 'erp-mcp >= 0.7.0 pinned, or HAP_E2E_PREINSTALLED_INTEGRATIONS (a local erp-mcp build with invoicing); ' : '') +
     (!perToolProfiles ? 'a gateway with per-tool profiles (invalidManifestOverrideProfilesReason); ' : '') +
     (!invoicingProfile ? 'hap-profiles invoicing@0.1; ' : ''),
   );
@@ -167,8 +171,10 @@ describe.skipIf(!available)('ERP invoicing: its own area, its own limits (real A
   beforeAll(async () => {
     previousPreinstalled = process.env.HAP_E2E_PREINSTALLED_INTEGRATIONS;
     previousOffline = process.env.SUVEREN_OFFLINE;
-    process.env.HAP_E2E_PREINSTALLED_INTEGRATIONS = PREINSTALLED_DIR;
-    process.env.SUVEREN_OFFLINE = '1';
+    if (preinstalled) {
+      process.env.HAP_E2E_PREINSTALLED_INTEGRATIONS = PREINSTALLED_DIR;
+      process.env.SUVEREN_OFFLINE = '1';
+    }
 
     pm.buildGateway();
     await pm.startSP(SP_PORT);
