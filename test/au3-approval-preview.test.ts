@@ -52,6 +52,8 @@ const available = !!manifest?.toolGating?.overrides?.send_quote?.preview;
 
 /** AU6 (ticket view) ships after AU3 — its browser check runs only against a gateway that has it. */
 const hasTicketView = existsSync(join(MANIFESTS_DIR, '..', '..', 'apps', 'ui', 'src', 'components', 'TicketWhatWasDone.tsx'));
+// UI spec §14: automatic tickets show what was sent (two levels, 'sealed' / 'recorded').
+const hasTicketContent = existsSync(join(MANIFESTS_DIR, '..', '..', 'apps', 'mcp-server', 'src', 'lib', 'ticket-content.ts'));
 
 const PROFILE_ID = PROFILE_V07.sales;
 const BOUNDS_KEY_ORDER = ['profile', 'read_access', 'value_max', 'discount_max', 'order_value_daily_max',
@@ -348,11 +350,12 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
       if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU6 E2E] tickets:\n' + JSON.stringify(states, null, 1));
       // Every ticket of this run was issued here, so its content is on this device and must verify.
       expect(states.length).toBeGreaterThan(0);
-      for (const st of states) expect(st.bound, st.text).toBe('verified');
+      // UI spec §14 (gateway 0.33) names the level 'sealed'; older gateways said 'verified'.
+      for (const st of states) expect(st.bound, st.text).toBe(hasTicketContent ? 'sealed' : 'verified');
       // The create_quote ticket shows what the AI actually sent: customer and line item.
       const quote = states.find((st) => st.text.includes('cust-4') && st.text.includes('item-1'));
       expect(quote, JSON.stringify(states)).toBeTruthy();
-      expect(quote!.text).toMatch(/bound by hash/);
+      expect(quote!.text).toMatch(hasTicketContent ? /Matches the fingerprint in the signed ticket/ : /bound by hash/);
       // The Ed25519 signature check on each ticket card (issuer key archived at issuance).
       const feet = await page.locator('.receipt-foot').evaluateAll((els) => els.map((el) => (el as HTMLElement).innerText));
       if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU6 E2E] feet:\n' + JSON.stringify(feet, null, 1));
