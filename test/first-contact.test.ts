@@ -126,7 +126,8 @@ describe.skipIf(!available)('first contact (real AS + gateway in simulation mode
     expect(r.isError).not.toBe(true);
     expect(text).toMatch(/\*\*Approvals:\*\* every mandate and brief you propose waits until the person approves it in the Suveren Gateway at http:\/\/localhost:\d+\/approvals/);
     // The email simulator is installed but not activated here: named, with where to activate it.
-    expect(text).toMatch(/\*\*Available but not activated:\*\* [^\n]*Email \(simulation\)/);
+    // gateway >= 0.35.1 calls the simulated mail "Email" (label "Test mailbox")
+    expect(text).toMatch(/\*\*Available but not activated:\*\* [^\n]*\*\*Email( \(simulation\))?\*\*/);
     expect(text).toMatch(/Never ask for, read or type the person's API key/);
   });
 });
