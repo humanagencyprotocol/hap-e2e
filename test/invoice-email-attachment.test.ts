@@ -30,19 +30,14 @@
  * needs a real Mollie account, which CI does not have, and the house rule is
  * real MCP servers only (no mocked Mollie). Skipped below with a note.
  *
- * Known red (2026-10-17, gateway feat/email-documents b1dae47 + erp-mcp 0.8.0):
- *   - step 3: the AU4 "record changed" check hashes the create_invoice preview
- *     INCLUDING the `kind: "document"` read (preview_invoice), whose PDF embeds
- *     the render time — two renders never match, so an approved review-mode
- *     invoice is always refused at execution. Step 4 then issues the same
- *     invoice as the operator (straight on the connector, no gateway) so the
- *     email half still runs; that fallback never triggers once step 3 passes.
- *   - steps 4, 5, 6(c): the gateway's document resolution reads only
- *     `structuredContent`; erp-mcp 0.8.0's get_document answers in text only.
+ * erp-mcp >= 0.9.0: the document date comes with the request and the PDF is
+ * deterministic, so the approved preview IS the issued file (step 3 asserts
+ * equal fingerprints) and the AU4 "record changed" check passes; get_document
+ * answers with structuredContent (and the gateway also reads JSON text).
  *
  * Gated on the gateway's attachment support (attachment-resolution.ts), the
  * profiles' email@0.9 + invoicing@0.1, and the manifests pinning erp-mcp >=
- * 0.8.0 (live/local) and declaring mail attachments. Skips loudly otherwise.
+ * 0.9.0 (live/local) and declaring mail attachments. Skips loudly otherwise.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -82,7 +77,7 @@ const gaps: string[] = [];
 if (!existsSync(ATTACHMENT_SRC)) gaps.push('a gateway with attachments by reference (apps/mcp-server/src/lib/attachment-resolution.ts)');
 if (!existsSync(join(PROFILES_DIR, 'email', '0.9.profile.json'))) gaps.push('hap-profiles email@0.9');
 if (!existsSync(join(PROFILES_DIR, 'invoicing', '0.1.profile.json'))) gaps.push('hap-profiles invoicing@0.1');
-if (String(erpManifest?.npmVersion ?? '').localeCompare('0.8.0', undefined, { numeric: true }) < 0) gaps.push('erp.json pinning erp-mcp >= 0.8.0 (live mode "local")');
+if (String(erpManifest?.npmVersion ?? '').localeCompare('0.9.0', undefined, { numeric: true }) < 0) gaps.push('erp.json pinning erp-mcp >= 0.9.0 (live mode "local" with document_date)');
 if (!erpManifest?.documents?.['invoice-pdf']) gaps.push('erp.json declaring documents.invoice-pdf');
 if (mailManifest?.attachments?.transport !== 'field') gaps.push('mail.json declaring an attachments transport (email-mcp >= 0.4.0)');
 const available = gaps.length === 0;
@@ -113,8 +108,11 @@ const CUSTOMER = {
   country: 'AT', uid: 'ATU87654321', email: CUSTOMER_EMAIL,
 };
 const NUMBER = '2026-0001';
+/** The invoice is dated today (the connector refuses any other day), in the
+ *  connector's default timezone. */
+const TODAY_VIENNA = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Vienna', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const INVOICE_ARGS = {
-  customer_id: CUSTOMER.id, number: NUMBER,
+  customer_id: CUSTOMER.id, number: NUMBER, document_date: TODAY_VIENNA,
   service_period: { from: '2026-09-01', to: '2026-09-30' },
   lines: [{ description: 'Beratung September 2026', qty: 10, unit: 'Std.', unit_price: 120, vat_rate: 20 }],
   net_total: 1200, currency: 'EUR',
@@ -380,33 +378,13 @@ describe.skipIf(!available)('Issue an invoice, then email it as an attachment (r
     issuedSha = inv.archive_sha256;
     archivePath = inv.archive_path;
     expect(sha256(readFileSync(archivePath))).toBe(issuedSha);
-    // The issue time is printed on the PDF, so the issued file is a new render — not the preview's bytes.
-    if (issuedSha !== previewSha) console.error('[INVOICE EMAIL E2E] note: issued PDF differs from the preview render (issue date/time printed).');
+    // The approved preview IS the issued document: same date, same bytes.
+    expect(previewShas[0]).toBe(previewShas[1]);
+    expect(issuedSha).toBe(previewSha);
   }, 60_000);
 
   it('4. send_message with the invoice by reference becomes a proposal; the card shows it sealed, same file as issued, body as AI text', async () => {
-    if (!issuedSha) {
-      // Only while step 3 is red: issue the same invoice as the operator,
-      // straight on the installed connector (no gateway), so steps 4–6 still
-      // test the email half against a real issued, archived PDF.
-      console.error('[INVOICE EMAIL E2E] step 3 did not issue the invoice — issuing it as the operator (no gateway) so steps 4–6 can run.');
-      const erp = new Client({ name: 'operator-erp', version: '1.0.0' }, { capabilities: {} });
-      const bin = join(pm.getDataDir(), 'integrations', 'node_modules', '@humanagencyp', 'erp-mcp', 'dist', 'index.js');
-      const env: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'DATABASE_URL') env[k] = v;
-      await erp.connect(new StdioClientTransport({ command: process.execPath, args: [bin], env: {
-        ...env, HAP_DATA_DIR: pm.getDataDir(), ERP_MODE: 'live', ERP_LIVE_ADAPTER: 'local', ERP_LIVE_COMPANY_FILE: COMPANY_FILE,
-      } }));
-      try {
-        const r = await erp.callTool({ name: 'create_invoice', arguments: INVOICE_ARGS });
-        const inv = JSON.parse((r.content as Array<{ text: string }>)[0].text);
-        expect(r.isError, JSON.stringify(inv)).not.toBe(true);
-        issuedSha = inv.archive_sha256;
-        archivePath = inv.archive_path;
-      } finally {
-        await erp.close().catch(() => {});
-      }
-    }
+    expect(issuedSha, 'step 3 must have issued the invoice').toMatch(/^[0-9a-f]{64}$/);
     const before = await sentCount();
     const r = await call('mail__send_message', {
       to: [CUSTOMER_EMAIL], subject: `Rechnung ${NUMBER}`, body: MAIL_BODY, attachments: [ATTACHMENT_REF],
