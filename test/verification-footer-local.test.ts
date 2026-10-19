@@ -48,8 +48,8 @@ const CONTEXT = { allowed_platforms: 'linkedin', content_type: 'text', audience:
 const GATE_CONTENT = { intent: 'E2E: verification-footer (creds-free) — bounded public publishing.' };
 
 // Publish profile → verb "Published"; ASCII "--" separator (mojibake-immune);
-// "Receipt:" label — the receipt is the precondition proof, not a "Verify" CTA.
-const FOOTER_MARKER = '-- Published by an AI agent via Suveren. Receipt:';
+// "Ticket:" label (gateway 0.36.0, v0.7 vocabulary) — the ticket is the precondition proof, not a "Verify" CTA.
+const FOOTER_MARKER = '-- Published by an AI agent via Suveren. Ticket:';
 // Constant second line promoting the protocol — present on every footer.
 // Footer v1.1 wording (suveren-gateway e56555b shortened it). Source of truth:
 // apps/mcp-server/src/lib/receipt-footer.ts — keep this in step with it.

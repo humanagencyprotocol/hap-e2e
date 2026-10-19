@@ -43,8 +43,8 @@ const ROOT = join(import.meta.dirname, '..', '..');
 const PROFILES_DIR = join(ROOT, 'hap-profiles');
 
 // Email profile → verb "Sent"; ASCII "--" separator (mojibake-immune);
-// "Receipt:" label — the receipt is the precondition proof, not a "Verify" CTA.
-const FOOTER_MARKER = '-- Sent by an AI agent via Suveren. Receipt:';
+// "Ticket:" label (gateway 0.36.0, v0.7 vocabulary) — the ticket is the precondition proof, not a "Verify" CTA.
+const FOOTER_MARKER = '-- Sent by an AI agent via Suveren. Ticket:';
 const RECEIPT_LINK = /https?:\/\/[^\s"]+\/t\/([0-9a-fA-F-]{36})/;
 
 const TEST_RECIPIENT = 'andreas@sublin.app';
