@@ -173,7 +173,10 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
     await expect(card).toContainText('Open balance');
     await expect(card).toContainText('1,200.00 EUR');
 
-    const table = card.locator('table.preview-table');
+    // The card's merged table (the read's item name). The bound-args fold below
+    // the card now shows the raw `lines` as a table too (one rule for records,
+    // gateway 0.35.2), so pick the merged one by what only it carries.
+    const table = card.locator('table.preview-table').filter({ hasText: 'Keilriemen SPB 2000' });
     await expect(table).toBeVisible();
     await expect(table).toContainText('Item'); // manifest label, not "Item id"
     await expect(table).toContainText('Keilriemen SPB 2000');

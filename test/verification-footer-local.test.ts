@@ -1,8 +1,8 @@
 /**
  * Verification footer — happy-path E2E WITHOUT Gmail credentials.
  *
- * The footer is integration-agnostic: the gateway injects it into any Category-A
- * (communicative) profile's content field, regardless of which MCP server backs
+ * The footer is integration-agnostic: the gateway injects it into the text field
+ * a tool's manifest declares (\`message\`), regardless of which MCP server backs
  * the tool. Every *real* Category-A integration (gmail, calendar, linkedin)
  * needs OAuth — which is why verification-footer.test.ts auto-skips in CI. This
  * test exercises the SAME gateway footer code with NO credentials by gating the
@@ -48,8 +48,8 @@ const CONTEXT = { allowed_platforms: 'linkedin', content_type: 'text', audience:
 const GATE_CONTENT = { intent: 'E2E: verification-footer (creds-free) — bounded public publishing.' };
 
 // Publish profile → verb "Published"; ASCII "--" separator (mojibake-immune);
-// "Receipt:" label — the receipt is the precondition proof, not a "Verify" CTA.
-const FOOTER_MARKER = '-- Published by an AI agent via Suveren. Receipt:';
+// "Ticket:" label (gateway 0.36.0, v0.7 vocabulary) — the ticket is the precondition proof, not a "Verify" CTA.
+const FOOTER_MARKER = '-- Published by an AI agent via Suveren. Ticket:';
 // Constant second line promoting the protocol — present on every footer.
 // Footer v1.1 wording (suveren-gateway e56555b shortened it). Source of truth:
 // apps/mcp-server/src/lib/receipt-footer.ts — keep this in step with it.
@@ -128,7 +128,9 @@ describe('Setup', () => {
       toolGating: {
         default: { executionMapping: {}, staticExecution: { allowed_platforms: 'linkedin', content_type: 'text', audience: 'public', action_type: 'post' } },
         overrides: {
-          create_record: { executionMapping: {}, staticExecution: { allowed_platforms: 'linkedin', content_type: 'text', audience: 'public', action_type: 'post' } },
+          // Gateway 0.36.0: the footer goes only to a tool that declares
+          // \`message\` — which field holds the text, and the verb.
+          create_record: { executionMapping: {}, staticExecution: { allowed_platforms: 'linkedin', content_type: 'text', audience: 'public', action_type: 'post' }, message: { text: 'content', verb: 'Published' } },
           // Read tools must declare governance (F9) or they are denied. The
           // publish profile has no read model — the records store is only a
           // sink here, read back to prove the footer survived storage — so an

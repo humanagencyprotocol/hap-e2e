@@ -456,6 +456,13 @@ export async function handleOnboarding(page: Page): Promise<void> {
  * Skips activation if the integration is already running (e.g. personalDefault
  * integrations auto-register on gateway startup).
  */
+/** The integration card's title: the name, optionally followed by " · <system>". */
+export function cardTitlePattern(integrationName: string): RegExp {
+  const aliases: Record<string, string[]> = { 'Email (simulation)': ['Email (simulation)', 'Email'] };
+  const names = (aliases[integrationName] ?? [integrationName]).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(`^(${names.join('|')})( · .+)?$`);
+}
+
 export async function activateIntegration(page: Page, integrationName: string): Promise<void> {
   // Let the app shell settle (auth/mode resolved, initial Dashboard rendered)
   // before navigating — clicking too early races the first render and the route
@@ -470,7 +477,10 @@ export async function activateIntegration(page: Page, integrationName: string): 
 
   // Exact title match: a substring match ("text=ERP") also hits other cards
   // whose text merely mentions the name, and then "already running" is never seen.
-  const card = page.locator('.card', { has: page.getByText(integrationName, { exact: true }) }).first();
+  // Gateway >= 0.35.1 appends the system behind the connector to the title
+  // ("CRM · Test data", "ERP · Local") and renamed "Email (simulation)" to
+  // "Email" — match the name alone or followed by " · <label>".
+  const card = page.locator('.card', { has: page.locator('.card-title', { hasText: cardTitlePattern(integrationName) }) }).first();
   await card.waitFor({ state: 'visible', timeout: 10_000 });
   await card.scrollIntoViewIfNeeded();
 
