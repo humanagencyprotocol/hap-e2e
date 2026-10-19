@@ -1,8 +1,8 @@
 /**
  * Verification footer — happy-path E2E WITHOUT Gmail credentials.
  *
- * The footer is integration-agnostic: the gateway injects it into any Category-A
- * (communicative) profile's content field, regardless of which MCP server backs
+ * The footer is integration-agnostic: the gateway injects it into the text field
+ * a tool's manifest declares (\`message\`), regardless of which MCP server backs
  * the tool. Every *real* Category-A integration (gmail, calendar, linkedin)
  * needs OAuth — which is why verification-footer.test.ts auto-skips in CI. This
  * test exercises the SAME gateway footer code with NO credentials by gating the
@@ -128,7 +128,9 @@ describe('Setup', () => {
       toolGating: {
         default: { executionMapping: {}, staticExecution: { allowed_platforms: 'linkedin', content_type: 'text', audience: 'public', action_type: 'post' } },
         overrides: {
-          create_record: { executionMapping: {}, staticExecution: { allowed_platforms: 'linkedin', content_type: 'text', audience: 'public', action_type: 'post' } },
+          // Gateway 0.36.0: the footer goes only to a tool that declares
+          // \`message\` — which field holds the text, and the verb.
+          create_record: { executionMapping: {}, staticExecution: { allowed_platforms: 'linkedin', content_type: 'text', audience: 'public', action_type: 'post' }, message: { text: 'content', verb: 'Published' } },
           // Read tools must declare governance (F9) or they are denied. The
           // publish profile has no read model — the records store is only a
           // sink here, read back to prove the footer survived storage — so an
