@@ -7,17 +7,9 @@
  * EU VIES service (vies-stub.ts), reached through the connector's own
  * `ERP_VIES_URL` setting.
  *
- * How ERP_VIES_URL reaches the connector — the one deviation from "activate it
- * the way the UI does": erp.json maps no credential field to ERP_VIES_URL and
- * does not list it in `mcp.passEnv`, so a gateway-run connector cannot be
- * pointed at a stub through any supported setting (reported, see the suite
- * header). The suite therefore registers the erp integration through the
- * gateway's internal add-integration route with EXACTLY what the control
- * plane's activateIntegration builds from erp.json (mcp-bridge.ts: command,
- * args, envKeys/optionalEnvKeys from envMapping, profile, toolGating,
- * npmPackage) plus one literal `env` entry: { ERP_VIES_URL: <stub> }. The
- * registry's literal `env` is spawned with the connector (integration-manager
- * `...config.env`); toolGating is re-read from the manifest on every start.
+ * How ERP_VIES_URL reaches the connector: through the connector's own setting,
+ * erp.json's "VAT-ID check address" field (`viesUrl` → ERP_VIES_URL), saved in
+ * the vault and activated the way the gateway UI does it — no workaround.
  *
  * Shared by test/erp-local-production.test.ts (vitest) and
  * e2e/erp-local-production.spec.ts (Playwright, the card in a browser).
@@ -121,10 +113,14 @@ export class ErpLocalStack {
     // The person's own connector settings, saved the way the gateway UI saves them.
     this.companyFile = join(this.dataDir, 'company.json');
     writeFileSync(this.companyFile, JSON.stringify(COMPANY, null, 2));
-    const put = await this.cp.authed(this.apiKey, 'PUT', '/vault/credentials/erp', { mode: 'live', liveAdapter: 'local', companyFile: this.companyFile });
+    const put = await this.cp.authed(this.apiKey, 'PUT', '/vault/credentials/erp', {
+      mode: 'live', liveAdapter: 'local', companyFile: this.companyFile, viesUrl: this.opts.viesUrl,
+    });
     if (put.status !== 200) throw new Error(`vault PUT erp: ${put.status} ${await put.text()}`);
+    const act = await this.cp.authed(this.apiKey, 'POST', '/mcp/integrations/erp/activate');
+    if (act.status !== 200) throw new Error(`activate erp: ${act.status} ${await act.text()}`);
+    await this.gw.waitForIntegration('erp');
 
-    await this.addErpIntegration({ ERP_VIES_URL: this.opts.viesUrl });
     if (this.opts.mail) {
       const res = await this.cp.authed(this.apiKey, 'POST', '/mcp/integrations/mail/activate');
       if (res.status !== 200) throw new Error(`activate mail: ${res.status} ${await res.text()}`);
@@ -139,29 +135,6 @@ export class ErpLocalStack {
     await new Promise((r) => setTimeout(r, 1_000));
     this.agent = new Client({ name: `erp-local-agent-${this.opts.label}`, version: '1.0.0' }, { capabilities: {} });
     await this.agent.connect(new SSEClientTransport(new URL(`${this.mcpUrl}/sse`)));
-  }
-
-  /**
-   * Register the erp integration exactly as the control plane's
-   * activateIntegration builds it from erp.json, plus a literal `env`
-   * (see the module header for why).
-   */
-  async addErpIntegration(env: Record<string, string>): Promise<void> {
-    const m = JSON.parse(readFileSync(ERP_MANIFEST_PATH, 'utf8'));
-    const optional = new Set((m.credentials.fields as Array<{ key: string; optional?: boolean }>).filter((f) => f.optional).map((f) => f.key));
-    const envKeys: Record<string, string> = {};
-    const optionalEnvKeys: Record<string, string> = {};
-    for (const [envVar, credKey] of Object.entries(m.credentials.envMapping as Record<string, string>)) {
-      (optional.has(credKey) ? optionalEnvKeys : envKeys)[envVar] = `${m.id}.${credKey}`;
-    }
-    const added = await this.gw.addIntegration({
-      id: m.id, name: m.name, command: m.mcp.command, args: m.mcp.args,
-      env: { ...(m.mcp.env ?? {}), ...env }, envKeys,
-      ...(Object.keys(optionalEnvKeys).length > 0 ? { optionalEnvKeys } : {}),
-      profile: m.profile, toolGating: m.toolGating, npmPackage: m.npmPackage, enabled: true,
-    } as Parameters<GatewayClient['addIntegration']>[0]);
-    if (added.warning) throw new Error(`erp integration: ${added.warning}`);
-    await this.gw.waitForIntegration('erp');
   }
 
   async stop(): Promise<void> {

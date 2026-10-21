@@ -1,28 +1,32 @@
 /**
- * ERP Local in production — the approval card in a browser, on its own real
+ * ERP Local in production — what a person sees, in a browser, on its own real
  * stack (Authority Server + gateway + erp-mcp live/local; VIES = the local
- * stand-in, src/helpers/vies-stub.ts). The behaviour itself (checks, blocking,
+ * stand-in src/helpers/vies-stub.ts, reached through the connector's own
+ * "VAT-ID check address" setting). The behaviour behind it (checks, blocking,
  * VIES, quotes, catalogue, migration) is proven in
- * test/erp-local-production.test.ts against the control plane's card data;
- * this spec checks what a person sees.
+ * test/erp-local-production.test.ts; this spec checks the signed-off card
+ * (UI spec §4.2.2 checks line, revised 2026-10-21, mockup temp/erp-checks-mockup):
+ *
+ *  - checks line: one line per check — pass ✓ quiet, not checked "–" bold in a
+ *    dashed frame, notice a plain line with a thin edge; no red line on a card
+ *    (a failing blocking check never reaches one);
+ *  - the VIES answer in its own "From EU VIES — checked <time>" box OUTSIDE the
+ *    sealed values (display-only, asked again on save);
+ *  - a tax-data change as a Now / New table, plus the "already issued" notice;
+ *  - an invoice line priced off the list: the "Price vs. list" notice;
+ *  - a quote: the PDF as it will be issued;
+ *  - a refused request (VIES invalid): a "Blocked — a check failed" entry.
  *
  * Its own stack (src/helpers/erp-local-stack.ts, ports 19950–19952) rather than
  * the shared Playwright gateway: the erp connector here runs in live mode
  * "local", which the shared gateway's AU8/AU10 specs must not inherit.
- *
- * PENDING (UI not finished at the gateway branch head this was written
- * against, suveren-gateway feat/erp-local-production @ 3c139d0): the manifest
- * `checks` line (pass ✓ / fail ✕ red / not checked – / notice) is not rendered
- * by ApprovalBody yet — the card shows only the per-call limit checks. Those
- * cases are `test.fixme` below with what they must show; drop the fixme when
- * the UI lands (UI spec suveren-as/docs/ui-spec, "checks line").
  */
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { test, expect, openApprovalCard } from './fixtures';
-import { ErpLocalStack, ERP_MANIFEST_PATH, P, TODAY_VIENNA, proposalIdOf } from '../src/helpers/erp-local-stack.js';
+import { ErpLocalStack, ERP_MANIFEST_PATH, P, TODAY_VIENNA, proposalIdOf, resultJson } from '../src/helpers/erp-local-stack.js';
 import { ViesStub } from '../src/helpers/vies-stub.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -33,17 +37,15 @@ mkdirSync(SCREENSHOT_DIR, { recursive: true });
 const manifest = (() => { try { return JSON.parse(readFileSync(ERP_MANIFEST_PATH, 'utf8')); } catch { return null; } })();
 const PRE = process.env.HAP_E2E_PREINSTALLED_INTEGRATIONS;
 const preErp = PRE ? join(PRE, 'node_modules', '@humanagencyp', 'erp-mcp', 'dist', 'index.js') : '';
-const AVAILABLE = !!manifest?.toolGating?.overrides?.create_customer?.checks
+const AVAILABLE = !!manifest?.credentials?.envMapping?.ERP_VIES_URL
+  && existsSync(join(ROOT, 'suveren-gateway', 'apps', 'ui', 'src', 'components', 'ChecksLines.tsx'))
   && existsSync(join(ROOT, 'hap-profiles', 'master-data', '0.1.profile.json'))
   && ((!!preErp && existsSync(preErp) && readFileSync(preErp, 'utf8').includes('check_customer_duplicates'))
     || String(manifest?.npmVersion ?? '').localeCompare('0.10.0', undefined, { numeric: true }) >= 0);
-/** The UI renders manifest checks once ApprovalBody knows them (any of these markers). */
-const APPROVAL_BODY = join(ROOT, 'suveren-gateway', 'apps', 'ui', 'src', 'components', 'ApprovalBody.tsx');
-const UI_HAS_CHECKS = existsSync(join(ROOT, 'suveren-gateway', 'apps', 'ui', 'src', 'components', 'ChecksLines.tsx'))
-  || (existsSync(APPROVAL_BODY) && /manifestChecks|ChecksLines|preview\.checks/.test(readFileSync(APPROVAL_BODY, 'utf8')));
 
 const MASTER_DATA = `${P}/master-data@0.1`;
 const INVOICING = `${P}/invoicing@0.1`;
+const SALES = `${P}/sales@0.4`;
 const MD_BOUNDS = {
   profile: MASTER_DATA, read_access: 'unlimited', customer_create_daily_max: 10, customer_update_daily_max: 10,
   customer_tax_daily_max: 10, customer_payment_daily_max: 0, item_create_daily_max: 10, item_update_daily_max: 10,
@@ -53,8 +55,15 @@ const INV_BOUNDS = {
   profile: INVOICING, read_access: 'unlimited', invoice_net_max: 20_000, credit_net_max: 20_000,
   invoice_net_monthly_max: 100_000, credit_net_monthly_max: 100_000, invoice_daily_max: 10, credit_daily_max: 10,
 };
+const SALES_BOUNDS = {
+  profile: SALES, read_access: 'unlimited', value_max: 20_000, discount_max: 0, order_value_daily_max: 0,
+  quote_daily_max: 10, send_daily_max: 0, order_daily_max: 0, setup_daily_max: 0,
+};
 const CUSTOMER = { name: 'Kunde GmbH', address_lines: ['Kundenweg 2', '4020 Linz'], country: 'AT', uid: 'ATU11111111', email: 'buchhaltung@kunde-gmbh.example' };
 const OUTAGE = { name: 'Nord Anlagen GmbH', address_lines: ['Hafenstraße 4', '20457 Hamburg'], country: 'DE', uid: 'DE333333333' };
+const INVALID = { name: 'Falsch GmbH', address_lines: ['Irrweg 1', '1010 Wien'], country: 'AT', uid: 'ATU22222222' };
+const NEW_UID = 'ATU44444444';
+const SERVICE_PERIOD = { from: '2026-09-01', to: '2026-09-30' };
 
 async function signIn(page: Page, cpUrl: string, apiKey: string): Promise<void> {
   await page.goto(`${cpUrl}/login`, { waitUntil: 'networkidle' });
@@ -64,22 +73,36 @@ async function signIn(page: Page, cpUrl: string, apiKey: string): Promise<void> 
   await expect(page.locator('.page-title')).toBeVisible({ timeout: 15_000 });
 }
 
-async function openApprovals(page: Page): Promise<void> {
+async function openCard(page: Page, s: ErpLocalStack, hasText: string | RegExp): Promise<Locator> {
+  await signIn(page, s.cpUrl, s.apiKey);
   await page.click('.sidebar-item:has-text("Approvals")');
   await page.waitForURL('**/approvals');
   const awaiting = page.locator('.nav-tab:has-text("Awaiting me")');
   if (await awaiting.count()) await awaiting.click();
+  const card = await openApprovalCard(page, hasText);
+  await expect(card.locator('[data-preview-status="ok"]').first()).toBeVisible({ timeout: 45_000 });
+  return card;
 }
 
-test.describe.serial('ERP Local in production — the approval card (own real stack)', () => {
-  test.skip(!AVAILABLE, 'needs the gateway erp.json with `checks`, hap-profiles master-data@0.1 and a preinstalled erp-mcp with the Local production tools');
+/** The checks line of a card, and the one rule that holds on every card: no red line on it. */
+async function checksOf(card: Locator): Promise<Locator> {
+  const body = card.getByTestId('card-checks-body');
+  await expect(body).toBeVisible({ timeout: 30_000 });
+  await expect(card.getByTestId('card-checks-top')).toHaveCount(0);
+  await expect(card.locator('[data-check-status="fail"]')).toHaveCount(0);
+  return body;
+}
+
+function line(checks: Locator, status: 'pass' | 'not_checked' | 'notice', text: string | RegExp): Locator {
+  return checks.locator(`[data-check-status="${status}"]`, { hasText: text });
+}
+
+test.describe.serial('ERP Local in production — the approval card and Blocked (own real stack)', () => {
+  test.skip(!AVAILABLE, 'needs a gateway with the erp.json VIES address setting and ChecksLines, hap-profiles master-data@0.1, and erp-mcp with the Local production tools');
 
   const vies = new ViesStub();
   let s: ErpLocalStack;
-  let customerProposal = '';
-  let outageProposal = '';
   let customerId = '';
-  let taxProposal = '';
 
   test.beforeAll(async () => {
     test.setTimeout(300_000);
@@ -88,14 +111,14 @@ test.describe.serial('ERP Local in production — the approval card (own real st
     const url = await vies.start();
     vies.set(CUSTOMER.uid, { kind: 'valid', name: 'KUNDE GMBH', address: 'Kundenweg 2, 4020 Linz', requestIdentifier: 'WAPI-CARD-0001' });
     vies.set(OUTAGE.uid, { kind: 'unavailable' });
-    vies.set('ATU44444444', { kind: 'valid' });
+    vies.set(INVALID.uid, { kind: 'invalid' });
+    vies.set(NEW_UID, { kind: 'valid' });
     s = new ErpLocalStack({ asPort: 19950, mcpPort: 19951, cpPort: 19952, viesUrl: url, label: 'pw' });
     await s.start();
-    await s.grant(MASTER_DATA, MD_BOUNDS, {}, 'E2E: customers, each change approved.');
+    await s.grant(MASTER_DATA, MD_BOUNDS, {}, 'E2E: customers and catalogue, each change approved.');
     await s.grant(INVOICING, INV_BOUNDS, { currency: 'EUR' }, 'E2E: invoices, each approved.');
+    await s.grant(SALES, SALES_BOUNDS, { currency: 'EUR' }, 'E2E: quotes, each approved.');
     await new Promise((r) => setTimeout(r, 1_000));
-    customerProposal = proposalIdOf((await s.call('erp__create_customer', CUSTOMER)).text);
-    outageProposal = proposalIdOf((await s.call('erp__create_customer', OUTAGE)).text);
   });
 
   test.afterAll(async () => {
@@ -103,86 +126,147 @@ test.describe.serial('ERP Local in production — the approval card (own real st
     await vies.stop();
   });
 
-  test('create_customer card: the manifest summary, the bound values with their labels, the VIES answer from the system', async ({ page }) => {
+  test('create_customer: summary, sealed values, passing checks, and the VIES answer in its own box outside the sealed values', async ({ page }) => {
     test.setTimeout(120_000);
-    await signIn(page, s.cpUrl, s.apiKey);
-    await openApprovals(page);
-    const card = await openApprovalCard(page, /Kunde GmbH/);
-    // Summary sentence from erp.json — never from the AI.
+    const proposal = proposalIdOf((await s.call('erp__create_customer', CUSTOMER)).text);
+    const card = await openCard(page, s, /Kunde GmbH/);
     await expect(page.locator('[data-testid="approval-row"].is-open [data-testid="approval-row-summary"]').or(card).first())
-      .toContainText('New customer Kunde GmbH, AT — VAT ID ATU11111111', { timeout: 20_000 });
-    await expect(card.locator('[data-preview-status="ok"]').first()).toBeVisible({ timeout: 45_000 });
-    // Sealed values, manifest labels.
+      .toContainText('New customer Kunde GmbH, AT — VAT ID ATU11111111');
     for (const t of ['VAT ID', 'ATU11111111', 'Kundenweg 2', '4020 Linz']) await expect(card).toContainText(t);
-    // From the system: what VIES returned (its consultation number), marked as read by the gateway.
-    await expect(card).toContainText('WAPI-CARD-0001');
-    await expect(card).toContainText('KUNDE GMBH');
-    await expect(card).toContainText('Read by the gateway, not by the AI');
-    await expect(card).toContainText('from the system — read by the gateway, not by the AI');
-    await card.screenshot({ path: join(SCREENSHOT_DIR, 'create-customer-card.png') });
-  });
 
-  test('create_customer card: the VIES read under the manifest labels, hidden fields hidden, the duplicates read not shown as a section', async ({ page }) => {
-    test.fixme(!UI_HAS_CHECKS, 'PENDING UI: at the branch head the read fields render as one raw run-on line ("VIES result valid, —, <iso>, <id>, …"), ' +
-      'display.labels/hidden for attached reads are not applied, and the `as: duplicates` read is rendered as its own section');
-    test.setTimeout(120_000);
-    await signIn(page, s.cpUrl, s.apiKey);
-    await openApprovals(page);
-    const card = await openApprovalCard(page, /Kunde GmbH/);
-    await expect(card.locator('[data-preview-status="ok"]').first()).toBeVisible({ timeout: 45_000 });
-    await expect(card).toContainText('Name at VIES');
-    await expect(card).toContainText('Address at VIES');
-    await expect(card).toContainText('Consultation no.');
+    const checks = await checksOf(card);
+    for (const label of ['VAT ID format', 'VAT ID confirmed by VIES', 'No other customer with this VAT ID']) {
+      await expect(line(checks, 'pass', label)).toHaveCount(1);
+      await expect(line(checks, 'pass', label).locator('.check-mark')).toHaveText('✓');
+    }
+    await expect(line(checks, 'pass', 'VAT ID confirmed by VIES')).toContainText(`checked ${TODAY_VIENNA}`);
+
+    const box = card.getByTestId('system-box');
+    await expect(box).toHaveCount(1);
+    await expect(box.locator('.system-box-heading')).toContainText(/^From EU VIES — checked /);
+    for (const t of ['Name at VIES', 'KUNDE GMBH', 'Address at VIES', 'Kundenweg 2, 4020 Linz', 'Consultation no.', 'WAPI-CARD-0001']) await expect(box).toContainText(t);
+    await expect(box).toContainText('Shown for this decision only. It is asked again when this is saved; that answer is stored.');
+    // Outside the sealed values, and hidden fields stay hidden; the duplicates read is input for checks only.
+    await expect(card.locator('.sealed, [data-sealed]').filter({ hasText: 'WAPI-CARD-0001' })).toHaveCount(0);
     await expect(card).not.toContainText('Another customer has it');
     await expect(card).not.toContainText('Check customer duplicates');
-  });
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'create-customer-card.png') });
 
-  test('approving in the browser creates the customer — the ticket is the Authority Server\'s', async ({ page }) => {
-    test.setTimeout(120_000);
-    await signIn(page, s.cpUrl, s.apiKey);
-    await openApprovals(page);
-    const card = await openApprovalCard(page, /Kunde GmbH/);
     await card.locator('button:has-text("Approve")').first().click();
-    const done = await s.awaitExecution(customerProposal);
+    const done = await s.awaitExecution(proposal);
     expect(done.denied, done.text).toBe(false);
-    customerId = JSON.parse(done.text.slice(done.text.indexOf('Result:') + 7)).id;
+    customerId = resultJson(done.text).id;
     const { tickets } = await s.sp.getMyTicketsPage(s.apiKey, { limit: 50 });
     expect(tickets.some((t: any) => String(t.action).includes('create_customer'))).toBe(true);
   });
 
-  test('checks line: VIES unreachable reads "not checked" with the reason and the outage sentence, nothing red', async ({ page }) => {
-    test.fixme(!UI_HAS_CHECKS, 'PENDING UI: the manifest checks line is not rendered by the gateway under test');
+  test('VIES unreachable: "not checked" in a dashed frame with the reason and the outage sentence — nothing red', async ({ page }) => {
     test.setTimeout(120_000);
-    await signIn(page, s.cpUrl, s.apiKey);
-    await openApprovals(page);
-    const card = await openApprovalCard(page, /Nord Anlagen GmbH/);
-    await expect(card).toContainText('VAT ID confirmed by VIES', { timeout: 45_000 });
-    await expect(card).toContainText('not checked');
-    await expect(card).toContainText('VIES unreachable (HTTP 503)');
-    await expect(card).toContainText('saving is not blocked while VIES is unreachable');
+    const proposal = proposalIdOf((await s.call('erp__create_customer', OUTAGE)).text);
+    const card = await openCard(page, s, /Nord Anlagen GmbH/);
+    const checks = await checksOf(card);
+    const nc = line(checks, 'not_checked', 'VAT ID confirmed by VIES');
+    await expect(nc).toHaveCount(1);
+    await expect(nc).toHaveClass(/check-not-checked/);
+    await expect(nc.locator('.check-mark')).toHaveText('–');
+    await expect(nc).toContainText('VAT ID confirmed by VIES: not checked');
+    await expect(nc).toContainText('VIES unreachable (HTTP 503)');
+    await expect(nc).toContainText('saving is not blocked while VIES is unreachable');
+    // "not checked" comes first (what needs attention), before the passed checks.
+    await expect(checks.locator('.check-line').first()).toHaveAttribute('data-check-status', 'not_checked');
+    await expect(card.getByTestId('system-box')).toHaveCount(0); // VIES gave no answer to show
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'create-customer-vies-not-checked.png') });
-    void outageProposal;
+    await s.reject(proposal);
   });
 
-  test('checks line: a tax-data change on an invoiced customer shows "Already issued to this customer" as a notice', async ({ page }) => {
-    test.fixme(!UI_HAS_CHECKS, 'PENDING UI: the manifest checks line is not rendered by the gateway under test');
+  test('tax-data change on an invoiced customer: Now / New table and the "already issued" notice', async ({ page }) => {
     test.setTimeout(180_000);
-    expect(customerId, 'created by the approval test').not.toBe('');
+    expect(customerId, 'created in the first test').not.toBe('');
     const inv = await s.call('erp__create_invoice', {
-      customer_id: customerId, number: '2026-0001', document_date: TODAY_VIENNA, service_period: { from: '2026-09-01', to: '2026-09-30' },
+      customer_id: customerId, number: '2026-0001', document_date: TODAY_VIENNA, service_period: SERVICE_PERIOD,
       lines: [{ description: 'Beratung', qty: 1, unit_price: 100, vat_rate: 20 }], net_total: 100, currency: 'EUR',
     });
-    const issued = await s.approve(proposalIdOf(inv.text));
-    expect(issued.denied, issued.text).toBe(false);
-    taxProposal = proposalIdOf((await s.call('erp__update_customer_tax_data', {
-      id: customerId, revision: 1, name: CUSTOMER.name, address_lines: CUSTOMER.address_lines, country: 'AT', uid: 'ATU44444444',
+    expect((await s.approve(proposalIdOf(inv.text))).denied).toBe(false);
+    const proposal = proposalIdOf((await s.call('erp__update_customer_tax_data', {
+      id: customerId, revision: 1, name: CUSTOMER.name, address_lines: ['Kundenweg 9', '4020 Linz'], country: 'AT', uid: NEW_UID,
     })).text);
+    const card = await openCard(page, s, /Change tax data of customer/);
+
+    const table = card.getByTestId('compare-table');
+    await expect(table).toHaveCount(1);
+    await expect(table.locator('thead')).toContainText('Now (from');
+    await expect(table.locator('thead')).toContainText('New');
+    const uidRow = table.locator('tr', { hasText: 'VAT ID' });
+    await expect(uidRow.locator('.compare-now')).toContainText('ATU11111111');
+    await expect(uidRow.locator('.compare-new')).toContainText(NEW_UID);
+    const addrRow = table.locator('tr', { hasText: 'Address' });
+    await expect(addrRow.locator('.compare-now')).toContainText('Kundenweg 2');
+    await expect(addrRow.locator('.compare-new')).toContainText('Kundenweg 9');
+
+    const checks = await checksOf(card);
+    const issued = line(checks, 'notice', 'Already issued to this customer');
+    await expect(issued).toHaveCount(1);
+    await expect(issued).toHaveClass(/check-notice/);
+    await expect(issued).toContainText('Already issued to this customer: 1 invoice, 0 credit notes — they keep the old data');
+    await expect(line(checks, 'pass', 'New VAT ID confirmed by VIES')).toHaveCount(1);
+    await expect(line(checks, 'pass', 'Request is for the record\'s current version')).toHaveCount(1);
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'tax-data-now-new-already-issued.png') });
+    await s.reject(proposal);
+  });
+
+  test('invoice line priced off the list: the "Price vs. list" notice names both prices', async ({ page }) => {
+    test.setTimeout(180_000);
+    const itemDone = await s.approve(proposalIdOf((await s.call('erp__create_item', {
+      name: 'Beratungsstunde', kind: 'service', unit: 'Std.', list_price: 120, vat_rate: 20, sku: 'B-100',
+    })).text));
+    expect(itemDone.denied, itemDone.text).toBe(false);
+    const item = resultJson(itemDone.text);
+    const proposal = proposalIdOf((await s.call('erp__create_invoice', {
+      customer_id: customerId, number: '2026-0002', document_date: TODAY_VIENNA, service_period: SERVICE_PERIOD,
+      lines: [{ item_id: item.id, description: 'Beratung (Sonderpreis)', qty: 3, unit: 'Std.', unit_price: 100, vat_rate: 20 }],
+      net_total: 300, currency: 'EUR',
+    })).text);
+    const card = await openCard(page, s, /2026-0002/);
+    const checks = await checksOf(card);
+    const lp = line(checks, 'notice', 'Price vs. list');
+    await expect(lp).toHaveCount(1);
+    await expect(lp).toContainText(/Price vs\. list: line 1: .*100[.,]00.*list price .*120[.,]00/);
+    await expect(line(checks, 'pass', 'VAT vs. item')).toHaveCount(1);
+    await expect(card.getByTestId('document-preview')).toBeVisible();
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'invoice-price-vs-list.png') });
+    await s.reject(proposal);
+  });
+
+  test('create_quote: the quote PDF as it will be issued', async ({ page }) => {
+    test.setTimeout(120_000);
+    const proposal = proposalIdOf((await s.call('erp__create_quote', {
+      customer_id: customerId, number: 'A-2026-001', document_date: TODAY_VIENNA,
+      lines: [{ description: 'Workshop Prozessanalyse', qty: 2, unit: 'Tag', unit_price: 950, vat_rate: 20 }],
+      value: 1900, discount_pct: 0, currency: 'EUR',
+    })).text);
+    const card = await openCard(page, s, /A-2026-001/);
+    const pdf = card.getByTestId('document-preview');
+    await expect(pdf).toBeVisible({ timeout: 45_000 });
+    await expect(pdf).toContainText('The PDF as it will be issued');
+    await expect(pdf.locator('.document-preview-filename')).toContainText('A-2026-001');
+    await expect(pdf).toContainText('Fingerprint');
+    await expect(pdf.locator('object[type="application/pdf"]')).toHaveCount(1);
+    await card.screenshot({ path: join(SCREENSHOT_DIR, 'quote-pdf.png') });
+    await s.reject(proposal);
+  });
+
+  test('VIES invalid: no card — the Blocked page shows "Blocked — a check failed"', async ({ page }) => {
+    test.setTimeout(120_000);
+    const r = await s.call('erp__create_customer', INVALID);
+    expect(r.denied, r.text).toBe(true);
     await signIn(page, s.cpUrl, s.apiKey);
-    await openApprovals(page);
-    const card = await openApprovalCard(page, /Change tax data of customer/);
-    await expect(card).toContainText('Already issued to this customer', { timeout: 45_000 });
-    await expect(card).toContainText('1 invoices, 0 credit notes — they keep the old data');
-    await card.screenshot({ path: join(SCREENSHOT_DIR, 'tax-data-already-issued.png') });
-    void taxProposal;
+    await page.click('.sidebar-item:has-text("Blocked")');
+    await page.waitForURL('**/blocked');
+    const item = page.locator('.blocked-item', { hasText: 'Blocked — a check failed' }).first();
+    await expect(item).toBeVisible({ timeout: 20_000 });
+    await expect(item).toContainText('create_customer');
+    await expect(item).toContainText('VAT ID confirmed by VIES');
+    await expect(item).toContainText('Nothing ran and no approval was asked for.');
+    await page.screenshot({ path: join(SCREENSHOT_DIR, 'blocked-check-failed.png'), fullPage: true });
   });
 });

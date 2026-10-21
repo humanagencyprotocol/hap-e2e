@@ -7,24 +7,24 @@
  * (AM1–AM4), §12 (Andreas's decisions D1–D5) and §13 (F1–F14).
  *
  * The ONLY stand-in is the EU VIES service: a local HTTP server
- * (src/helpers/vies-stub.ts) the connector reaches through its own
- * ERP_VIES_URL setting. erp.json maps no gateway setting to ERP_VIES_URL, so
- * the erp integration is registered with exactly what the control plane builds
- * from erp.json plus that one literal env entry — see
- * src/helpers/erp-local-stack.ts. One optional test (end of file) asks the
- * REAL EU VIES and skips, saying so, when it cannot be reached.
+ * (src/helpers/vies-stub.ts) the connector reaches through its own setting,
+ * erp.json's "VAT-ID check address" (viesUrl → ERP_VIES_URL), saved and
+ * activated the way the gateway UI does it. One optional test (end of file)
+ * asks the REAL EU VIES and skips, saying so, when it cannot be reached.
  *
  *   1. master-data mandates: review only — the AS refuses automatic and
  *      review_above_cap (suveren-as PR #109);
  *   2. create_customer → card → approve → ticket; update_customer_tax_data on a
  *      customer with issued invoices shows the "already issued" line; a stale
- *      revision is refused (also when the approval races a newer change);
+ *      revision is refused before any card (blocking `revision` check), and an
+ *      approval that races a newer change is refused at execution;
  *   3. VIES: valid / invalid (blocking: refused before any card, Blocked entry)
  *      / unreachable (card says not checked, saving allowed) / AM1 — an
  *      approval survives a second VIES answer with a new request id and a
  *      flipped status; the execution-time answer is what is stored;
- *   4. blocking: duplicate VAT ID, duplicate CRM contact, reverse charge
- *      without a VIES-valid VAT ID (D1), non-EU customer (F3) — each refused
+ *   4. blocking: malformed VAT ID, duplicate VAT ID, duplicate CRM contact,
+ *      reverse charge without a VIES-valid VAT ID (D1), non-EU customer (F3)
+ *      on an invoice and on a quote — each refused
  *      before any proposal, with a Blocked entry, nothing in the ERP;
  *   5. quote (number from the request, own series) → quote PDF → email with the
  *      PDF attached by reference (sha = archive) → create_invoice {quote_id} →
@@ -287,7 +287,7 @@ describe.skipIf(!available)('ERP Local in production (real AS + gateway + erp-mc
       const card = await s.cardPreview(taxProposal);
       const issued = check(card.checks, 'already-invoiced');
       expect(issued.status).toBe('notice');
-      expect(issued.detail).toBe('1 invoices, 0 credit notes — they keep the old data');
+      expect(issued.detail).toBe('1 invoice, 0 credit notes — they keep the old data');
       expect(check(card.checks, 'vies').status).toBe('pass');
       expect(check(card.checks, 'vat-duplicate').status).toBe('pass');
       expect(check(card.checks, 'tax-mode').status).toBe('pass');
@@ -303,18 +303,11 @@ describe.skipIf(!available)('ERP Local in production (real AS + gateway + erp-mc
       expect((await read('erp__get_customer', { id: c1.id, revision: 1 })).uid).toBe(C1.uid);
     });
 
-    it('a stale revision is refused, naming both revisions — nothing changes', async () => {
-      const args = { id: c1.id, revision: 1, name: 'Kunde GmbH (alt)', address_lines: C1.address_lines, country: 'AT', uid: C1_NEW_UID };
-      const r = await s.call('erp__update_customer_tax_data', args);
-      let text = r.text;
-      if (!r.denied) {
-        // Not refused at the gateway: then the approval must not change anything.
-        const done = await s.approve(proposalIdOf(r.text));
-        expect(done.denied, done.text).toBe(true);
-        text = done.text;
-      }
-      note('stale revision', r.denied ? 'refused at the call' : 'proposal made, refused at execution', text);
-      expect(text).toMatch(/revision 2[\s\S]*revision 1|changed|stale|revision/i);
+    it('a stale revision is refused before any card (blocking "revision" check), naming both versions — nothing changes', async () => {
+      const r = await expectBlockedBeforeAnyCard('erp__update_customer_tax_data',
+        { id: c1.id, revision: 1, name: 'Kunde GmbH (alt)', address_lines: C1.address_lines, country: 'AT', uid: C1_NEW_UID },
+        'revision', /Request is for the record's current version: failed/);
+      expect(r.text).toContain('request for version 1, record at version 2');
       const now = await read('erp__get_customer', { id: c1.id });
       expect(now).toMatchObject({ revision: 2, name: C1.name });
     });
@@ -402,6 +395,15 @@ describe.skipIf(!available)('ERP Local in production (real AS + gateway + erp-mc
 
   // ── 4. blocking checks ─────────────────────────────────────────────────
   describe('4. blocking — refused before any proposal, a Blocked entry, nothing in the ERP', () => {
+    it('malformed VAT ID (wrong pattern): refused before any card, never sent to VIES', async () => {
+      const calls = vies.calls.length;
+      await expectBlockedBeforeAnyCard('erp__create_customer',
+        { name: 'Format GmbH', address_lines: ['Formweg 1', '1010 Wien'], country: 'AT', uid: 'ATU1234' }, 'vat-format',
+        /VAT ID format: failed/);
+      expect(vies.calls.length).toBe(calls);
+      expect(await customersByName('Format GmbH')).toHaveLength(0);
+    });
+
     it('duplicate VAT ID', async () => {
       const r = await expectBlockedBeforeAnyCard('erp__create_customer',
         { name: 'Zweitkunde GmbH', address_lines: ['Andere Gasse 1', '1010 Wien'], country: 'AT', uid: AM1_A.uid }, 'vat-duplicate',
@@ -438,34 +440,22 @@ describe.skipIf(!available)('ERP Local in production (real AS + gateway + erp-mc
 
     it('non-EU customer (F3): create_invoice refused before any proposal, Blocked entry, nothing issued', async () => {
       const before = await invoiceCount();
-      const pendingBefore = (await s.pendingProposals()).length;
-      const blockedBefore = (await s.blocked()).length;
-      const r = await s.call('erp__create_invoice', {
+      await expectBlockedBeforeAnyCard('erp__create_invoice', {
         customer_id: nonEu.id, number: '2026-0101', document_date: TODAY_VIENNA, service_period: SERVICE_PERIOD,
         lines: [{ description: 'Beratung', qty: 1, unit_price: 500, vat_rate: 0 }], net_total: 500, currency: 'EUR',
-      });
-      let leftover = '';
-      if (!r.denied && /Proposal ID/.test(r.text)) leftover = proposalIdOf(r.text);
-      try {
-        expect(r.denied, `non-EU invoice was not refused before a card — ${r.text}`).toBe(true);
-        expect(r.text).toMatch(/outside the EU/);
-        expect((await s.pendingProposals()).length).toBe(pendingBefore);
-        expect((await s.blocked()).length).toBe(blockedBefore + 1);
-      } finally {
-        if (leftover) {
-          const card = await s.cardPreview(leftover).catch((e) => ({ reads: [], checks: [], raw: String(e) }));
-          note('non-EU invoice card', 'made (no blocking check)', JSON.stringify({
-            reads: card.reads.map((x: any) => ({ tool: x.tool, status: x.result?.status, message: x.result?.message ?? x.result?.error })),
-            checks: card.checks,
-          }));
-          // Prove at least the connector's own refusal holds, then clean up.
-          const done = await s.approve(leftover);
-          note('non-EU invoice', `proposal ${leftover} made; at execution`, done.text);
-          expect(done.denied, done.text).toBe(true);
-          expect(await invoiceCount()).toBe(before);
-        }
-      }
+      }, 'tax-supported', /Tax treatment supported for this customer: failed/);
       expect(await invoiceCount()).toBe(before);
+    });
+
+    it('non-EU customer (F3): create_quote refused before any proposal, Blocked entry, nothing issued', async () => {
+      const lq = await read('erp__list_quotes', {});
+      const before = (Array.isArray(lq) ? lq : lq?.quotes ?? []).length;
+      await expectBlockedBeforeAnyCard('erp__create_quote', {
+        customer_id: nonEu.id, number: 'A-2026-090', document_date: TODAY_VIENNA,
+        lines: [{ description: 'Beratung', qty: 1, unit_price: 500, vat_rate: 0 }], value: 500, discount_pct: 0, currency: 'EUR',
+      }, 'tax-supported', /Tax treatment supported for this customer: failed/);
+      const lq2 = await read('erp__list_quotes', {});
+      expect((Array.isArray(lq2) ? lq2 : lq2?.quotes ?? []).length).toBe(before);
     });
   });
 

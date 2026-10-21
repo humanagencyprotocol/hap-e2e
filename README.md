@@ -139,10 +139,9 @@ service — and only it — is replaced by a local HTTP server
 (`src/helpers/vies-stub.ts`) reached through the connector's own `ERP_VIES_URL`
 setting, so valid / invalid / unreachable answers and a changed answer between
 card and execution are deterministic. One opt-in case asks the real VIES and
-skips, saying so, without network. The gateway has no setting for
-`ERP_VIES_URL`, so `src/helpers/erp-local-stack.ts` registers the erp
-integration exactly as the control plane builds it from `erp.json`, plus that
-one literal env entry.
+skips, saying so, without network. The stand-in's address is set through the
+connector's own "VAT-ID check address" setting (erp.json `viesUrl`), saved and
+activated the way the gateway UI does it.
 
 The AS runs as `next start`, not `next dev`. That is deliberate: the two are
 not the same server, and the difference is not academic — a route prerendered
