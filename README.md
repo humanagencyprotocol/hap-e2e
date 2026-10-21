@@ -132,6 +132,17 @@ personal defaults (erp, crm, records) and also mail (`email-mcp`), deploy,
 google-calendar and linkedin — with `SUVEREN_OFFLINE=1` a connector missing
 from the folder fails to start instead of being installed.
 
+**The one stand-in: EU VIES.** `erp-local-production` (vitest + Playwright)
+runs the erp connector in live mode "local", which asks the European
+Commission's VIES service whether a customer's VAT ID is valid. That outside
+service — and only it — is replaced by a local HTTP server
+(`src/helpers/vies-stub.ts`) reached through the connector's own `ERP_VIES_URL`
+setting, so valid / invalid / unreachable answers and a changed answer between
+card and execution are deterministic. One opt-in case asks the real VIES and
+skips, saying so, without network. The stand-in's address is set through the
+connector's own "VAT-ID check address" setting (erp.json `viesUrl`), saved and
+activated the way the gateway UI does it.
+
 The AS runs as `next start`, not `next dev`. That is deliberate: the two are
 not the same server, and the difference is not academic — a route prerendered
 at build time was serving a stale signing key, which only production mode

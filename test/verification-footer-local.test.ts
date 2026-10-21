@@ -50,8 +50,8 @@ const GATE_CONTENT = { intent: 'E2E: verification-footer (creds-free) — bounde
 // Publish profile → verb "Published"; ASCII "--" separator (mojibake-immune);
 // "Ticket:" label (gateway 0.36.0, v0.7 vocabulary) — the ticket is the precondition proof, not a "Verify" CTA.
 const FOOTER_MARKER = '-- Published by an AI agent via Suveren. Ticket:';
-// Constant second line promoting the protocol — present on every footer.
-// Footer v1.1 wording (suveren-gateway e56555b shortened it). Source of truth:
+// The second footer line promoting the protocol — REMOVED in gateway 0.38.0 (Andreas
+// 2026-10-21: the footer is the ticket line only). Asserted absent. Source of truth:
 // apps/mcp-server/src/lib/receipt-footer.ts — keep this in step with it.
 const HAP_LINE = '-- Suveren implements HAP, the open Human Agency Protocol: https://www.humanagencyprotocol.org/';
 const RECEIPT_LINK = /\/t\/([0-9a-fA-F-]{36})/;
@@ -188,7 +188,10 @@ describe('Footer — end to end', () => {
     const record = JSON.parse((result.content as Array<{ text: string }>)[0].text);
     recordId = record.id;
     expect(record.content).toContain(FOOTER_MARKER);
-    expect(record.content).toContain(HAP_LINE);
+    // One line only: no HAP promotion line, and the content ends with the ticket link.
+    expect(record.content).not.toContain(HAP_LINE);
+    expect(record.content).not.toContain('Human Agency Protocol');
+    expect(record.content as string).toMatch(/\n\n-- Published by [^\n]*Ticket: [^\n]*\/t\/[0-9a-fA-F-]{36}$/);
 
     const match = RECEIPT_LINK.exec(record.content as string);
     expect(match).not.toBeNull();
