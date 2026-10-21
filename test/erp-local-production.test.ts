@@ -47,6 +47,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -565,7 +566,12 @@ describe.skipIf(!available)('ERP Local in production (real AS + gateway + erp-mc
       let text = r.text;
       if (!r.denied) text = (await s.approve(proposalIdOf(r.text))).text;
       note('AM2 conversion', r.denied ? 'refused at the call' : 'proposal made, refused at execution', text);
-      expect(text).toMatch(new RegExp(`revision ${changed.revision}[\\s\\S]*revision ${am2Customer.revision}|revision ${am2Customer.revision}[\\s\\S]*revision ${changed.revision}`));
+      // Since gateway 0.38.0 the manifest's blocking check (customer version pinned by the
+      // quote vs. the customer now) refuses at the call — before a card; the connector's own
+      // execution-time refusal says "revision", the gateway's check says "version".
+      expect(r.denied, text).toBe(true);
+      const v = '(?:revision|version)';
+      expect(text).toMatch(new RegExp(`${v} ${changed.revision}[\\s\\S]*${v} ${am2Customer.revision}|${v} ${am2Customer.revision}[\\s\\S]*${v} ${changed.revision}`));
       expect(await invoiceCount()).toBe(before);
       expect((await read('erp__get_quote', { id: 'A-2026-002' })).status).toBe('issued');
     });
@@ -622,7 +628,9 @@ describe.skipIf(!available)('ERP Local in production (real AS + gateway + erp-mc
       let text = r.text;
       if (!r.denied) text = (await s.approve(proposalIdOf(r.text))).text;
       note('new call pinning the old item revision', r.denied ? 'refused at the call' : 'proposal made, refused at execution', text);
-      expect(text).toMatch(/Item [0-9a-f-]{36} is at revision 2; this request is for revision 1/);
+      // Since gateway 0.38.0 the manifest's blocking item-version check refuses at the call.
+      expect(r.denied, text).toBe(true);
+      expect(text).toMatch(/item version 1, the item is now at version 2|Item [0-9a-f-]{36} is at revision 2; this request is for revision 1/);
       expect(await invoiceCount()).toBe(before);
     });
   });
@@ -648,7 +656,18 @@ describe.skipIf(!available)('7. a Local DB made by erp-mcp 0.9.5, under the new 
         cpSync(join(FIXTURE_DIR, 'erp-local-archive'), join(dataDir, 'erp-local-archive'), { recursive: true });
         const sql = readFileSync(join(FIXTURE_DIR, 'local-db.sql'), 'utf8').split('__DATA_DIR__').join(dataDir);
         // better-sqlite3 from the connector install itself (hap-e2e has no SQLite dependency).
-        const req = createRequire(join(dataDir, 'integrations', 'node_modules', '@humanagencyp', 'erp-mcp', 'package.json'));
+        // Without HAP_E2E_PREINSTALLED_INTEGRATIONS (CI, and a run against the published
+        // connector) nothing is installed yet when this runs: install the PINNED package from
+        // npm into the gateway's integrations dir exactly as the gateway does
+        // (integration-manager.ts: `npm install --no-fund --no-audit <pkg>@<pin>`, cwd = that
+        // dir) — the gateway then finds it at the pin and does not install it again.
+        const integrationsDir = join(dataDir, 'integrations');
+        const pkgJson = join(integrationsDir, 'node_modules', '@humanagencyp', 'erp-mcp', 'package.json');
+        if (!existsSync(pkgJson)) {
+          mkdirSync(integrationsDir, { recursive: true });
+          execFileSync('npm', ['install', '--no-fund', '--no-audit', `${erpManifest.npmPackage}@${erpManifest.npmVersion}`], { cwd: integrationsDir, stdio: 'pipe' });
+        }
+        const req = createRequire(pkgJson);
         const Database = req('better-sqlite3');
         const raw = new Database(join(dataDir, 'erp-local.sqlite'));
         raw.exec(sql);
