@@ -1,0 +1,95 @@
+{
+  "invoices": {
+    "F-2026-001": {
+      "document_date": "2026-10-21",
+      "service_period": {
+        "from": "2026-10-06",
+        "to": "2026-10-24"
+      },
+      "currency": "EUR",
+      "customer_id": "c-at-0001",
+      "number": "F-2026-001",
+      "lines": [
+        {
+          "description": "Beratung",
+          "qty": 2,
+          "unit": "Std.",
+          "unit_price": 120,
+          "vat_rate": 20
+        },
+        {
+          "description": "Reise",
+          "qty": 1,
+          "unit_price": 80,
+          "vat_rate": 20
+        }
+      ],
+      "net_total": 320,
+      "memo": "fixture"
+    },
+    "F-2026-002": {
+      "document_date": "2026-10-21",
+      "service_period": {
+        "from": "2026-10-06",
+        "to": "2026-10-24"
+      },
+      "currency": "EUR",
+      "customer_id": "c-de-0001",
+      "number": "F-2026-002",
+      "lines": [
+        {
+          "description": "Workshop",
+          "qty": 1,
+          "unit_price": 1500,
+          "vat_rate": 0
+        }
+      ],
+      "net_total": 1500
+    },
+    "F-2026-003": {
+      "document_date": "2026-10-21",
+      "service_period": {
+        "from": "2026-10-06",
+        "to": "2026-10-24"
+      },
+      "currency": "EUR",
+      "customer_id": "c-at-0002",
+      "number": "F-2026-003",
+      "lines": [
+        {
+          "description": "Plakat",
+          "qty": 3,
+          "unit_price": 50,
+          "vat_rate": 20
+        }
+      ],
+      "net_total": 150
+    }
+  },
+  "credit_notes": {
+    "F-2026-004": {
+      "invoice_id": "F-2026-001",
+      "number": "F-2026-004",
+      "document_date": "2026-10-21",
+      "credit_total": 80,
+      "currency": "EUR",
+      "reason": "Reise nicht angefallen",
+      "lines": [
+        {
+          "description": "Reise",
+          "qty": 1,
+          "unit_price": 80,
+          "vat_rate": 20
+        }
+      ]
+    },
+    "F-2026-005": {
+      "invoice_id": "F-2026-002",
+      "number": "F-2026-005",
+      "document_date": "2026-10-21",
+      "credit_total": 1500,
+      "currency": "EUR",
+      "reason": "Storno"
+    }
+  }
+}
