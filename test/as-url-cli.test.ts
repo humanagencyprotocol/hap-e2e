@@ -97,7 +97,8 @@ beforeAll(() => {
 
 afterAll(async () => {
   await pm.killAll();
-  for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
+  // A gateway child (npm install) can still be writing when the test ends: retry instead of failing on ENOTEMPTY.
+  for (const d of tmpDirs) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 }, 30_000);
 
 describe('AS URL precedence: flag > env > saved > default', () => {
