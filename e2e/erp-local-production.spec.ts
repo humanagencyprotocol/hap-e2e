@@ -35,7 +35,8 @@ const PRE = process.env.HAP_E2E_PREINSTALLED_INTEGRATIONS;
 const preErp = PRE ? join(PRE, 'node_modules', '@humanagencyp', 'erp-mcp', 'dist', 'index.js') : '';
 const AVAILABLE = !!manifest?.toolGating?.overrides?.create_customer?.checks
   && existsSync(join(ROOT, 'hap-profiles', 'master-data', '0.1.profile.json'))
-  && !!preErp && existsSync(preErp) && readFileSync(preErp, 'utf8').includes('check_customer_duplicates');
+  && ((!!preErp && existsSync(preErp) && readFileSync(preErp, 'utf8').includes('check_customer_duplicates'))
+    || String(manifest?.npmVersion ?? '').localeCompare('0.10.0', undefined, { numeric: true }) >= 0);
 /** The UI renders manifest checks once ApprovalBody knows them (any of these markers). */
 const APPROVAL_BODY = join(ROOT, 'suveren-gateway', 'apps', 'ui', 'src', 'components', 'ApprovalBody.tsx');
 const UI_HAS_CHECKS = existsSync(join(ROOT, 'suveren-gateway', 'apps', 'ui', 'src', 'components', 'ChecksLines.tsx'))

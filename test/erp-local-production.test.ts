@@ -64,8 +64,13 @@ const gaps: string[] = [];
 if (!erpManifest?.toolGating?.overrides?.create_customer?.checks) gaps.push('a gateway whose erp.json declares create_customer with `checks` (suveren-gateway feat/erp-local-production)');
 if (!existsSync(join(PROFILES_DIR, 'master-data', '0.1.profile.json'))) gaps.push('hap-profiles master-data@0.1');
 if (!existsSync(join(PROFILES_DIR, 'email', '0.9.profile.json'))) gaps.push('hap-profiles email@0.9');
-if (!(preinstalledErp && existsSync(preinstalledErp) && readFileSync(preinstalledErp, 'utf8').includes('check_customer_duplicates'))) {
-  gaps.push('an erp-mcp build with the Local production tools, preinstalled (HAP_E2E_PREINSTALLED_INTEGRATIONS + SUVEREN_OFFLINE=1)');
+// The Local production tools ship in erp-mcp 0.10.0 (contract §0). Either the
+// manifest pins that release (the gateway installs it from npm, as in CI), or a
+// local build that has them is preinstalled.
+const pinsRelease = String(erpManifest?.npmVersion ?? '').localeCompare('0.10.0', undefined, { numeric: true }) >= 0;
+const preinstalledHasTools = !!preinstalledErp && existsSync(preinstalledErp) && readFileSync(preinstalledErp, 'utf8').includes('check_customer_duplicates');
+if (!pinsRelease && !preinstalledHasTools) {
+  gaps.push('erp.json pinning erp-mcp >= 0.10.0, or a local build with the Local production tools preinstalled (HAP_E2E_PREINSTALLED_INTEGRATIONS + SUVEREN_OFFLINE=1)');
 }
 const available = gaps.length === 0;
 if (!available) console.warn(`[ERP LOCAL E2E] SKIPPED — needs ${gaps.join('; ')}.`);
@@ -749,7 +754,7 @@ async function realViesReachable(): Promise<string | null> {
   }
 }
 
-describe.skipIf(!available || !preinstalledErp)('optional: the real EU VIES (skips without network)', () => {
+describe.skipIf(!available || !preinstalledHasTools)('optional: the real EU VIES (skips without network or without a preinstalled erp-mcp build)', () => {
   let why: string | null = 'not probed';
   beforeAll(async () => {
     why = await realViesReachable();
