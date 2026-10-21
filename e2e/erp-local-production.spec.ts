@@ -209,7 +209,8 @@ test.describe.serial('ERP Local in production — the approval card and Blocked 
     await expect(issued).toHaveClass(/check-notice/);
     await expect(issued).toContainText('Already issued to this customer: 1 invoice, 0 credit notes — they keep the old data');
     await expect(line(checks, 'pass', 'New VAT ID confirmed by VIES')).toHaveCount(1);
-    await expect(line(checks, 'pass', 'Request is for the record\'s current version')).toHaveCount(1);
+    // `showOnly: "fail"` (gateway 0.38.0): the version check still runs and blocks, but a pass is not shown.
+    await expect(card.getByText('Request is for the record\'s current version')).toHaveCount(0);
     await card.screenshot({ path: join(SCREENSHOT_DIR, 'tax-data-now-new-already-issued.png') });
     await s.reject(proposal);
   });
