@@ -283,5 +283,16 @@ export function proposalIdOf(text: string): string {
 export function resultJson(text: string): any {
   const i = text.indexOf('Result:');
   if (i < 0) throw new Error(`no "Result:" in: ${text}`);
-  return JSON.parse(text.slice(i + 'Result:'.length).trim());
+  // The gateway may append lines after the JSON (e.g. a note for the agent):
+  // parse exactly the first balanced JSON value that follows "Result:".
+  const rest = text.slice(i + 'Result:'.length).trimStart();
+  let depth = 0, inStr = false, esc = false;
+  for (let k = 0; k < rest.length; k++) {
+    const c = rest[k];
+    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') { depth--; if (depth === 0) return JSON.parse(rest.slice(0, k + 1)); }
+  }
+  return JSON.parse(rest);
 }
