@@ -88,7 +88,8 @@ async function checksOf(card: Locator): Promise<Locator> {
   const body = card.getByTestId('card-checks-body');
   await expect(body).toBeVisible({ timeout: 30_000 });
   // v3: the passed checks are one folded row ("✓ N checks passed") — open it so its lines are visible too.
-  await card.locator('details.av3-fold').evaluateAll((ds) => ds.forEach((d) => { (d as HTMLDetailsElement).open = true; }));
+  // (Folds are an accordion — open only this one.)
+  await card.getByTestId('checks-passed').evaluateAll((ds) => ds.forEach((d) => { (d as HTMLDetailsElement).open = true; }));
   await expect(card.getByTestId('card-checks-top')).toHaveCount(0);
   await expect(card.locator('[data-check-status="fail"]')).toHaveCount(0);
   return body;
