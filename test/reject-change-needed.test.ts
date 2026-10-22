@@ -6,7 +6,7 @@
  *
  * What must hold:
  * - Reject (one click, no note) → the AI is told REJECTED … must not be retried;
- * - Change needed with a note → the card shows CHANGE NEEDED + the note as
+ * - Ask for changes (was "Change needed") with a note → the card shows CHANGE NEEDED + the note as
  *   stored; the AI's NEXT, unrelated tool call carries a one-time line with the
  *   note; a second call does not repeat it; check-pending-commitments says
  *   SENT BACK FOR A CHANGE, may propose again;
@@ -85,9 +85,14 @@ async function approvalsPage(): Promise<Page> {
   return page;
 }
 
-/** Decided proposals leave "Awaiting me"; their stored outcome is listed under All → All. */
+/** Decided proposals leave "For me"; their stored outcome is listed under Show: All → All. */
 async function showDecided(page: Page): Promise<void> {
-  await page.locator('button.nav-tab', { hasText: /^All$/ }).click();
+  // From a card (still showing its stamp) back to the list, where the "Show" menu lives.
+  const menu = page.getByTestId('queue-view');
+  const tab = page.locator('button.nav-tab', { hasText: /^All$/ });
+  await menu.or(tab).or(page.getByTestId('back-to-list')).first().waitFor({ timeout: 30_000 });
+  if (!(await menu.isVisible().catch(() => false)) && !(await tab.count())) await page.getByTestId('back-to-list').click({ timeout: 30_000 });
+  if (await menu.count()) await menu.selectOption('all'); else await tab.click();
   await page.locator('button.filter-chip', { hasText: /^All$/ }).click();
 }
 
@@ -154,7 +159,7 @@ describe.skipIf(!available)('reject or ask for a change — the AI learns which 
     expect(r.text).not.toMatch(/SENT BACK/);
   }, 120_000);
 
-  it('Change needed with a note: the card shows it, the AI\'s next unrelated call carries it once', async () => {
+  it('Ask for changes with a note: the card shows it, the AI\'s next unrelated call carries it once', async () => {
     const id = await propose(`RJ change ${Date.now()}`);
     const page = await approvalsPage();
     try {

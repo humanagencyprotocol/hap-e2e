@@ -54,7 +54,7 @@ test.describe.serial('Journey 1: Personal User', () => {
     await page.waitForURL('**/settings');
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });
 
-    // Navigate to Pending Approvals (proposals — empty)
+    // Navigate to Approvals (proposals — empty)
     await page.click('.sidebar-item:has-text("Approvals")');
     await page.waitForURL('**/approvals');
     await expect(page.locator('.page-title, h1').first()).toBeVisible({ timeout: 10_000 });

@@ -41,6 +41,7 @@ import {
   registerOnSP, signInToGateway, handleOnboarding, activateIntegration,
   spApiAttest, latestProfileId, gatewayDataDir,
   openApprovalCard,
+  selectQueueView,
 } from './fixtures';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
@@ -141,7 +142,7 @@ async function openCard(page: Page, hasText: string): Promise<Locator> {
   await page.click('.sidebar-item:has-text("Dashboard")');
   await page.click('.sidebar-item:has-text("Approvals")');
   await page.waitForURL('**/approvals');
-  await page.click('.nav-tab:has-text("Awaiting me")');
+  await selectQueueView(page, 'me');
   return openApprovalCard(page, hasText);
 }
 
@@ -384,7 +385,7 @@ test.describe.serial('AU10: request and customer history on the approval card (r
 
     // Core-objects gateways mark the row with the id (the card no longer
     // prints it); older ones print "Proposal: <id>" in the card.
-    const openRow = page.locator('[data-testid="approval-row"].is-open');
+    const openRow = page.getByTestId('approval-card');
     const shortId = (await openRow.count())
       ? await openRow.getAttribute('data-proposal-id')
       : ((await card.textContent()) ?? '').match(/Proposal:\s*([0-9a-f]{6,})/)?.[1];
