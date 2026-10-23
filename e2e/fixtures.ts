@@ -726,6 +726,8 @@ export async function selectQueueView(page: Page, view: 'me' | 'others' | 'all')
   const menu = page.getByTestId('queue-view');
   const legacy = { me: 'Awaiting me', others: 'Awaiting others', all: 'All' }[view];
   const tab = page.locator(`.nav-tab:has-text("${legacy}")`);
+  // The page shows "Loading…" until both queues answered and a lone item has opened (UI spec §17.1).
+  await expect(page.locator('.av3-empty', { hasText: 'Loading…' })).toHaveCount(0, { timeout: 30_000 });
   await expect(menu.or(tab).or(page.getByTestId('back-to-list')).first()).toBeVisible({ timeout: 30_000 });
   if (!(await menu.isVisible().catch(() => false))) await backToApprovalList(page);
   if (await menu.count()) { await menu.selectOption(view); return; }
