@@ -8,6 +8,7 @@
  * 4. Revocation blocks further activity
  */
 import { test, expect, ensureUsersRegistered, ALICE, signInToGateway, handleOnboarding, createAuthorization, activateIntegration, spApiAttest, SP_URL, GW_URL , ensureProfileEnabledForActiveGroups, latestProfileId, openApprovalCard,
+  selectQueueView,
 } from './fixtures';
 
 // The version the gateway's CRM wizard grants under (newest) — see latestProfileId.
@@ -115,7 +116,7 @@ test.describe.serial('Journey 5: Agent Flow', () => {
 
     await page.click('.sidebar-item:has-text("Approvals")');
     await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
+    await selectQueueView(page, 'me');
     const card = await openApprovalCard(page, 'jane@example.com');
 
     // Approving resolves under the proposal's own domain.

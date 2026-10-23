@@ -25,7 +25,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import type { Locator, Page } from '@playwright/test';
-import { test, expect, openApprovalCard } from './fixtures';
+import { test, expect, openApprovalCard, selectQueueView } from './fixtures';
 import { ErpLocalStack, ERP_MANIFEST_PATH, P, TODAY_VIENNA, proposalIdOf, resultJson } from '../src/helpers/erp-local-stack.js';
 import { ViesStub } from '../src/helpers/vies-stub.js';
 
@@ -77,8 +77,7 @@ async function openCard(page: Page, s: ErpLocalStack, hasText: string | RegExp):
   await signIn(page, s.cpUrl, s.apiKey);
   await page.click('.sidebar-item:has-text("Approvals")');
   await page.waitForURL('**/approvals');
-  const awaiting = page.locator('.nav-tab:has-text("Awaiting me")');
-  if (await awaiting.count()) await awaiting.click();
+  await selectQueueView(page, 'me');
   const card = await openApprovalCard(page, hasText);
   await expect(card.locator('[data-preview-status="ok"]').first()).toBeVisible({ timeout: 45_000 });
   return card;
@@ -88,6 +87,9 @@ async function openCard(page: Page, s: ErpLocalStack, hasText: string | RegExp):
 async function checksOf(card: Locator): Promise<Locator> {
   const body = card.getByTestId('card-checks-body');
   await expect(body).toBeVisible({ timeout: 30_000 });
+  // v3: the passed checks are one folded row ("✓ N checks passed") — open it so its lines are visible too.
+  // (Folds are an accordion — open only this one.)
+  await card.getByTestId('checks-passed').evaluateAll((ds) => ds.forEach((d) => { (d as HTMLDetailsElement).open = true; }));
   await expect(card.getByTestId('card-checks-top')).toHaveCount(0);
   await expect(card.locator('[data-check-status="fail"]')).toHaveCount(0);
   return body;
@@ -130,7 +132,7 @@ test.describe.serial('ERP Local in production — the approval card and Blocked 
     test.setTimeout(120_000);
     const proposal = proposalIdOf((await s.call('erp__create_customer', CUSTOMER)).text);
     const card = await openCard(page, s, /Kunde GmbH/);
-    await expect(page.locator('[data-testid="approval-row"].is-open [data-testid="approval-row-summary"]').or(card).first())
+    await expect(card.getByTestId('approval-summary').or(card).first())
       .toContainText('New customer Kunde GmbH, AT — VAT ID ATU11111111');
     for (const t of ['VAT ID', 'ATU11111111', 'Kundenweg 2', '4020 Linz']) await expect(card).toContainText(t);
 
@@ -256,14 +258,14 @@ test.describe.serial('ERP Local in production — the approval card and Blocked 
     await s.reject(proposal);
   });
 
-  test('VIES invalid: no card — the Blocked page shows "Blocked — a check failed"', async ({ page }) => {
+  test('VIES invalid: no card — the Blocked page shows "A check failed"', async ({ page }) => {
     test.setTimeout(120_000);
     const r = await s.call('erp__create_customer', INVALID);
     expect(r.denied, r.text).toBe(true);
     await signIn(page, s.cpUrl, s.apiKey);
     await page.click('.sidebar-item:has-text("Blocked")');
     await page.waitForURL('**/blocked');
-    const item = page.locator('.blocked-item', { hasText: 'Blocked — a check failed' }).first();
+    const item = page.locator('.blocked-item', { hasText: 'A check failed:' }).first();
     await expect(item).toBeVisible({ timeout: 20_000 });
     await expect(item).toContainText('create_customer');
     await expect(item).toContainText('VAT ID confirmed by VIES');

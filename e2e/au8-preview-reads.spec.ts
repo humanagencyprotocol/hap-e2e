@@ -30,6 +30,7 @@ import {
   registerOnSP, signInToGateway, handleOnboarding, activateIntegration,
   spApiAttest, latestProfileId,
   openApprovalCard,
+  selectQueueView,
 } from './fixtures';
 import { hashGateContent, hashExecutionContext, computeBoundsHash, computeScopeHash } from '../src/helpers/crypto.js';
 
@@ -146,14 +147,14 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
     await signInToGateway(page, apiKey);
     await page.click('.sidebar-item:has-text("Approvals")');
     await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
+    await selectQueueView(page, 'me');
 
     const card = await openApprovalCard(page, 'create_quote');
     // UI3: the row reads as one sentence from the erp manifest's template
     // (gateway feat/erp-local-production adds "to <customer> (<id>)" via {customer_id|ref}).
-    const openRow = page.locator('[data-testid="approval-row"].is-open');
+    const openRow = page.getByTestId('approval-card');
     if (await openRow.count()) {
-      await expect(openRow.getByTestId('approval-row-summary')).toHaveText(/^Quote of €385(\.00)? net( to Steiner Landtechnik GmbH \(cust-1\))? — 0% discount$/, { timeout: 20_000 });
+      await expect(openRow.getByTestId('approval-summary')).toHaveText(/^Quote of €385(\.00)? net( to Steiner Landtechnik GmbH \(cust-1\))? — 0% discount$/, { timeout: 20_000 });
     }
     // Wait for the gateway's own live read (get_customer + get_item) to
     // settle — generous on CI, where the erp connector's own npm install
@@ -272,7 +273,7 @@ test.describe.serial('AU8: several reads per preview (real stack)', () => {
     await signInToGateway(page, apiKey);
     await page.click('.sidebar-item:has-text("Approvals")');
     await page.waitForURL('**/approvals');
-    await page.click('.nav-tab:has-text("Awaiting me")');
+    await selectQueueView(page, 'me');
 
     const card = await openApprovalCard(page, 'send_quote');
     await expect(card).toBeVisible({ timeout: 30_000 });

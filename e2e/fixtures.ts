@@ -707,29 +707,61 @@ export const test = base;
 export { expect };
 
 /**
+ * Back to the Approvals list (approval card v3, UI spec §17.1): the card view's
+ * "‹ Approvals N" button, or Esc. A no-op when the list is already there, on a
+ * wide window (list beside the card) and on older gateways.
+ */
+export async function backToApprovalList(page: Page): Promise<void> {
+  const back = page.getByTestId('back-to-list');
+  if (await back.isVisible().catch(() => false)) await back.click({ timeout: 15_000 });
+}
+
+/**
+ * The Approvals page's one "Show" menu (UI spec §17.1: For me / Others / All),
+ * which replaced the Awaiting me / Awaiting others / All tabs. Falls back to the
+ * tabs on older gateways. From a card it goes back to the list first (the menu
+ * lives in the list header).
+ */
+export async function selectQueueView(page: Page, view: 'me' | 'others' | 'all'): Promise<void> {
+  const menu = page.getByTestId('queue-view');
+  const legacy = { me: 'Awaiting me', others: 'Awaiting others', all: 'All' }[view];
+  const tab = page.locator(`.nav-tab:has-text("${legacy}")`);
+  // The page shows "Loading…" until both queues answered and a lone item has opened (UI spec §17.1).
+  await expect(page.locator('.av3-empty', { hasText: 'Loading…' })).toHaveCount(0, { timeout: 30_000 });
+  await expect(menu.or(tab).or(page.getByTestId('back-to-list')).first()).toBeVisible({ timeout: 30_000 });
+  if (!(await menu.isVisible().catch(() => false))) await backToApprovalList(page);
+  if (await menu.count()) { await menu.selectOption(view); return; }
+  await tab.click();
+}
+
+/**
  * The approval card on the Approvals page whose content contains `hasText`.
  *
- * Gateways with the core-objects queue (UI spec §12.2) render each approval as
- * a row that opens in place, one at a time — the card's content exists only
- * while its row is open. Older gateways render every card open. This opens
- * rows one by one until the card is found, so specs work against both.
+ * Approval card v3 (UI spec §17): more than one approval waiting → the list
+ * opens first and a row opens ONE card (the list is gone, or beside it on wide
+ * windows); exactly one → its card opens directly. This opens rows one by one —
+ * open → check the card's text → back to the list → next row — until the card
+ * is found. Older gateways (rows that open in place, or every card open) work
+ * through the same global `.card` check.
  */
 export async function openApprovalCard(page: Page, hasText: string | RegExp): Promise<Locator> {
   const openCard = page.locator('.card', { hasText }).first();
-  const rows = page.locator('[data-testid="approval-row"]');
-  await expect(rows.first().or(openCard).first()).toBeVisible({ timeout: 30_000 });
+  const listRows = page.locator('[data-testid="approval-row"]:not(.is-open)');
+  await expect(listRows.first().or(openCard).or(page.getByTestId('approval-card')).first()).toBeVisible({ timeout: 30_000 });
   if (await openCard.isVisible()) return openCard;
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
-    const n = await rows.count();
+    // Another card is open: back to the list to reach the rows.
+    if ((await listRows.count()) === 0) { await backToApprovalList(page); await page.waitForTimeout(300); }
+    const n = await listRows.count();
     for (let i = 0; i < n; i++) {
-      const row = rows.nth(i);
-      if (!(await row.getAttribute('class'))?.includes('is-open')) {
-        await row.locator('.appr-item-head').click();
-      }
-      const card = row.locator('.card', { hasText });
-      const found = await card.first().waitFor({ state: 'visible', timeout: 6_000 }).then(() => true).catch(() => false);
-      if (found) return card.first();
+      const head = listRows.nth(i).locator('.appr-item-head');
+      if (!(await head.count())) continue;
+      await head.click();
+      const found = await openCard.waitFor({ state: 'visible', timeout: 6_000 }).then(() => true).catch(() => false);
+      if (found) return openCard;
+      await backToApprovalList(page);
+      await expect(listRows.first()).toBeVisible({ timeout: 10_000 }).catch(() => {});
     }
   }
   throw new Error(`No approval card containing ${String(hasText)}`);

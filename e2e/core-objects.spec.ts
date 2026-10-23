@@ -131,7 +131,8 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await goDashboard(page);
     const waiting = page.getByTestId('col-waiting');
     await expect(waiting.getByTestId('dash-approval')).toHaveCount(2, { timeout: 30_000 });
-    await expect(waiting.getByTestId('dash-approval').first()).toContainText(/waiting/);
+    // §18.5: the Approvals page's own row — type line with the age ("4 min"), no "waiting" word.
+    await expect(waiting.getByTestId('dash-approval').first().getByTestId('approval-row')).toBeVisible();
     // UI3: the sentence comes from the manifest's summary template + the
     // sealed values ("Create contact Dora Review"), not just the action name.
     await expect(waiting.getByTestId('dash-approval').filter({ hasText: 'Create contact Dora Review' })).toHaveCount(1, { timeout: 30_000 });
@@ -144,7 +145,7 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await expect(group).toContainText('Customer care');
 
     const atWork = page.getByTestId('col-mandates').getByTestId('mandate-at-work').filter({ hasText: 'Customer care' });
-    await expect(atWork).toContainText('3 of 20 today', { timeout: 30_000 });
+    await expect(atWork).toContainText('3 of 20 used today', { timeout: 30_000 });
     await page.screenshot({ path: join(SCREENSHOT_DIR, 'a-dashboard.png'), fullPage: true });
   });
 
@@ -173,29 +174,35 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
   test('D: a dashboard row opens that approval in place; approving opens the next; its ticket is Approved', async () => {
     test.setTimeout(120_000);
     await goDashboard(page);
-    await page.getByTestId('col-waiting').getByTestId('dash-approval').first().click();
+    await page.getByTestId('col-waiting').getByTestId('dash-approval').first().locator('.appr-item-head').click();
     await page.waitForURL(/\/approvals\?open=/);
+    // Approval card v3 (UI spec §17): ?open=<id> opens that card directly (no list), "1 of 2".
+    const openId = new URL(page.url()).searchParams.get('open');
+    const cards = page.getByTestId('approval-card');
+    await expect(cards).toHaveCount(1, { timeout: 30_000 });
+    await expect(cards.first()).toHaveAttribute('data-proposal-id', openId!);
+    await expect(cards.first().getByTestId('approval-summary')).toHaveText(/^Create contact (Dora|Emil) Review$/, { timeout: 30_000 });
+    await expect(page.getByTestId('card-position')).toContainText('of 2');
+    // The list holds both, one sentence each.
+    await page.getByTestId('back-to-list').click();
     const rows = page.getByTestId('approval-row');
     await expect(rows).toHaveCount(2, { timeout: 30_000 });
     await expect(page.getByTestId('approval-row-summary').filter({ hasText: /^Create contact (Dora|Emil) Review$/ })).toHaveCount(2, { timeout: 30_000 });
-    // Exactly the one from the dashboard is open.
-    const openId = new URL(page.url()).searchParams.get('open');
-    await expect(page.locator(`[data-testid="approval-row"][data-proposal-id="${openId}"]`)).toHaveClass(/is-open/);
-    await expect(page.locator('[data-testid="approval-row"].is-open')).toHaveCount(1);
-    await expect(page.locator('.approval-resp')).toContainText('Approving sends exactly this');
+    await page.locator(`[data-testid="approval-row"][data-proposal-id="${openId}"] .appr-item-head`).click();
+    await expect(cards.first()).toHaveAttribute('data-proposal-id', openId!);
 
-    const open = page.locator('[data-testid="approval-row"].is-open');
-    await open.locator('button:has-text("Approve")').click();
-    // The decided one leaves the list and the remaining one opens by itself.
-    await expect(rows).toHaveCount(1, { timeout: 30_000 });
-    await expect(rows.first()).toHaveClass(/is-open/, { timeout: 15_000 });
+    await cards.first().locator('button:has-text("Approve")').click();
+    // The ✓ stamp shows only once the gateway has answered; then the remaining card slides in by itself.
+    await expect(page.getByTestId('decision-stamp')).toContainText('Approved', { timeout: 30_000 });
+    await expect(cards.first()).not.toHaveAttribute('data-proposal-id', openId!, { timeout: 15_000 });
+    await expect(cards).toHaveCount(1);
     await page.screenshot({ path: join(SCREENSHOT_DIR, 'd-next-opened.png'), fullPage: true });
 
     await page.click('.sidebar-item:has-text("Tickets")');
     await page.waitForURL('**/tickets');
     await page.getByTestId('tickets-filter-approved').click();
     await expect(page.locator('.ticket-obj-card')).toHaveCount(1, { timeout: 30_000 });
-    await expect(page.locator('.ticket-obj-card').first()).toContainText('approved');
+    await expect(page.locator('.ticket-obj-card').first()).toContainText(/approved/i);
     // The approved ticket's headline is the sentence the approver saw (from the
     // proposal's sealed values), not only the action's name.
     if (HAS_AREAS) {
@@ -218,15 +225,17 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     const atWork = page.getByTestId('col-mandates').getByTestId('mandate-at-work');
     await expect(atWork.filter({ hasText: 'Customer care' })).toHaveCount(1);
     await expect(atWork.filter({ hasText: 'Customer care' }).locator('.obj-line')).toContainText(area);
-    await expect(page.getByTestId('col-waiting').getByTestId('dash-approval').first().getByTestId('mandate-line')).toHaveText('Mandate: Customer review');
+    // §18.5: the approval row's quiet line carries the mandate name (as on the Approvals page).
+    await expect(page.getByTestId('col-waiting').getByTestId('dash-approval').first()).toContainText('Customer review');
     await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-dashboard-areas.png'), fullPage: true });
 
     // Approvals: the one left after D carries its mandate's name underneath.
     await page.click('.sidebar-item:has-text("Approvals")');
     await page.waitForURL('**/approvals**');
-    const row = page.getByTestId('approval-row').first();
-    await expect(row.locator('.obj-line')).toContainText(area, { timeout: 30_000 });
-    await expect(row.getByTestId('mandate-line')).toHaveText('Mandate: Customer review');
+    // One approval left: its card opens directly. Type line names the area; "Covered by" the mandate.
+    const card = page.getByTestId('approval-card');
+    await expect(card.getByTestId('approval-type')).toContainText(area, { timeout: 30_000 });
+    await expect(card.getByTestId('covered-by')).toContainText('Customer review');
 
     // Tickets: one area only → no area pills (nothing to choose between).
     await page.click('.sidebar-item:has-text("Tickets")');
@@ -257,7 +266,8 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await expect(grp.locator('.area-group-h')).toContainText(area, { timeout: 30_000 });
     await expect(grp.locator('.area-group-h')).toContainText('via CRM');
     // Cards under their area heading do not repeat the area.
-    await expect(grp.locator('.mandate-card .obj-line').first()).not.toContainText(area);
+    // (§18: the area sits in the type line; the title is the mandate name alone.)
+    await expect(grp.locator('.mandate-card .ob-title').first()).not.toContainText(area);
     await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-mandates-areas.png'), fullPage: true });
 
     // Integrations: the CRM under its area.
@@ -282,7 +292,7 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await anna.locator('.ticket-obj-head').click();
     const sent = anna.getByTestId('ticket-what-was-done');
     await expect(sent).toHaveAttribute('data-bound', 'sealed', { timeout: 30_000 });
-    await expect(sent).toContainText('sealed in the ticket');
+    await expect(sent).toContainText(/sealed in the ticket/i);
     await expect(sent).toContainText('Anna Auto');
     await expect(sent).toContainText('Matches the fingerprint in the signed ticket');
     await expect(anna.getByTestId('ticket-result')).toHaveAttribute('data-ok', 'true');

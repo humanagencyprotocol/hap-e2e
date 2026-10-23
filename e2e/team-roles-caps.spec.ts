@@ -100,7 +100,9 @@ import {
   latestProfileId,
   signInToGateway, handleOnboarding, activateIntegration,
   spApiAttest, gatewayDataDir,
+  selectQueueView,
 } from './fixtures';
+import { openApprovalById } from '../src/helpers/gateway-ui';
 import type { APIRequestContext } from '@playwright/test';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -360,9 +362,9 @@ test.describe('Team roles, caps and read limits — gateway (#119)', () => {
       await page.click('.sidebar-item:has-text("Approvals")');
       await page.waitForURL('**/approvals');
       // Tom is not an approver of his own action: it waits on others.
-      await page.click('.nav-tab:has-text("Awaiting others")');
+      await selectQueueView(page, 'others');
 
-      const card = page.locator('.id-card', { hasText: /Needs 1 approval from/ }).first();
+      const card = page.locator('.av3-other, .id-card', { hasText: /Needs 1 approval from/ }).first();
       await expect(card).toBeVisible({ timeout: 15_000 });
 
       await expect(card).toContainText(/Needs 1 approval from/);
@@ -446,8 +448,8 @@ test.describe('Team roles, caps and read limits — gateway (#119)', () => {
       // Tom's own card, from the AS's creator=me list, offers Withdraw.
       await page.click('.sidebar-item:has-text("Approvals")');
       await page.waitForURL('**/approvals');
-      await page.click('.nav-tab:has-text("Awaiting others")');
-      const card = page.locator('.id-card', { hasText: /Needs 1 approval from/ }).first();
+      await selectQueueView(page, 'others');
+      const card = page.locator('.av3-other, .id-card', { hasText: /Needs 1 approval from/ }).first();
       await expect(card).toBeVisible({ timeout: 15_000 });
       await expect(card.getByTestId('cant-approve-own-action')).toBeVisible();
       await card.locator('button:has-text("Withdraw")').click();
@@ -720,16 +722,18 @@ test.describe('Team approval from a row (UI spec §12.2)', () => {
     await handleOnboarding(page);
     await page.click('.sidebar-item:has-text("Approvals")');
     await page.waitForURL('**/approvals');
-    const row = page.locator(`[data-testid="approval-row"][data-proposal-id="${id}"]`);
-    await expect(row).toBeVisible({ timeout: 30_000 });
-    // The row reads as one sentence (manifest template) and says others are involved.
-    await expect(row.getByTestId('approval-row-summary')).toHaveText('Create contact TR5 Row Approval', { timeout: 30_000 });
-    await expect(row).toContainText('Team approval');
-    // A lone item opens by itself; otherwise open it.
-    if (!(await row.getAttribute('class'))?.includes('is-open')) await row.locator('.appr-item-head').click();
-    await expect(row).toHaveClass(/is-open/);
-    await expect(row.locator('.approval-resp')).toContainText('Approving sends exactly this');
-    await row.locator('button:has-text("Approve")').click();
+    // A lone item opens by itself (its card); otherwise the list shows its row first.
+    const row = page.locator(`[data-testid="approval-row"][data-proposal-id="${id}"]:not(.is-open)`);
+    const lone = page.locator(`[data-testid="approval-card"][data-proposal-id="${id}"]`);
+    await expect(row.or(lone).first()).toBeVisible({ timeout: 30_000 });
+    if (await row.count()) {
+      // In the list: one sentence (manifest template), and it says others are involved.
+      await expect(row.getByTestId('approval-row-summary')).toHaveText('Create contact TR5 Row Approval', { timeout: 30_000 });
+      await expect(row).toContainText('Team approval');
+    }
+    const card = await openApprovalById(page, id);
+    await expect(card.getByTestId('approval-summary')).toHaveText('Create contact TR5 Row Approval', { timeout: 30_000 });
+    await card.locator('button:has-text("Approve")').click();
 
     await expect(async () => {
       const got = await request.get(`${SP_URL}/api/proposals/${encodeURIComponent(id)}`, { headers: { 'x-api-key': team.lisa.apiKey } });

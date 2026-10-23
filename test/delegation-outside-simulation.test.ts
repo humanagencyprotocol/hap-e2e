@@ -120,7 +120,9 @@ async function cardText(): Promise<{ status: string | null; text: string; hasEdi
     const box = page.locator('[data-testid="approval-preview"]').first();
     await box.waitFor({ timeout: 20_000 });
     await page.waitForFunction(() => document.querySelector('[data-testid="approval-preview"]')?.getAttribute('data-preview-status') !== 'loading', null, { timeout: 20_000 });
-    const text = await box.innerText();
+    // UI spec §17.3 pt 6: the area is in the title, the AI's intent sits in the sealed tile above the preview rows.
+    const parts = await Promise.all(['approval-summary', 'mandate-intent-ai'].map((id) => page.getByTestId(id).first().innerText().catch(() => '')));
+    const text = [...parts, await box.innerText()].join('\n');
     if (process.env.HAP_E2E_SHOW_CARD) console.error('[DL E2E] card:\n' + text);
     return { status: await box.getAttribute('data-preview-status'), text, hasEdit: (await page.locator('[data-testid="edit-before-signing"]').count()) > 0 };
   } finally {

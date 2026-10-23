@@ -116,7 +116,9 @@ async function approvalPreviewText(): Promise<{ status: string | null; text: str
       const el = document.querySelector('[data-testid="approval-preview"]');
       return !!el && el.getAttribute('data-preview-status') !== 'loading';
     }, null, { timeout: 20_000 });
-    const out = { status: await box.getAttribute('data-preview-status'), text: await box.innerText() };
+    // UI spec §17: the "read by the gateway … the AI is not involved" line sits in the (folded) Technical details.
+    const note = (await page.getByTestId('preview-source-note').first().textContent().catch(() => null)) ?? '';
+    const out = { status: await box.getAttribute('data-preview-status'), text: `${await box.innerText()}\n${note}` };
     if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU3 E2E] card:\n' + out.text);
     return out;
   } finally {
@@ -356,11 +358,11 @@ describe.skipIf(!available)('AU3/AU4: the approval preview is read from the syst
       const quote = states.find((st) => st.text.includes('cust-4') && st.text.includes('item-1'));
       expect(quote, JSON.stringify(states)).toBeTruthy();
       expect(quote!.text).toMatch(hasTicketContent ? /Matches the fingerprint in the signed ticket/ : /bound by hash/);
-      // The Ed25519 signature check on each ticket card (issuer key archived at issuance).
-      const feet = await page.locator('.receipt-foot').evaluateAll((els) => els.map((el) => (el as HTMLElement).innerText));
-      if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU6 E2E] feet:\n' + JSON.stringify(feet, null, 1));
-      expect(feet.length).toBeGreaterThan(0);
-      for (const f of feet) expect(f, f).toContain('Verified on this device');
+      // The Ed25519 signature check on each ticket card (issuer key archived at issuance) — under the title (UI spec §18.3).
+      const cards = await page.locator('.ticket-obj-card').evaluateAll((els) => els.map((el) => (el.querySelector('.ob-check') as HTMLElement | null)?.innerText ?? (el as HTMLElement).innerText.slice(0, 200)));
+      if (process.env.HAP_E2E_SHOW_CARD) console.error('[AU6 E2E] signature lines:\n' + JSON.stringify(cards, null, 1));
+      expect(cards.length).toBeGreaterThan(0);
+      for (const c of cards) expect(c, c).toMatch(/Signature verified on this device/);
     } finally {
       await page.close();
     }

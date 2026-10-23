@@ -5,7 +5,7 @@
  * Authority Server stores ciphertext and a fingerprint, never the content —
  * checked in its own database. The person still sees the content on the card
  * (decrypted on the gateway), the action still runs after approval, and a
- * "Change needed" note reaches the AI without the AS being able to read it.
+ * "Ask for changes" note reaches the AI without the AS being able to read it.
  *
  * Real stack: Authority Server + its Postgres, the whole gateway, the records
  * connector under a review mandate, a real browser on /approvals.
@@ -175,7 +175,7 @@ describe.skipIf(!available)('proposal content is encrypted end to end — the AS
     expect((await storedRow(id)).text).not.toContain(`${SECRET}-A`);
   }, 150_000);
 
-  it('a "Change needed" note reaches the AI; the AS stores it encrypted', async () => {
+  it('an "Ask for changes" note reaches the AI; the AS stores it encrypted', async () => {
     const id = await propose(`PE change ${Date.now()}`, `Change me: ${SECRET}-C`);
     const page = await approvalsPage();
     try {
