@@ -201,7 +201,7 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await page.waitForURL('**/tickets');
     await page.getByTestId('tickets-filter-approved').click();
     await expect(page.locator('.ticket-obj-card')).toHaveCount(1, { timeout: 30_000 });
-    await expect(page.locator('.ticket-obj-card').first()).toContainText('approved');
+    await expect(page.locator('.ticket-obj-card').first()).toContainText(/approved/i);
     // The approved ticket's headline is the sentence the approver saw (from the
     // proposal's sealed values), not only the action's name.
     if (HAS_AREAS) {
@@ -264,7 +264,8 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await expect(grp.locator('.area-group-h')).toContainText(area, { timeout: 30_000 });
     await expect(grp.locator('.area-group-h')).toContainText('via CRM');
     // Cards under their area heading do not repeat the area.
-    await expect(grp.locator('.mandate-card .obj-line').first()).not.toContainText(area);
+    // (§18: the area sits in the type line; the title is the mandate name alone.)
+    await expect(grp.locator('.mandate-card .ob-title').first()).not.toContainText(area);
     await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-mandates-areas.png'), fullPage: true });
 
     // Integrations: the CRM under its area.
@@ -289,7 +290,7 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await anna.locator('.ticket-obj-head').click();
     const sent = anna.getByTestId('ticket-what-was-done');
     await expect(sent).toHaveAttribute('data-bound', 'sealed', { timeout: 30_000 });
-    await expect(sent).toContainText('sealed in the ticket');
+    await expect(sent).toContainText(/sealed in the ticket/i);
     await expect(sent).toContainText('Anna Auto');
     await expect(sent).toContainText('Matches the fingerprint in the signed ticket');
     await expect(anna.getByTestId('ticket-result')).toHaveAttribute('data-ok', 'true');

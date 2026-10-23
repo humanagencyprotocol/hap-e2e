@@ -124,8 +124,8 @@ test.describe.serial('Journey 1: Personal User', () => {
     await page.waitForURL('**/mandates**');
     await expect(page.locator('.page-title')).toHaveText('Mandates', { timeout: 10_000 });
 
-    // Revoke is behind the row's "Details" expander — open it, then revoke.
-    const details = page.locator('button:has-text("Details")').first();
+    // Revoke is inside the opened mandate card (UI spec §18) — open it, then revoke.
+    const details = page.locator('.mandate-card .ob-head').first();
     if (await details.isVisible({ timeout: 3_000 }).catch(() => false)) {
       await details.click();
     }

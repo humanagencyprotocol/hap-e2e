@@ -258,14 +258,14 @@ test.describe.serial('ERP Local in production — the approval card and Blocked 
     await s.reject(proposal);
   });
 
-  test('VIES invalid: no card — the Blocked page shows "Blocked — a check failed"', async ({ page }) => {
+  test('VIES invalid: no card — the Blocked page shows "A check failed"', async ({ page }) => {
     test.setTimeout(120_000);
     const r = await s.call('erp__create_customer', INVALID);
     expect(r.denied, r.text).toBe(true);
     await signIn(page, s.cpUrl, s.apiKey);
     await page.click('.sidebar-item:has-text("Blocked")');
     await page.waitForURL('**/blocked');
-    const item = page.locator('.blocked-item', { hasText: 'Blocked — a check failed' }).first();
+    const item = page.locator('.blocked-item', { hasText: 'A check failed:' }).first();
     await expect(item).toBeVisible({ timeout: 20_000 });
     await expect(item).toContainText('create_customer');
     await expect(item).toContainText('VAT ID confirmed by VIES');
