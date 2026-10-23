@@ -131,7 +131,8 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await goDashboard(page);
     const waiting = page.getByTestId('col-waiting');
     await expect(waiting.getByTestId('dash-approval')).toHaveCount(2, { timeout: 30_000 });
-    await expect(waiting.getByTestId('dash-approval').first()).toContainText(/waiting/);
+    // §18.5: the Approvals page's own row — type line with the age ("4 min"), no "waiting" word.
+    await expect(waiting.getByTestId('dash-approval').first().getByTestId('approval-row')).toBeVisible();
     // UI3: the sentence comes from the manifest's summary template + the
     // sealed values ("Create contact Dora Review"), not just the action name.
     await expect(waiting.getByTestId('dash-approval').filter({ hasText: 'Create contact Dora Review' })).toHaveCount(1, { timeout: 30_000 });
@@ -144,7 +145,7 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     await expect(group).toContainText('Customer care');
 
     const atWork = page.getByTestId('col-mandates').getByTestId('mandate-at-work').filter({ hasText: 'Customer care' });
-    await expect(atWork).toContainText('3 of 20 today', { timeout: 30_000 });
+    await expect(atWork).toContainText('3 of 20 used today', { timeout: 30_000 });
     await page.screenshot({ path: join(SCREENSHOT_DIR, 'a-dashboard.png'), fullPage: true });
   });
 
@@ -173,7 +174,7 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
   test('D: a dashboard row opens that approval in place; approving opens the next; its ticket is Approved', async () => {
     test.setTimeout(120_000);
     await goDashboard(page);
-    await page.getByTestId('col-waiting').getByTestId('dash-approval').first().click();
+    await page.getByTestId('col-waiting').getByTestId('dash-approval').first().locator('.appr-item-head').click();
     await page.waitForURL(/\/approvals\?open=/);
     // Approval card v3 (UI spec §17): ?open=<id> opens that card directly (no list), "1 of 2".
     const openId = new URL(page.url()).searchParams.get('open');
@@ -224,7 +225,8 @@ test.describe.serial('Core objects — dashboard, tickets, approvals (real stack
     const atWork = page.getByTestId('col-mandates').getByTestId('mandate-at-work');
     await expect(atWork.filter({ hasText: 'Customer care' })).toHaveCount(1);
     await expect(atWork.filter({ hasText: 'Customer care' }).locator('.obj-line')).toContainText(area);
-    await expect(page.getByTestId('col-waiting').getByTestId('dash-approval').first().getByTestId('mandate-line')).toHaveText('Mandate: Customer review');
+    // §18.5: the approval row's quiet line carries the mandate name (as on the Approvals page).
+    await expect(page.getByTestId('col-waiting').getByTestId('dash-approval').first()).toContainText('Customer review');
     await page.screenshot({ path: join(SCREENSHOT_DIR, 'e-dashboard-areas.png'), fullPage: true });
 
     // Approvals: the one left after D carries its mandate's name underneath.
