@@ -90,8 +90,15 @@ async function showDecided(page: Page): Promise<void> {
   // From a card (still showing its stamp) back to the list, where the "Show" menu lives.
   const menu = page.getByTestId('queue-view');
   const tab = page.locator('button.nav-tab', { hasText: /^All$/ });
-  await menu.or(tab).or(page.getByTestId('back-to-list')).first().waitFor({ timeout: 30_000 });
-  if (!(await menu.isVisible().catch(() => false)) && !(await tab.count())) await page.getByTestId('back-to-list').click({ timeout: 30_000 });
+  // After a decision the card keeps its stamp (back button disabled), then leaves on its own (UI spec §17) —
+  // so wait for the list, and only click back if the card stays open with the button enabled.
+  const back = page.getByTestId('back-to-list');
+  const end = Date.now() + 30_000;
+  while (!(await menu.isVisible().catch(() => false)) && !(await tab.count())) {
+    if (Date.now() > end) throw new Error('approvals list did not come back after the decision');
+    if (await back.isEnabled({ timeout: 250 }).catch(() => false)) await back.click({ timeout: 2_000 }).catch(() => {});
+    await page.waitForTimeout(250);
+  }
   if (await menu.count()) await menu.selectOption('all'); else await tab.click();
   await page.locator('button.filter-chip', { hasText: /^All$/ }).click();
 }
