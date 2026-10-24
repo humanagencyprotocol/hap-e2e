@@ -297,7 +297,8 @@ describe.skipIf(!available)('ERP invoicing: its own area, its own limits (real A
       lines: [{ item_id: 'item-1', description: 'Widget 100', qty: 1, unit_price: 25, vat_rate: 20 }],
     });
     expect(r.denied).toBe(true);
-    expect(r.text).toMatch(/Required at net_total/);
+    // zod 3 said "Required at net_total"; zod 4 "Invalid input: expected number, received undefined at net_total".
+    expect(r.text).toMatch(/Required at net_total|received undefined at net_total/);
     expect(await invoiceCount()).toBe(before);
   });
 

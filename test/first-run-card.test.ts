@@ -226,6 +226,6 @@ describe.skipIf(!available)('first-run card (real AS + gateway UI + simulation m
     expect(await page.getByText('Get started', { exact: true }).count()).toBe(0);
     // …and the live-mode guide does not take its place in simulation mode.
     expect(await page.getByText('Get Started', { exact: true }).count()).toBe(0);
-    expect(await page.locator('body').innerText()).not.toMatch(/of 4 (complete|done)/);
+    expect(await page.locator('body').innerText()).not.toMatch(/of [34] (complete|done)/);
   });
 });

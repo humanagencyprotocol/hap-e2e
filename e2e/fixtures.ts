@@ -484,13 +484,13 @@ export async function activateIntegration(page: Page, integrationName: string): 
   await card.waitFor({ state: 'visible', timeout: 10_000 });
   await card.scrollIntoViewIfNeeded();
 
-  // If already running, nothing to do.
-  if (await card.locator('text=Running').isVisible()) {
-    return;
-  }
-
+  // Wait for the card to know its state — "Running" or an Activate button —
+  // instead of reading it once, before the integration status has loaded.
+  const running = card.locator('text=Running');
   const activateBtn = card.locator('button:has-text("Activate")');
-  await activateBtn.waitFor({ state: 'visible', timeout: 10_000 });
+  await expect(running.or(activateBtn).first()).toBeVisible({ timeout: 10_000 });
+  if (await running.isVisible()) return;
+
   await activateBtn.click();
   await card.locator('text=Running').waitFor({ state: 'visible', timeout: 60_000 });
 }
