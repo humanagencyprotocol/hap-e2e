@@ -181,11 +181,11 @@ describe('CRM revisions on the real stack', () => {
     // "exposes no contact_type"). Either way: no ticket, no proposal, nothing changed.
     const upd = await call('crm__update_contact', { id: customerId, revision: 1, notes: 'no type declared' });
     expect(upd.error, upd.text).toBe(true);
-    expect(upd.text).toMatch(/exposes no contact_type|Required at contact_type|contact_type is required/);
+    expect(upd.text).toMatch(/exposes no contact_type|Required at contact_type|contact_type is required|Invalid option: expected one of .* at contact_type/);
     const del = await call('crm__delete_contact', { id: customerId, revision: 1 });
     expect(del.error, del.text).toBe(true);
     expect(del.text).not.toMatch(/Proposal ID/);
-    expect(del.text).toMatch(/exposes no contact_type|Required at contact_type|contact_type is required/);
+    expect(del.text).toMatch(/exposes no contact_type|Required at contact_type|contact_type is required|Invalid option: expected one of .* at contact_type/);
     const got = await call('crm__get_contact', { id: customerId });
     expect(got.text).toMatch(/"revision":\s*1/);
   });
